@@ -1,0 +1,76 @@
+# multi.yaml — three-level drilldown demonstrating multi-screen navigation.
+#
+#   regions  ──enter──▶  cities (in selected region)  ──enter──▶  detail
+#                                                                   ▲
+#                                                          ${selection}
+#                                                          substituted at push time
+#
+# Breadcrumb fills as you push:    My-App › Regions › Europe › London
+# esc pops back; q at the root quits.
+#
+# `on_enter:` on a screen wires `enter on <source>` to push <target>.
+# The source component's selection is captured and substituted into the
+# target screen's config as ${selection} (and ${selection.COLNAME} or
+# ${selection.N} for table sources).
+app:
+  title: World Atlas
+  theme: nord
+
+components:
+  regions:
+    type: list
+    title: Regions
+    filterable: true
+    items:
+      - Europe
+      - Asia
+      - Americas
+      - Africa
+
+  # Same component re-used across "cities" screens (one per region) —
+  # each push substitutes the parent selection into Title + Items.
+  region_cities:
+    type: list
+    title: Cities in ${selection}
+    filterable: true
+    items:
+      - London
+      - Paris
+      - Berlin
+      - Madrid
+      - Reykjavík
+      - Istanbul
+
+  city_detail:
+    type: inspector
+    title: ${selection}
+    initial_depth: 2
+    fields:
+      - {label: name,        value: "${selection}"}
+      - label: location
+        children:
+          - {label: country,   value: TBD}
+          - {label: continent, value: TBD}
+      - label: stats
+        children:
+          - {label: founded, value: TBD}
+          - {label: notes,   value: "Detail page for ${selection} — populate from a data source later."}
+
+screens:
+  regions:
+    title: Regions
+    layout: {component: regions}
+    on_enter:
+      - {source: regions, push: cities}
+
+  cities:
+    title: ${selection}
+    layout: {component: region_cities}
+    on_enter:
+      - {source: region_cities, push: detail}
+
+  detail:
+    title: ${selection}
+    layout: {component: city_detail}
+
+initial: regions

@@ -1,0 +1,113 @@
+version: '3'
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  build:
+    desc: Compile both binaries into ./bin
+    cmds:
+      - mkdir -p bin
+      - go build -o bin/tui-builder ./cmd/tui-builder
+      - go build -o bin/example-launcher ./cmd/example-launcher
+    sources:
+      - cmd/**/*.go
+      - internal/**/*.go
+      - go.mod
+      - go.sum
+    generates:
+      - bin/tui-builder
+      - bin/example-launcher
+
+  examples:
+    desc: Open the launcher listing every YAML in examples/
+    cmds:
+      - go run ./cmd/example-launcher
+
+  example:
+    desc: Run a single example by name — `task example NAME=table`
+    requires:
+      vars: [NAME]
+    cmds:
+      - go run ./cmd/tui-builder examples/{{.NAME}}.yaml
+
+  test:
+    desc: Run go vet + go test
+    cmds:
+      - go vet ./...
+      - go test ./...
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  tidy:
+    desc: Sync go.mod / go.sum
+    cmds:
+      - go mod tidy
+
+  clean:
+    desc: Remove built binaries
+    cmds:
+      - rm -rf bin
+
+  # ---- Kubernetes demo ----------------------------------------------------
+  # Workflow:
+  #   1. task kube:up        # creates a `tui-builder` kind cluster + seeds workloads
+  #   2. task kube:proxy     # in another terminal — runs `kubectl proxy --port=8001`
+  #   3. task kube:demo      # in this terminal — runs the kube.yaml example
+  #   4. task kube:down      # tear it all down
+
+  kube:up:
+    desc: Create local kind cluster (name `tui-builder`) and seed demo workloads
+    preconditions:
+      - sh: command -v kind >/dev/null
+        msg: kind not installed — run `brew install kind`
+      - sh: command -v kubectl >/dev/null
+        msg: kubectl not installed — run `brew install kubectl`
+    cmds:
+      - cmd: |
+          if ! kind get clusters | grep -q '^tui-builder$'; then
+            kind create cluster --name tui-builder
+          else
+            echo "kind cluster `tui-builder` already exists — skipping create"
+          fi
+        silent: true
+      # Seed workloads. `|| true` keeps the task idempotent: re-running
+      # after the resources exist is a no-op instead of an error.
+      - kubectl --context kind-tui-builder create namespace demo || true
+      - kubectl --context kind-tui-builder create deployment nginx   --image=nginx --replicas=3 || true
+      - kubectl --context kind-tui-builder create deployment redis   --image=redis --replicas=1 || true
+      - kubectl --context kind-tui-builder create deployment busybox --image=busybox --replicas=2 -- sleep infinity || true
+      - kubectl --context kind-tui-builder create deployment crashy  --image=busybox -- /bin/sh -c "exit 1" || true
+      - kubectl --context kind-tui-builder -n demo create deployment hello --image=nginxdemos/hello || true
+      # Noisy pod so the logview tail in the TUI has something to show.
+      - kubectl --context kind-tui-builder run noisy --image=busybox --restart=Never -- /bin/sh -c "while true; do date; sleep 1; done" || true
+      - echo
+      - echo "Ready. Next:"
+      - "echo \"  task kube:proxy   # in another terminal\""
+      - "echo \"  task kube:demo    # in this terminal\""
+
+  kube:proxy:
+    desc: Run `kubectl proxy --port=8001` (foreground — leave running in its own terminal)
+    preconditions:
+      - sh: command -v kubectl >/dev/null
+        msg: kubectl not installed
+    cmds:
+      - kubectl --context kind-tui-builder proxy --port=8001
+
+  kube:demo:
+    desc: Run the kube example (requires kube:up + kube:proxy)
+    cmds:
+      - go run ./cmd/tui-builder examples/kube.yaml
+
+  kube:down:
+    desc: Delete the local kind cluster (data + workloads)
+    preconditions:
+      - sh: command -v kind >/dev/null
+        msg: kind not installed
+    cmds:
+      - kind delete cluster --name tui-builder

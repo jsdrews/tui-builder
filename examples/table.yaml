@@ -1,0 +1,58 @@
+# table.yaml — single sortable + filterable table.
+#
+# Keys when focused:
+#   j/↓ k/↑          row cursor
+#   g / G            top / bottom
+#   ctrl+u / ctrl+d  half page
+#   ← / →            horizontal scroll
+#   shift+← / shift+→  jump column-by-column
+#   /                engage filter
+#   [ / ]            step active sort column among Sortable
+#   s                toggle sort direction (▲ / ▼)
+#
+# Filter syntax (when /):
+#   term             case-insensitive substring across all cells
+#   region:europe    scope to column whose title starts with "region"
+#   ~^new            regex term (case-insensitive)
+#   region:~^euro    regex scoped to one column
+#   a b c            space-separated AND-ed
+app:
+  title: Table Demo
+  theme: nord
+
+components:
+  cities:
+    type: table
+    title: World Cities
+    filterable: true
+    columns:
+      - {title: City,    width: 18, sortable: true}
+      - {title: Country, width: 16, sortable: true}
+      - {title: Region,  width: 12, sortable: true}
+      - {title: Pop,     width: 10, sortable: true, sort: si, align: right}
+    rows:
+      - [Tokyo,        Japan,         Asia,     37M]
+      - [Delhi,        India,         Asia,     32M]
+      - [Shanghai,     China,         Asia,     28M]
+      - [São Paulo,    Brazil,        Americas, 22M]
+      - [Mexico City,  Mexico,        Americas, 22M]
+      - [Cairo,        Egypt,         Africa,   21M]
+      - [Mumbai,       India,         Asia,     20M]
+      - [Beijing,      China,         Asia,     20M]
+      - [Dhaka,        Bangladesh,    Asia,     20M]
+      - [Osaka,        Japan,         Asia,     19M]
+      - [New York,     USA,           Americas, 18M]
+      - [Lagos,        Nigeria,       Africa,   16M]
+      - [Buenos Aires, Argentina,     Americas, 15M]
+      - [Kolkata,      India,         Asia,     15M]
+      - [Manila,       Philippines,   Asia,     14M]
+      - [Istanbul,     Turkey,        Europe,   15M]
+      - [Moscow,       Russia,        Europe,   12M]
+      - [Paris,        France,        Europe,   11M]
+      - [London,       UK,            Europe,   9M]
+      - [Reykjavík,    Iceland,       Europe,   130K]
+
+screen:
+  title: Cities
+  layout:
+    component: cities

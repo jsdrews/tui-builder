@@ -1,0 +1,39 @@
+# themes.yaml — pick a built-in theme via app.theme.
+#
+# Recognized names (from tuilib's theme.All()):
+#   dark, accent, light, solarized, nord, dracula, gruvbox,
+#   catppuccin-mocha, catppuccin-latte, tokyonight,
+#   rose-pine, rose-pine-dawn, onedark, monokai, everforest-dark,
+#   base16-ocean, base16-eighties, base16-railscasts, base16-tomorrow-night
+#
+# Press `t` to cycle through every loaded theme live.
+# Unknown names fall back silently to the first theme in the list.
+app:
+  title: Theme Picker
+  theme: gruvbox        # change me and re-run; or press `t` at runtime
+
+components:
+  preview:
+    type: table
+    title: Palette preview
+    filterable: true
+    columns:
+      - {title: Token,        width: 22}
+      - {title: Role,         width: 32}
+      - {title: Use,          width: 32}
+    rows:
+      - ["BarBG / BarFG",     "Breadcrumb + statusbar surface",   "Header + footer band"]
+      - ["Current",           "Active crumb / highlight",         "Selection emphasis"]
+      - ["Muted",             "Past crumbs / secondary text",     "De-emphasized text"]
+      - ["Subtle",            "Separators / faint chrome",        "Selected-row bg"]
+      - ["KeyFG",             "Help-hint key labels",             "Bold key chips"]
+      - ["BorderActive",      "Focused pane border",              "Where-am-I cue"]
+      - ["BorderInactive",    "Unfocused pane border",            "Quiet borders"]
+      - ["Accent",            "Body highlight",                   "Sort marker / spinner"]
+      - ["InfoBG / InfoFG",   "Statusbar info state",             "Success messages"]
+      - ["ErrorBG / ErrorFG", "Statusbar error state",            "Failure messages"]
+
+screen:
+  title: Theme preview
+  layout:
+    component: preview

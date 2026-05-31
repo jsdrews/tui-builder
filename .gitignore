@@ -1,0 +1,22 @@
+# Build artifacts
+/bin/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Go test/cover output
+*.out
+*.test
+
+# Local env (don't commit tokens used by ${env.*})
+.env
+.envrc.local
+
+# direnv (often holds tokens used by ${env.*})
+.envrc
+
+# go-task internal cache
+/.task/

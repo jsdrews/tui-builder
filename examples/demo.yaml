@@ -1,0 +1,42 @@
+app:
+  title: TUIQuery Demo
+  version: v0.1.0
+  theme: nord
+
+components:
+  cities:
+    type: list
+    title: Cities
+    filterable: true        # '/' to search, esc to clear
+    items:
+      - London
+      - Tokyo
+      - Madrid
+      - Lima
+      - Reykjavík
+      - Cairo
+      - Buenos Aires
+
+  population:
+    type: table
+    title: Population
+    filterable: true        # '/' to search; supports key:val and ~regex
+    columns:
+      - {title: City,   width: 16, sortable: true}
+      - {title: Region, width: 14, sortable: true}
+      - {title: Pop,    width: 8,  sortable: true, sort: si, align: right}
+    rows:
+      - [London,       Europe,   9M]
+      - [Tokyo,        Asia,     13M]
+      - [Madrid,       Europe,   3M]
+      - [Lima,         Americas, 10M]
+      - [Reykjavík,    Europe,   130K]
+      - [Cairo,        Africa,   10M]
+      - [Buenos Aires, Americas, 15M]
+
+screen:
+  title: Cities
+  layout:
+    hstack:
+      - {flex: 1, component: cities}
+      - {flex: 2, component: population}

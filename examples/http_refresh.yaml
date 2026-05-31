@@ -1,0 +1,62 @@
+# http_refresh.yaml — visible HTTP polling demo.
+#
+# Watch the table for ~30 seconds: the "Updated" column flips every cycle
+# and the Price / 24h % cells drift as CoinGecko's quote stream changes.
+# Press `r` at any time to force an immediate refetch (suppressed while
+# the filter is engaged). Tab away from the table (then back) doesn't
+# refetch — only the polling tick + the manual `r` do.
+#
+# Notes:
+#   - refresh: 10s         polls every 10s after each successful fetch
+#                          (so a slow request doesn't pile up overlapping
+#                          fetches — the tick re-arms only after the
+#                          previous response settles)
+#   - timeout: 15s         caps each request — exceeding it surfaces an
+#                          error in the statusbar but doesn't break the
+#                          polling loop
+#   - filter / sort / cursor all survive across refreshes (tuilib's
+#     SetRows update is in-place)
+app:
+  title: Crypto prices (live)
+  theme: nord
+
+data_sources:
+  prices:
+    type: http
+    url: https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=25&page=1&price_change_percentage=1h
+    refresh: 10s
+    timeout: 15s
+    headers:
+      Accept: application/json
+
+components:
+  prices:
+    type: table
+    title: Top 25 by market cap (refreshes every 10s — watch the Updated column)
+    source: prices
+    filterable: true
+    initial_sort: {column: Rank, desc: false}
+    # Bind chrome tokens to the theme so cycling themes (`t`) re-skins
+    # the table consistently with the rest of the app.
+    colors:
+      border_active:    theme:accent
+      header:           theme:accent
+      selected_fg:      theme:bar-fg
+      selected_bg:      theme:current
+      column_separator: theme:subtle
+      header_rule:      theme:accent
+    columns:
+      - {title: Rank,    width: 6,  sortable: true, sort: number, align: right, value: market_cap_rank}
+      - {title: Symbol,  width: 8,  sortable: true,                              value: symbol}
+      - {title: Name,    width: 22, sortable: true,                              value: name}
+      - {title: Price,   width: 14, sortable: true, sort: number, align: right, value: current_price}
+      - {title: 1h %,    width: 9,  sortable: true, sort: number, align: right, value: price_change_percentage_1h_in_currency}
+      - {title: 24h %,   width: 9,  sortable: true, sort: number, align: right, value: price_change_percentage_24h}
+      - {title: Mkt Cap, width: 16, sortable: true, sort: number, align: right, value: market_cap}
+      - {title: Volume,  width: 16, sortable: true, sort: number, align: right, value: total_volume}
+      - {title: Updated, width: 24,                                              value: last_updated}
+
+screen:
+  title: Prices
+  layout:
+    component: prices

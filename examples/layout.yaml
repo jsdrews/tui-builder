@@ -1,0 +1,48 @@
+# layout.yaml — nested layout primitives.
+#
+# Nodes: vstack | hstack | zstack | component (ref by name).
+# Items inside a stack carry sizing:
+#   flex: K    proportional share of leftover space (default if both unset)
+#   fixed: N   exact number of rows (vstack) or cols (hstack)
+#
+# Tab cycles focus between components in walk order.
+app:
+  title: Layout Showcase
+  theme: dracula
+
+components:
+  left_top:
+    type: list
+    title: Top-Left
+    filterable: true
+    items: [alpha, beta, gamma, delta, epsilon, zeta, eta, theta]
+
+  left_bottom:
+    type: list
+    title: Bottom-Left
+    items: [North, South, East, West]
+
+  right:
+    type: table
+    title: Right
+    filterable: true
+    columns:
+      - {title: Key,   width: 12, sortable: true}
+      - {title: Value, width: 18}
+      - {title: Rank,  width: 6, sortable: true, sort: number, align: right}
+    rows:
+      - [alpha,   primary,   1]
+      - [beta,    secondary, 2]
+      - [gamma,   tertiary,  3]
+      - [delta,   quaternary,4]
+
+screen:
+  title: Layout
+  layout:
+    hstack:
+      - flex: 1
+        vstack:
+          - {flex: 2, component: left_top}
+          - {flex: 1, component: left_bottom}
+      - flex: 2
+        component: right

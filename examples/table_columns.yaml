@@ -1,0 +1,40 @@
+# table_columns.yaml — column sizing modes.
+#
+# Width sizing per column:
+#   width: N, flex: 0          fixed visible-cell width
+#   width: 0, flex: 0          content-auto (max of title + widest cell, floor 4)
+#   flex: K                    expand to absorb a share of leftover space,
+#                              weighted by K. `width` becomes a minimum;
+#                              `max_width` caps growth.
+#
+# Align: left (default), right, center.
+app:
+  title: Column Sizing
+  theme: nord
+
+components:
+  sizing:
+    type: table
+    title: Sizing modes
+    columns:
+      # fixed 6, right-aligned — typical for ID columns
+      - {title: ID,       width: 6,  align: right}
+      # content-auto — sized to whichever is widest, title or any cell
+      - {title: Code}
+      # flex 1, min 12 — grows to fill leftover space
+      - {title: Name,     width: 12, flex: 1}
+      # flex 2, min 8, capped at 40 — grows twice as much as Name
+      - {title: Summary,  width: 8,  flex: 2, max_width: 40}
+      # fixed 10, centered — typical for short statuses
+      - {title: Status,   width: 10, align: center}
+    rows:
+      - [1,    A,   Alpha,   First entry in the dataset for demo purposes,                    OK]
+      - [2,    BB,  Beta,    Second; demonstrates max_width capping a flex column at 40 cells, OK]
+      - [3,    CCC, Gamma,   Short,                                                            WARN]
+      - [42,   D,   Delta,   The fourth — IDs render right-aligned for numeric scanning,        ERROR]
+      - [9999, EEE, Epsilon, Last,                                                              OK]
+
+screen:
+  title: Column sizing
+  layout:
+    component: sizing

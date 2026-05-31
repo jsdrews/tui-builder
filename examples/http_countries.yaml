@@ -1,0 +1,49 @@
+# http_countries.yaml — table driven by a public REST API (restcountries.com).
+#
+# Lifecycle:
+#   - On screen activate, every bound source fetches once.
+#   - While in flight, the pane shows a centered spinner.
+#   - Errors surface in the statusbar (red); successful payload SetRows's
+#     the table in place.
+#   - `r` re-fetches every source on this screen (suppressed while a
+#     filter is engaged so 'r' typed into search isn't hijacked).
+#   - `refresh:` on a source schedules polling — this example polls every
+#     5 minutes so the table stays current without hammering the API.
+#
+# Mapping syntax:
+#   data_sources.countries.url           where to fetch
+#   data_sources.countries.refresh       polling cadence (omit for fetch-once)
+#   data_sources.countries.root          dot-path into the response that
+#                                        identifies the iterable root (empty
+#                                        when the response itself is an array)
+#   components.countries.source          name of the data source
+#   components.countries.columns[].value dot-path per cell, evaluated per
+#                                        element of the iterable root
+app:
+  title: REST Countries
+  theme: nord
+
+data_sources:
+  countries:
+    type: http
+    url: https://restcountries.com/v3.1/all?fields=name,region,capital,population,languages,cca2
+    refresh: 5m
+    timeout: 15s
+
+components:
+  countries:
+    type: table
+    title: Countries
+    filterable: true
+    source: countries
+    columns:
+      - {title: Code,       width: 6,  sortable: true, value: cca2}
+      - {title: Name,       width: 26, sortable: true, value: name.common}
+      - {title: Region,     width: 16, sortable: true, value: region}
+      - {title: Capital,    width: 22, sortable: true, value: capital.0}
+      - {title: Population, width: 14, sortable: true, sort: si, align: right, value: population}
+
+screen:
+  title: Countries
+  layout:
+    component: countries

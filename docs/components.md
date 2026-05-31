@@ -1,0 +1,376 @@
+# Components — what tui-builder exposes vs. tuilib capability
+
+tui-builder binds a subset of [tuilib](https://github.com/jsdrews/tuilib) to a
+YAML schema. This doc lists every component currently supported, the
+schema fields available for each, and the gaps between the schema and the
+underlying tuilib component.
+
+Legend: ✓ exposed · ⚠ partially exposed · ✗ not exposed
+
+---
+
+## Round 1 — initial gap analysis
+
+This is the state of the schema **before** the round of additions for
+styled cells, initial values, logview, and tree.
+
+### `list` (`pkg/list`)
+
+| Tuilib feature | Exposed? |
+|---|---|
+| `Title`, `Items`, `Filterable` | ✓ |
+| `LoadingLabel` + `SetLoading(true)` | ✗ |
+| `SetKeyedItems` (stable-cursor refresh) | ✗ |
+| Initial cursor / pre-filter value | ✗ |
+| Per-list border style / slot brackets | ✗ |
+| Color overrides (selected/active/inactive) | ✗ |
+| `HScrollbar` toggle | ✗ |
+| Pane loading spinner style | ✗ |
+
+### `table` (`pkg/table`)
+
+| Tuilib feature | Exposed? |
+|---|---|
+| `Title`, `Columns`, `Rows`, `Filterable` | ✓ |
+| `Column.Width` / `Flex` / `MaxWidth` / `Align` / `Sortable` | ✓ |
+| `Column.Less` | ⚠ string only (default lex) |
+| `SetKeyedRows` (stable cursor) | ✗ |
+| `LoadingLabel` / `SetLoading` | ✗ |
+| Initial sort column + direction | ✗ |
+| Initial cursor row | ✗ |
+| Filter placeholder text | ✗ |
+| `Borders.Vertical` / `HeaderRule` glyphs | ✗ |
+| Header / Selected / Cell style overrides | ✗ |
+| `HScrollbar` toggle | ✗ |
+| Per-cell `ansi.CellColor` (status cells) | ✗ |
+| `ansi.Hyperlink` (clickable URL cells) | ✗ |
+
+### Layout (`pkg/layout`)
+
+| Tuilib feature | Exposed? |
+|---|---|
+| `VStack`, `HStack`, `ZStack`, `Fixed`, `Flex` | ✓ |
+| `layout.Center(naturalW, naturalH, child)` | ✗ |
+| `layout.Bar(...)` | n/a — no bar-shaped components yet |
+
+### App shell (`pkg/app`)
+
+| Tuilib feature | Exposed? |
+|---|---|
+| `Title`, `Version`, `Theme` | ✓ |
+| `QuitKey`, `ThemeKey` custom bindings | ✗ |
+| `ThemeEnvVar` / `SkipConfig` / `DisableAutoEscPop` | ✗ |
+| Inline custom themes | ✗ |
+| `theme.Terminal()` | ✗ |
+
+### Cross-cutting (not in schema)
+
+- Multi-screen / stack
+- `input`, `form`, `logview`, `tree`, `inspector`, `toggle`,
+  `confirm`, `alert`, `tab`, `metrics`, `runner`, `poll`,
+  `breadcrumb` components
+- Data sources
+- Component-to-component bindings
+
+---
+
+## Round 2 — after this round
+
+This round added:
+
+- **Per-cell styling** for tables — colored values and OSC 8 hyperlinks.
+- **Sort modes** for table columns — `string` / `number` / `si`.
+- **Initial state** — cursor, filter value, table sort, filter placeholder,
+  logview/tree query, tree expansion depth.
+- **`logview`** component — streaming-log pane with `/`-search, n/N
+  jump, `\` filter mode, follow-the-tail.
+- **`tree`** component — hierarchical view with expand/collapse, search,
+  filter mode.
+
+Below is the current state of each component.
+
+### `list` (`pkg/list`)
+
+| Tuilib feature | Exposed? | Schema field |
+|---|---|---|
+| `Title`, `Items`, `Filterable` | ✓ | `title`, `items`, `filterable` |
+| Initial cursor | ✓ | `initial_cursor` |
+| Initial filter value | ✓ | `initial_filter` |
+| Filter placeholder | ✓ | `filter_placeholder` |
+| `LoadingLabel` + `SetLoading(true)` | ✗ | needs data sources |
+| `SetKeyedItems` (stable-cursor refresh) | ✗ | needs data sources |
+| Border style / slot brackets | ✗ | theme default only |
+| Color overrides (selected/active/inactive) | ✗ | theme only |
+| `HScrollbar` toggle | ✗ | theme enables by default |
+| Spinner style | ✗ | theme only |
+
+### `table` (`pkg/table`)
+
+| Tuilib feature | Exposed? | Schema field |
+|---|---|---|
+| `Title`, `Columns`, `Rows`, `Filterable` | ✓ | `title`, `columns`, `rows`, `filterable` |
+| `Column.Width` / `Flex` / `MaxWidth` / `Align` / `Sortable` | ✓ | per-column |
+| `Column.Less` | ⚠ | `sort: string \| number \| si` |
+| Per-cell `ansi.CellColor` | ✓ | `{value: X, color: red}` |
+| `ansi.Hyperlink` | ✓ | `{label: X, url: …}` |
+| Initial cursor | ✓ | `initial_cursor` |
+| Initial filter value | ✓ | `initial_filter` |
+| Filter placeholder | ✓ | `filter_placeholder` |
+| Initial sort | ✓ | `initial_sort: {column, desc}` |
+| `SetKeyedRows` (stable cursor) | ✗ | needs data sources |
+| `LoadingLabel` / `SetLoading` | ✗ | needs data sources |
+| `Borders.Vertical` / `HeaderRule` glyphs | ✗ | theme default only |
+| Header / Selected / Cell style overrides | ✗ | theme only |
+| `HScrollbar` toggle | ✗ | theme enables by default |
+| Date / custom comparator | ✗ | extend `sort:` modes |
+
+### `logview` (`pkg/logview`)  — new
+
+| Tuilib feature | Exposed? | Schema field |
+|---|---|---|
+| `Title`, `Searchable`, `MaxLines`, `FilterMode` | ✓ | `title`, `searchable`, `max_lines`, `filter_mode` |
+| Initial lines | ✓ | `lines: [...]` |
+| Initial query | ✓ | `initial_query` |
+| Filter placeholder | ✓ | `filter_placeholder` |
+| `MatchStyle` / `CurrentLineStyle` overrides | ✗ | theme only |
+| Border / pane overrides | ✗ | theme only |
+| Streaming append (live) | ✗ | needs data sources |
+| `SetLoading` / `LoadingLabel` | ✗ | needs data sources |
+
+### `inspector` (`pkg/inspector`)  — new
+
+| Tuilib feature | Exposed? | Schema field |
+|---|---|---|
+| `Title`, `Filterable`, `InitialDepth` | ✓ | `title`, `filterable`, `initial_depth` |
+| Recursive `Fields` (label/value/children) | ✓ | `fields: [{label, value, children}]` |
+| Initial query | ✓ | `initial_query` |
+| Initial cursor | ✓ | `initial_cursor` |
+| Filter placeholder | ✓ | `filter_placeholder` |
+| `FromAny` / `FromMap` (JSON → Fields) | ✗ | needs data sources |
+| `MatchStyle` / `CurrentLineStyle` overrides | ✗ | theme only |
+| `SetLoading` / `LoadingLabel` | ✗ | needs data sources |
+| Custom Keys | ✗ | tuilib default keymap |
+
+### `tree` (`pkg/tree`)  — new
+
+| Tuilib feature | Exposed? | Schema field |
+|---|---|---|
+| `Title`, `Searchable`, `InitialDepth` | ✓ | `title`, `searchable`, `initial_depth` |
+| Root + Children (recursive Node interface) | ✓ | `root: {label, children: [...]}` |
+| Initial query | ✓ | `initial_query` |
+| Initial cursor | ✓ | `initial_cursor` |
+| Filter placeholder | ✓ | `filter_placeholder` |
+| `MatchStyle` / `CurrentLineStyle` overrides | ✗ | theme only |
+| Custom row data beyond Label | ✗ | tuilib's `Node` only exposes Label/Children for the schema's purposes |
+| `SetLoading` / `LoadingLabel` | ✗ | needs data sources |
+
+### Layout (`pkg/layout`)
+
+Unchanged from round 1. `layout.Center` lands when modal components
+(`confirm` / `alert`) enter the schema.
+
+### App shell (`pkg/app`)
+
+| Tuilib feature | Exposed? | Schema field |
+|---|---|---|
+| `Title`, `Version`, `Theme` | ✓ | `app.title`, `app.version`, `app.theme` |
+| `HelpVerbose` (legacy inline footer) | ✓ | `app.help_verbose` (default false → minimal "? help" footer; press `?` for full panel) |
+| `QuitKey`, `ThemeKey`, `HelpKey` custom bindings | ✗ | defaults locked |
+| `HelpMaxRows` (cap expanded help panel) | ✗ | defaults to 6 |
+| `ThemeEnvVar` / `SkipConfig` / `DisableAutoEscPop` | ✗ | |
+| Inline custom themes | ✗ | |
+| `theme.Terminal()` | ✗ | |
+
+---
+
+## Remaining cross-cutting gaps
+
+| Area | Status |
+|---|---|
+| Multi-screen / stack | Not yet — v2 |
+| Other components: `input`, `form`, `inspector`, `toggle`, `confirm`, `alert`, `tab`, `metrics`, `runner`, `poll`, `breadcrumb` | Out of scope until they have a binding partner (data source, dedicated screen, or modal layer) |
+| Data sources | Project goal — pending |
+| Component-to-component binding | Lands with data sources |
+| Theming: inline custom palette, `theme.Terminal()` | Not yet |
+| App-shell knobs: `QuitKey`, `ThemeKey`, `ThemeEnvVar` | Not yet |
+| `LoadingLabel` / `SetLoading` everywhere | Lands with data sources |
+
+## Schema cheat sheet (current)
+
+```yaml
+app:
+  title: <string>             # breadcrumb prefix
+  version: <string>           # statusbar right
+  theme: <name>               # one of theme.All() names
+  help_verbose: <bool>        # true = legacy inline footer, false (default) = minimal "? help"
+
+data_sources:                 # optional — components bind to these via `source:`
+  <name>:
+    type: http                # only http for v1
+    url: <string>             # may contain ${selection.*} when pushed
+    method: GET               # default
+    headers: {<k>: <v>, ...}  # optional
+    body: <string>            # optional, sent as-is
+    root: <dot-path>          # optional — slice into the response (empty = use response root)
+    format: json | text       # default json; use text for plain-text endpoints
+                              # (kube pod logs, etc.) — required for logview bindings
+                              # against non-JSON sources
+    refresh: <duration>       # optional — polling interval (e.g. "5m"); omit for fetch-once
+    timeout: <duration>       # default 10s
+
+components:
+  <name>:
+    type: list | table | logview | tree | inspector
+    title: <string>
+    source: <data-source-name>  # optional — populates the component dynamically;
+                                # static items/rows/fields are ignored when set
+    item: <dot-path>            # list: where to pluck each display string (when source: is set)
+    colors:                     # optional — per-component color overrides, all fields optional.
+                                # Values accept:
+                                #   named colors (red, bright_green, gray, ...)
+                                #   0-255 indices ("160")
+                                #   hex ("#ff8800")
+                                #   theme tokens: theme:accent | theme:current | theme:muted |
+                                #                 theme:subtle | theme:key | theme:bar-bg |
+                                #                 theme:bar-fg | theme:border-active |
+                                #                 theme:border-inactive | theme:info-bg |
+                                #                 theme:info-fg | theme:error-bg | theme:error-fg
+                                # Theme tokens re-resolve every time the user cycles themes (`t`),
+                                # so chrome stays consistent across palettes.
+      border_active:   <color>  # all components
+      border_inactive: <color>  # all components
+      spinner:         <color>  # all components
+      selected:        <color>  # list
+      header:          <color>  # table
+      selected_fg:     <color>  # table
+      selected_bg:     <color>  # table
+      cell:            <color>  # table
+      column_separator: <color> # table
+      header_rule:     <color>  # table
+      label:           <color>  # inspector
+      value:           <color>  # inspector
+      match:           <color>  # inspector / logview / tree
+      current_line_bg: <color>  # inspector / logview / tree
+
+    # list / table / logview / tree — filter knobs
+    filterable: <bool>        # list, table — '/' filter
+    searchable: <bool>        # logview, tree — '/' search
+    filter_placeholder: <string>
+    initial_filter: <string>  # list/table — pre-populate filter value
+    initial_query:   <string> # logview/tree — pre-populate search query
+    initial_cursor:  <int>    # list, table, tree
+
+    # list
+    items: [string, ...]
+
+    # table
+    columns:
+      - title: <string>
+        width: <int>           # 0=auto, >0=fixed
+        flex: <int>            # leftover-share weight
+        max_width: <int>       # flex cap
+        align: left | right | center
+        sortable: <bool>
+        sort: string | number | si
+        value: <dot-path>      # when source: is set — pluck this cell from each item
+    rows:
+      - [<cell>, <cell>, ...]   # cell is string OR
+                                # {value: <string>, color: <name|0-255>} OR
+                                # {label: <string>, url: <string>}
+    initial_sort: {column: <title-prefix|1-based-index>, desc: <bool>}
+
+    # logview
+    lines:       [string, ...]
+    max_lines:   <int>          # 0=default 10000, -1=unbounded
+    filter_mode: <bool>
+
+    # tree
+    root:
+      label: <string>
+      children: [<TreeNode>, ...]
+    initial_depth: <int>         # 0=root only, 1=root expanded, ...
+
+    # inspector
+    fields:
+      - label: <string>
+        value: <string>            # optional — empty for header rows; static
+        path:  <dot-path>          # optional — when source: is set, overrides value
+        children: [<InspectorField>, ...]
+    initial_depth: <int>           # shared with tree
+
+# Single-screen mode:
+screen:
+  title: <string>
+  layout: <Node>
+
+# OR multi-screen mode (mutually exclusive with `screen:`):
+screens:
+  <name>:
+    title: <string>            # may contain ${selection} when pushed
+    layout: <Node>
+    on_enter:                  # optional — enter on Source pushes Push
+      - {source: <component>, push: <screen-name>}
+    actions:                   # optional — bind a key to a subprocess
+                               # (kubectl exec, $EDITOR, open, ...) via pkg/runner
+      - key:         <string>  # dispatch key (avoid q/t/?/tab/esc/enter/r//j/k)
+        label:       <string>  # shown in the help strip
+        source:      <component>  # which list/table's selection feeds ${selection.*}
+        confirm:     <string>  # optional yes/no modal message before dispatch
+                               # (${selection.*}/${env.*} substituted in here too)
+        notice:      <string>  # optional banner during slow handoffs (interactive only)
+        interactive: <bool>    # default true (uses pkg/runner — TTY handoff, brief
+                               # flicker, right for vim/ssh/kubectl exec).
+                               # false runs cmd.Run() in a goroutine, captures
+                               # stdout/stderr, never suspends — right for one-shot
+                               # commands (delete/scale/open). Errors surface in
+                               # the alert; success goes to the statusbar.
+        run:         [<argv...>] # ${selection.*} + ${env.*} substituted at fire time
+initial: <screen-name>         # required when `screens:` is set
+
+# Template tokens (substituted in titles, URLs, headers, body, items,
+# values, paths — anywhere a string lives in the schema):
+#
+#   ${selection}            — list source: selected item;
+#                             table source: first cell
+#   ${selection.N}          — table source: 1-based cell index
+#   ${selection.COLNAME}    — table source: cell by column-title prefix
+#   ${env.NAME}             — os.Getenv("NAME") (empty when unset).
+#                             Use for tokens / API keys so they stay out of
+#                             YAML, e.g. "Bearer ${env.GITHUB_TOKEN}".
+#
+# Selection tokens substitute at push time; env tokens also substitute at
+# push time (env vars are usually stable for the run).
+
+# Node is one of:
+#   {vstack: [<Item>, ...]}
+#   {hstack: [<Item>, ...]}
+#   {zstack: {base: <Node>, overlay: <Node>}}
+#   {component: <name>}     # leaf — refers to components map
+#
+# Item is a Node + sizing hint:
+#   {flex: <int>,  vstack|hstack|zstack|component: ...}
+#   {fixed: <int>, ...}
+```
+
+## Example index
+
+| File | Demonstrates |
+|---|---|
+| `examples/list.yaml` | Filterable list, navigation keys |
+| `examples/table.yaml` | Filterable + sortable table, filter syntax |
+| `examples/table_columns.yaml` | Column sizing (fixed / auto / flex / max_width) + alignment |
+| `examples/table_styled.yaml` | Colored cells + clickable hyperlinks, `initial_sort` |
+| `examples/logview.yaml` | Streaming-log pane, `/`-search, filter mode, `initial_query` |
+| `examples/tree.yaml` | Hierarchical view, expand/collapse, search, `initial_depth` |
+| `examples/inspector.yaml` | Two-column label/value record viewer, nested groups |
+| `examples/table_wide.yaml` | Wide table demonstrating horizontal scroll (`←`/`→`, `shift+←`/`shift+→`, `0`/`$`) |
+| `examples/layout.yaml` | Nested layouts, mixed flex weights |
+| `examples/themes.yaml` | Built-in theme picker reference |
+| `examples/multi.yaml` | Multi-screen drilldown (Regions → Cities → Detail) with breadcrumbing and `${selection}` substitution |
+| `examples/http_countries.yaml` | Table backed by restcountries.com REST API; `refresh: 5m` polling; per-column `value:` dot-paths |
+| `examples/http_github.yaml` | Multi-screen drilldown over the GitHub API: users → repos (via `/users/${selection}/repos`) → repo inspector (via `/repos/${selection.Repo}`). Shows URL templating from list and table selections |
+| `examples/http_github_auth.yaml` | Authenticated GitHub: `/user/starred` → repo inspector. Uses `${env.GITHUB_TOKEN}` in the Authorization header — token stays out of YAML |
+| `examples/http_refresh.yaml` | Live crypto prices via CoinGecko, `refresh: 10s`. Watch the `Updated` column flip every cycle; filter/sort/cursor survive each refresh. Press `r` to refetch on demand |
+| `examples/colors.yaml` | Per-component `colors:` overrides across list / table / inspector — different token per pane to show what each field affects |
+| `examples/kube.yaml` | Kubernetes namespaces → pods → pod inspector + tailing logview. Talks to `http://localhost:8001` (run `kubectl proxy --port=8001` first). Uses `format: text` + logview binding for the log tail |
+| `examples/demo.yaml` | Kitchen-sink: list + table side-by-side |

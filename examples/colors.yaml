@@ -1,0 +1,90 @@
+# colors.yaml — per-component color overrides.
+#
+# Every component accepts an optional `colors:` block whose fields map
+# directly to tuilib's underlying Options. Unset fields fall through to
+# the active theme — so you can tweak one or two tokens per component
+# without redefining the whole palette.
+#
+# Value formats:
+#   named         red, green, yellow, blue, magenta, cyan, white,
+#                 gray (= bright_black), bright_* variants
+#   palette       any 0-255 index as a string: "208", "33"
+#   hex           "#ff8800"
+#
+# Fields by component:
+#
+#   list           border_active, border_inactive, selected, spinner
+#   table          border_active, border_inactive,
+#                  header, selected_fg, selected_bg, cell,
+#                  column_separator, header_rule, spinner
+#   inspector      border_active, border_inactive,
+#                  label, value, match, current_line_bg, spinner
+#   logview        border_active, border_inactive,
+#                  match, current_line_bg, spinner
+#   tree           border_active, border_inactive,
+#                  match, current_line_bg, spinner
+#
+# Tab between panes — every component has a different override scheme to
+# show what each token affects.
+app:
+  title: Color overrides
+  theme: nord
+
+components:
+  fruits:
+    type: list
+    title: List (selected = orange, active border = magenta)
+    filterable: true
+    items: [Apple, Apricot, Banana, Blueberry, Cherry, Date, Fig, Grape, Kiwi, Lemon, Mango]
+    colors:
+      border_active: magenta
+      selected: "208"           # bright orange (256-color)
+
+  cities:
+    type: table
+    title: Table (red header, white-on-blue selection, cyan separators)
+    filterable: true
+    columns:
+      - {title: City,    width: 18}
+      - {title: Region,  width: 14}
+      - {title: Pop,     width: 10, align: right}
+    rows:
+      - [London,       Europe,   "9M"]
+      - [Tokyo,        Asia,     "37M"]
+      - [Lima,         Americas, "10M"]
+      - [Reykjavík,    Europe,   "130K"]
+    colors:
+      border_active: "#ff8800"
+      header: red
+      selected_fg: bright_white
+      selected_bg: blue
+      column_separator: cyan
+      header_rule: cyan
+
+  details:
+    type: inspector
+    title: Inspector (gray labels, yellow values, magenta cursor row)
+    initial_depth: 2
+    fields:
+      - {label: name,     value: nginx-7c64f5d}
+      - {label: status,   value: Running}
+      - label: spec
+        children:
+          - {label: image,    value: "nginx:1.25"}
+          - {label: replicas, value: "3"}
+    colors:
+      border_active: green
+      label: gray
+      value: bright_yellow
+      current_line_bg: magenta
+
+screen:
+  title: Colors
+  layout:
+    hstack:
+      - flex: 1
+        component: fruits
+      - flex: 2
+        vstack:
+          - {flex: 2, component: cities}
+          - {flex: 1, component: details}

@@ -1,0 +1,216 @@
+# kube.yaml — namespaces → pods → {pod inspector + logs} via kubectl proxy.
+#
+# Prereq:
+#   kubectl proxy --port=8001    # run in another terminal; no auth header
+#                                # needed because kubectl proxy uses your
+#                                # kubeconfig under the hood
+#
+# Drilldown:
+#   ┌ Namespaces ─┐  enter   ┌ Pods (in ${ns}) ┐  enter   ┌ Pod inspector ┐
+#   │ default     │ ──────▶  │ pod-a   Running │ ──────▶  │  metadata     │
+#   │ kube-system │          │ pod-b   Running │          │  spec         │
+#   │ …           │          │ pod-c   Pending │          │  status       │
+#   └─────────────┘          └─────────────────┘          ├ Logs (tail) ──┤
+#                                                         │ 12:00 INFO …  │
+#                                                         │ 12:00 WARN …  │
+#                                                         └───────────────┘
+#
+# The pod-detail screen polls pod state every 5s and tails logs every 2s.
+# Both refreshes update in place — filter/cursor/scroll survive.
+#
+# K8s response shape:
+#   List endpoints wrap their array in `{items: [...]}`. We set
+#   `root: items` on each list source so the bindings see the array.
+#   Detail endpoints return a single object — no root needed.
+app:
+  title: Kubernetes
+  theme: nord
+
+data_sources:
+  namespaces:
+    type: http
+    url: http://localhost:8001/api/v1/namespaces
+    root: items
+    refresh: 30s
+    timeout: 10s
+
+  pods:
+    type: http
+    url: http://localhost:8001/api/v1/namespaces/${selection}/pods
+    root: items
+    refresh: 5s
+    timeout: 10s
+
+  pod_detail:
+    type: http
+    url: http://localhost:8001/api/v1/namespaces/${selection.Namespace}/pods/${selection.Name}
+    refresh: 5s
+    timeout: 10s
+
+  pod_logs:
+    type: http
+    # tailLines caps the response — the kube logs endpoint returns plain
+    # text, so we use format:text instead of json. Each refresh replaces
+    # the buffer with the most recent N lines.
+    url: http://localhost:8001/api/v1/namespaces/${selection.Namespace}/pods/${selection.Name}/log?tailLines=200
+    format: text
+    refresh: 2s
+    timeout: 10s
+
+components:
+  namespaces_list:
+    type: list
+    title: Namespaces
+    filterable: true
+    source: namespaces
+    item: "metadata.name"
+    colors:
+      border_active: theme:accent
+      selected:      theme:accent
+
+  pods_table:
+    type: table
+    title: ${selection}
+    filterable: true
+    source: pods
+    initial_sort: {column: Name, desc: false}
+    # colors:
+    #   border_active:    theme:accent
+    #   header:           theme:accent
+    #   selected_fg:      theme:bar-fg
+    #   selected_bg:      theme:current
+    #   column_separator: theme:subtle
+    #   header_rule:      theme:accent
+    columns:
+      - {title: Name,      width: 36, sortable: true,                value: "metadata.name"}
+      - {title: Namespace, width: 18, sortable: true,                value: "metadata.namespace"}
+      - {title: Status,    width: 12, sortable: true,                value: "status.phase"}
+      - {title: Ready,     width: 6,  align: right,                  value: "status.containerStatuses.0.ready"}
+      - {title: Restarts,  width: 8,  sortable: true, sort: number, align: right, value: "status.containerStatuses.0.restartCount"}
+      - {title: Node,      width: 24,                                 value: "spec.nodeName"}
+      - {title: Pod IP,    width: 16,                                 value: "status.podIP"}
+      - {title: Started,   width: 22, sortable: true,                value: "status.startTime"}
+
+  pod_inspector:
+    type: inspector
+    title: ${selection.Name}
+    filterable: true
+    initial_depth: 0
+    source: pod_detail
+    colors:
+      border_active:   theme:accent
+      label:           theme:muted
+      value:           theme:bar-fg
+      current_line_bg: theme:subtle
+    fields:
+      - {label: name,       path: "metadata.name"}
+      - {label: namespace,  path: "metadata.namespace"}
+      - {label: nodeName,   path: "spec.nodeName"}
+      - {label: phase,      path: "status.phase"}
+      - {label: podIP,      path: "status.podIP"}
+      - {label: hostIP,     path: "status.hostIP"}
+      - label: metadata
+        children:
+          - {label: uid,               path: "metadata.uid"}
+          - {label: creationTimestamp, path: "metadata.creationTimestamp"}
+          - {label: resourceVersion,   path: "metadata.resourceVersion"}
+      - label: spec
+        children:
+          - {label: serviceAccountName, path: "spec.serviceAccountName"}
+          - {label: restartPolicy,      path: "spec.restartPolicy"}
+          - label: container[0]
+            children:
+              - {label: name,            path: "spec.containers.0.name"}
+              - {label: image,           path: "spec.containers.0.image"}
+              - {label: imagePullPolicy, path: "spec.containers.0.imagePullPolicy"}
+      - label: status
+        children:
+          - {label: phase,     path: "status.phase"}
+          - {label: startTime, path: "status.startTime"}
+          - label: containerStatus[0]
+            children:
+              - {label: ready,        path: "status.containerStatuses.0.ready"}
+              - {label: restartCount, path: "status.containerStatuses.0.restartCount"}
+              - {label: image,        path: "status.containerStatuses.0.image"}
+              - {label: imageID,      path: "status.containerStatuses.0.imageID"}
+
+  pod_logs_view:
+    type: logview
+    title: ${selection.Name} — logs (tail 200, refresh 2s)
+    searchable: true
+    source: pod_logs
+    colors:
+      border_active:   theme:accent
+      match:           theme:accent
+      current_line_bg: theme:subtle
+
+screens:
+  namespaces:
+    title: Namespaces
+    layout: {component: namespaces_list}
+    on_enter:
+      - {source: namespaces_list, push: pods}
+
+  pods:
+    title: ${selection}
+    layout: {component: pods_table}
+    on_enter:
+      - {source: pods_table, push: detail}
+    # Actions: while focused on the pods table, these keys dispatch a
+    # subprocess via tuilib's pkg/runner. The TUI suspends, the
+    # subprocess gets the TTY, and we resume on exit. ${selection.Col}
+    # resolves to the focused row's cell.
+    actions:
+      - key: x
+        label: exec
+        source: pods_table
+        # `confirm:` prompts a yes/no modal before dispatch. ${selection.*}
+        # substitutes here too, so the message names the pod you're about
+        # to drop into.
+        confirm: "Open an interactive shell in ${selection.Name} (${selection.Namespace})?"
+        notice: "connecting…"
+        run:
+          - kubectl
+          - --context
+          - kind-tui-builder
+          - exec
+          - -it
+          - -n
+          - ${selection.Namespace}
+          - ${selection.Name}
+          - --
+          - sh
+      - key: d
+        label: describe
+        source: pods_table
+        run:
+          - sh
+          - -c
+          - "kubectl --context kind-tui-builder describe -n ${selection.Namespace} pod ${selection.Name} | ${PAGER:-less} -R"
+      - key: D
+        label: delete
+        source: pods_table
+        # `interactive: false` runs kubectl in a goroutine, captures
+        # stdout/stderr, and never suspends the alt-screen — no flicker.
+        # On error the captured stderr is shown in the modal alert; on
+        # success the statusbar reports "action complete."
+        interactive: false
+        confirm: "Delete pod ${selection.Name} in ${selection.Namespace}? This cannot be undone."
+        run:
+          - kubectl
+          - --context
+          - kind-tui-builder
+          - delete
+          - -n
+          - ${selection.Namespace}
+          - pod
+          - ${selection.Name}
+
+  detail:
+    title: ${selection.Name}
+    layout:
+      vstack:
+        - {flex: 2, component: pod_inspector}
+        - {flex: 3, component: pod_logs_view}
+
+initial: namespaces
