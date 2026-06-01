@@ -35,6 +35,16 @@ func (c *Config) Validate() error {
 		if err := src.validate("data_sources." + name); err != nil {
 			return err
 		}
+		if src.Type == "merge" {
+			for _, child := range src.Sources {
+				if _, ok := c.DataSources[child]; !ok {
+					return fmt.Errorf("data_sources.%s: merge child %q not defined in data_sources", name, child)
+				}
+			}
+		}
+	}
+	if err := c.checkMergeCycles(); err != nil {
+		return err
 	}
 	for name, comp := range c.Components {
 		if comp == nil {
@@ -215,6 +225,11 @@ func (c *Component) validate(path string) error {
 			default:
 				return fmt.Errorf("%s.columns[%d]: unknown sort %q (want string|number|si)", path, i, col.Sort)
 			}
+			for j, r := range col.ColorRules {
+				if r.Color == "" {
+					return fmt.Errorf("%s.columns[%d].color_rules[%d]: color is required", path, i, j)
+				}
+			}
 		}
 	}
 	if c.Type == "tree" && c.Root == nil && c.Source == "" {
@@ -229,7 +244,7 @@ func (c *Component) validate(path string) error {
 			}
 		case "table":
 			for i, col := range c.Columns {
-				if col.Value == "" {
+				if len(col.Value) == 0 || col.Value[0] == "" {
 					return fmt.Errorf("%s.columns[%d]: table bound to source %q needs `value:` (dot-path) on every column", path, i, c.Source)
 				}
 			}
@@ -246,16 +261,76 @@ func (c *Component) validate(path string) error {
 	return nil
 }
 
+// checkMergeCycles walks the merge → children graph and rejects cycles
+// (which would otherwise cause infinite recursion at Build time).
+func (c *Config) checkMergeCycles() error {
+	const (
+		white = 0 // unvisited
+		gray  = 1 // on the current DFS stack
+		black = 2 // fully explored
+	)
+	color := make(map[string]int, len(c.DataSources))
+	var dfs func(name string, stack []string) error
+	dfs = func(name string, stack []string) error {
+		switch color[name] {
+		case gray:
+			return fmt.Errorf("data_sources: cyclic merge reference: %v -> %s",
+				stack, name)
+		case black:
+			return nil
+		}
+		color[name] = gray
+		stack = append(stack, name)
+		def := c.DataSources[name]
+		if def != nil && def.Type == "merge" {
+			for _, child := range def.Sources {
+				if err := dfs(child, stack); err != nil {
+					return err
+				}
+			}
+		}
+		color[name] = black
+		return nil
+	}
+	for name := range c.DataSources {
+		if err := dfs(name, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (d *DataSource) validate(path string) error {
 	switch d.Type {
 	case "http":
 		if d.URL == "" {
 			return fmt.Errorf("%s: http source needs url", path)
 		}
+	case "exec":
+		if len(d.Command) == 0 {
+			return fmt.Errorf("%s: exec source needs command (non-empty argv)", path)
+		}
+	case "file":
+		if d.Path == "" {
+			return fmt.Errorf("%s: file source needs path", path)
+		}
+	case "merge":
+		if len(d.Sources) == 0 {
+			return fmt.Errorf("%s: merge source needs sources (list of names)", path)
+		}
+		switch d.OnError {
+		case "", "fail", "skip":
+		default:
+			return fmt.Errorf("%s: unknown on_error %q (want fail|skip)", path, d.OnError)
+		}
+	case "websocket":
+		if d.URL == "" {
+			return fmt.Errorf("%s: websocket source needs url (ws:// or wss://)", path)
+		}
 	case "":
 		return fmt.Errorf("%s: missing type", path)
 	default:
-		return fmt.Errorf("%s: unknown source type %q (want http)", path, d.Type)
+		return fmt.Errorf("%s: unknown source type %q (want http|exec|file|merge|websocket)", path, d.Type)
 	}
 	switch d.Format {
 	case "", "json", "text":

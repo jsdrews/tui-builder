@@ -1,0 +1,12 @@
+{
+  "people": [
+    {"name": "Ada Lovelace",       "role": "Engineer",   "team": "Platform", "joined": "2024-01-15"},
+    {"name": "Alan Turing",        "role": "Engineer",   "team": "Platform", "joined": "2023-06-02"},
+    {"name": "Grace Hopper",       "role": "Director",   "team": "Engineering", "joined": "2022-09-10"},
+    {"name": "Donald Knuth",       "role": "Architect",  "team": "Platform", "joined": "2021-04-20"},
+    {"name": "Margaret Hamilton",  "role": "Manager",    "team": "Reliability", "joined": "2023-11-01"},
+    {"name": "Edsger Dijkstra",    "role": "Engineer",   "team": "Compilers", "joined": "2024-08-12"},
+    {"name": "Linus Torvalds",     "role": "Engineer",   "team": "Kernel", "joined": "2020-12-25"},
+    {"name": "Barbara Liskov",     "role": "Researcher", "team": "Languages", "joined": "2022-03-30"}
+  ]
+}

@@ -10,6 +10,7 @@ package screen
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/jsdrews/tuilib/pkg/alert"
 	"github.com/jsdrews/tuilib/pkg/app"
@@ -41,15 +43,19 @@ type Multi struct {
 	DataSources map[string]*cfg.DataSource
 }
 
-// sourceEntry pairs a live data source with its iterable-root path so
-// fetch results can be sliced once at apply time. loaded flips true after
-// the first successful fetch — used to suppress the loading spinner on
-// polling refreshes (the data is already on screen; flashing to a
-// spinner and back would just flicker).
+// sourceEntry tracks a live data source bound to one or more components.
+// loaded flips true after the first successful fetch — used to suppress
+// the loading spinner on polling refreshes (the data is already on
+// screen; flashing to a spinner and back would just flicker).
+//
+// Streaming sources additionally carry a cancel func that ends the
+// subscription when the screen's lifecycle calls for it (deferred — v1
+// leaks streams on pop, documented in the package doc).
 type sourceEntry struct {
 	src    ds.Source
-	root   string
 	loaded bool
+	stream <-chan ds.Event   // non-nil for streaming sources after Subscribe
+	cancel context.CancelFunc // cancels the stream's context
 }
 
 // fetchMsg carries the result of one source fetch back into Update.
@@ -62,6 +68,17 @@ type fetchMsg struct {
 // tickMsg signals "time to refetch source X." Emitted by the per-source
 // tea.Tick scheduled after each successful fetch when refresh > 0.
 type tickMsg struct{ source string }
+
+// streamMsg delivers one event from a streaming source. Lines append
+// to the bound logview; an Err ends the stream and surfaces in the
+// statusbar. The "done" path (channel closed) maps to a streamMsg with
+// done=true so the consumer Cmd knows to stop re-issuing itself.
+type streamMsg struct {
+	source string
+	line   string
+	err    error
+	done   bool
+}
 
 // nonInteractiveResult is the outcome of a non-interactive action
 // dispatch. Used instead of runner.Result for the no-TTY path.
@@ -149,7 +166,13 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, dataSources map
 	}
 	m.actions = append([]cfg.Action(nil), s.Actions...)
 
-	// Wire data sources for any bound components in this screen.
+	// Build every defined data source up front so merge sources can
+	// resolve their children. Leaves (http/exec/file) and merges all
+	// satisfy ds.Source; the screen-side wiring below is type-agnostic.
+	live, err := ds.Build(dataSources)
+	if err != nil {
+		return nil, err
+	}
 	m.sources = map[string]*sourceEntry{}
 	m.sourceUsers = map[string][]string{}
 	for _, name := range tree.Order {
@@ -158,16 +181,11 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, dataSources map
 		if srcName == "" {
 			continue
 		}
-		def, ok := dataSources[srcName]
-		if !ok {
+		if _, ok := dataSources[srcName]; !ok {
 			return nil, fmt.Errorf("component %q: source %q not defined", name, srcName)
 		}
 		if _, ok := m.sources[srcName]; !ok {
-			live, err := ds.New(def)
-			if err != nil {
-				return nil, fmt.Errorf("data_sources.%s: %w", srcName, err)
-			}
-			m.sources[srcName] = &sourceEntry{src: live, root: def.Root}
+			m.sources[srcName] = &sourceEntry{src: live[srcName]}
 		}
 		m.sourceUsers[srcName] = append(m.sourceUsers[srcName], name)
 	}
@@ -185,8 +203,10 @@ func (m *Model) Init() tea.Cmd {
 }
 
 // OnEnter fires each time the screen becomes the active top of the stack.
-// On the first activation it kicks off one fetch per bound data source;
-// subsequent activations (pop-back) reuse cached data and let polling
+// On the first activation it kicks off one fetch per bound data source
+// — and for sources that implement ds.StreamingSource, opens the
+// subscription and starts pumping events into the bound logview.
+// Subsequent activations (pop-back) reuse cached data and let polling
 // handle refreshes.
 func (m *Model) OnEnter(any) tea.Cmd {
 	if m.started || len(m.sources) == 0 {
@@ -194,12 +214,49 @@ func (m *Model) OnEnter(any) tea.Cmd {
 	}
 	m.started = true
 	var cmds []tea.Cmd
-	for name := range m.sources {
+	for name, entry := range m.sources {
+		// Streaming sources take a different path: subscribe once and
+		// pump events into the logview as they arrive. Fetch still
+		// fires alongside so the bound logview can render an empty
+		// initial state via the standard apply path.
+		if streamer, ok := entry.src.(ds.StreamingSource); ok {
+			ctx, cancel := context.WithCancel(context.Background())
+			ch, err := streamer.Subscribe(ctx)
+			if err == nil {
+				entry.stream = ch
+				entry.cancel = cancel
+				cmds = append(cmds, m.startFetch(name), nextStreamMsg(name, ch))
+				continue
+			}
+			cancel()
+			// ErrNotStreaming is the source's way of saying "I can't
+			// stream under this config — use my Fetch path instead."
+			// Fall through to the polling branch below. Real errors
+			// (dial failures etc.) get the alert-or-statusbar treatment.
+			if !errors.Is(err, ds.ErrNotStreaming) {
+				cmds = append(cmds, app.Error(fmt.Sprintf("%s: %v", name, err)))
+				continue
+			}
+		}
 		if cmd := m.startFetch(name); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+// nextStreamMsg returns the Cmd that reads one event from a streaming
+// source's channel and turns it into a streamMsg. The Update handler
+// re-issues this Cmd after each non-terminal event so the pump keeps
+// draining without blocking the model.
+func nextStreamMsg(source string, ch <-chan ds.Event) tea.Cmd {
+	return func() tea.Msg {
+		ev, ok := <-ch
+		if !ok {
+			return streamMsg{source: source, done: true}
+		}
+		return streamMsg{source: source, line: ev.Line, err: ev.Err}
+	}
 }
 
 // Layout returns the live layout.Node tree built from the YAML config.
@@ -305,6 +362,8 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		return m, m.handleFetch(x)
 	case tickMsg:
 		return m, m.startFetch(x.source)
+	case streamMsg:
+		return m, m.handleStream(x)
 	case runner.Result:
 		captured := ""
 		if m.inFlightStderr != nil {
@@ -359,20 +418,41 @@ func (m *Model) handleFetch(msg fetchMsg) tea.Cmd {
 		return nil
 	}
 	var cmds []tea.Cmd
+	// Sources may legitimately return (data, err) at the same time —
+	// notably merge with on_error:skip surfaces partial failures via a
+	// non-nil err while still handing back the surviving union. Apply
+	// whatever data we got, then surface the error (if any) so the
+	// user sees both halves of the story.
 	for _, compName := range m.sourceUsers[msg.source] {
 		c := m.tree.Components[compName]
 		if !entry.loaded {
 			setLoading(c, false)
 		}
-		if msg.err == nil {
-			root := ds.Get(msg.data, entry.root)
-			build.ApplyData(c, root)
+		if msg.data != nil {
+			build.ApplyData(c, msg.data, m.th)
 		}
 	}
-	if msg.err == nil {
+	// Track whether this fetch is the FIRST attempt (entry.loaded was
+	// false going in). The "still false after this fetch" case is the
+	// "I just opened the screen and nothing works" path — surface
+	// errors in an alert modal there, since the empty table gives no
+	// visual clue why. Later transient failures during polling stay in
+	// the statusbar (we don't want a modal popping every 5s if a
+	// cluster briefly disconnects).
+	firstFetch := !entry.loaded
+	if msg.data != nil {
 		entry.loaded = true
-	} else {
-		cmds = append(cmds, app.Error(fmt.Sprintf("%s: %v", msg.source, msg.err)))
+	}
+	if msg.err != nil {
+		if firstFetch && msg.data == nil && m.alertModal == nil {
+			a := m.newAlertModal(
+				fmt.Sprintf("%s: initial fetch failed", msg.source),
+				msg.err.Error(),
+			)
+			m.alertModal = &a
+		} else {
+			cmds = append(cmds, app.Error(fmt.Sprintf("%s: %v", msg.source, msg.err)))
+		}
 	}
 	if d := entry.src.Refresh(); d > 0 {
 		name := msg.source
@@ -703,16 +783,25 @@ func (m *Model) tryPush() (tea.Cmd, bool) {
 }
 
 // selectionFrom extracts a Selection from a list or table component. The
-// validator restricts on_enter sources to those two kinds, so other
-// kinds return a zero Selection.
+// validator restricts on_enter sources / action sources to lists and
+// tables, so other kinds return a zero Selection.
+//
+// Items and cells are ANSI-stripped before being captured so that
+// color_rules wrapping (which lives in the displayed text) does not
+// leak into ${selection.*} substitutions that downstream URLs / headers
+// / titles depend on. Selection carries the logical value; the visible
+// styling stays in the component's view.
 func selectionFrom(c *build.Component) build.Selection {
 	switch c.Kind {
 	case build.KList:
 		s, _ := c.List.Selected()
-		return build.Selection{String: s}
+		return build.Selection{String: xansi.Strip(s)}
 	case build.KTable:
 		row, _ := c.Table.Selected()
-		cells := []string(row)
+		cells := make([]string, len(row))
+		for i, raw := range row {
+			cells[i] = xansi.Strip(raw)
+		}
 		titles := make([]string, 0, len(cells))
 		for _, col := range c.Table.Columns() {
 			titles = append(titles, col.Title)
@@ -724,6 +813,47 @@ func selectionFrom(c *build.Component) build.Selection {
 		return build.Selection{String: first, Cells: cells, Columns: titles}
 	}
 	return build.Selection{}
+}
+
+// handleStream applies one streaming event. Lines are appended to every
+// logview bound to the source; errors surface in the statusbar and
+// terminate the pump. On normal channel closure (done=true) the pump
+// stops without an error message — the screen will resubscribe on a
+// manual `r` refresh.
+func (m *Model) handleStream(x streamMsg) tea.Cmd {
+	entry, ok := m.sources[x.source]
+	if !ok {
+		return nil
+	}
+	if x.err != nil {
+		return app.Error(fmt.Sprintf("%s: %v", x.source, x.err))
+	}
+	if x.done {
+		// Stream ended cleanly. Drop the channel so a manual refresh
+		// can re-subscribe; cancel the context so any lingering
+		// goroutines in the source can exit.
+		if entry.cancel != nil {
+			entry.cancel()
+			entry.cancel = nil
+		}
+		entry.stream = nil
+		return nil
+	}
+	// Apply: dispatch per component kind. Logview = append the raw
+	// line. Table = JSON-parse + project to a row via column paths
+	// (handled in build.ApplyStreamLine; non-JSON / all-empty lines
+	// are skipped there). Other kinds ignore streaming events.
+	for _, compName := range m.sourceUsers[x.source] {
+		c := m.tree.Components[compName]
+		switch c.Kind {
+		case build.KLogview:
+			c.Logview.Append(x.line)
+		case build.KTable:
+			build.ApplyStreamLine(c, x.line, m.th)
+		}
+	}
+	// Re-issue the pump so the next event keeps draining the channel.
+	return nextStreamMsg(x.source, entry.stream)
 }
 
 func updateComponent(c *build.Component, msg tea.Msg) tea.Cmd {

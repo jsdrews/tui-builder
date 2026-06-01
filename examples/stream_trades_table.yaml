@@ -1,0 +1,82 @@
+# stream_trades_table.yaml — live BTC/USD trades streaming into a table.
+#
+# Each JSON frame from bitstamp's WebSocket becomes one table row:
+#   - Frame parsed as JSON
+#   - Cells projected via each column's `value:` dot-path
+#   - Row prepended (newest-first) to the ring buffer
+#   - Buffer trimmed to `max_rows`
+#   - Table SetRows with the new buffer
+#
+# Frames that don't parse as JSON (the synthetic "(connecting…)" /
+# "(connected…)" diagnostic lines emitted by the websocket source) and
+# frames whose every projected cell is empty (the
+# bts:subscription_succeeded confirmation) are silently skipped, so the
+# table stays clean.
+#
+# Layout: vstack of two panes —
+#   - small logview at the top tracks connection state + raw frames
+#     (great for verifying everything's working)
+#   - main table below shows the parsed trades
+#
+# Try: focus the table (tab), then sort by price (`]` to step the
+# sort column, `s` to toggle direction). The buffer keeps trimming
+# while you sort, but cursor + sort survive every refresh because
+# tuilib's SetRows is in-place.
+app:
+  title: Live BTC/USD trades
+  theme: nord
+
+data_sources:
+  trades:
+    type: websocket
+    url: wss://ws.bitstamp.net
+    timeout: 10s
+    initial_messages:
+      - '{"event":"bts:subscribe","data":{"channel":"live_trades_btcusd"}}'
+
+components:
+  raw_feed:
+    type: logview
+    title: Connection state + raw frames (debug)
+    searchable: true
+    source: trades
+    color_rules:
+      - {when: "~^\\(",                       color: theme:muted}
+      - {when: "~bts:subscription_succeeded", color: theme:accent}
+      - {when: '~"type":\s*0',                color: green}
+      - {when: '~"type":\s*1',                color: red}
+
+  trades_table:
+    type: table
+    title: Trades (newest first, ring buffer of 100)
+    source: trades
+    max_rows: 100
+    columns:
+      - {title: ID,        width: 12, value: "data.id"}
+      - {title: Time,      width: 22, value: "data.timestamp"}
+      - title: Side
+        width: 6
+        align: center
+        value: "data.type"
+        color_rules:
+          - {when: "0", color: green}
+          - {when: "1", color: red}
+      - title: Price (USD)
+        width: 16
+        align: right
+        sortable: true
+        sort: number
+        value: "data.price_str"
+      - title: Amount (BTC)
+        width: 16
+        align: right
+        sortable: true
+        sort: number
+        value: "data.amount_str"
+
+screen:
+  title: Trades
+  layout:
+    vstack:
+      - {fixed: 8, component: raw_feed}
+      - {flex: 1,  component: trades_table}

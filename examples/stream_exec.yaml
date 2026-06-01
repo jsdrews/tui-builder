@@ -1,0 +1,47 @@
+# stream_exec.yaml — exec source in follow mode → logview.
+#
+# `follow: true` switches exec from one-shot capture to a long-running
+# stream: the subprocess is started and its stdout is read line-by-line
+# as it emits. Each line becomes an Event delivered to the bound
+# logview, which Append's it without resetting cursor / filter / scroll.
+#
+# Replace the command with anything that streams to stdout:
+#   - kubectl logs -f pod-name
+#   - tail -f /var/log/system.log
+#   - journalctl -f
+#   - docker logs -f container
+#   - your own script
+#
+# This example synthesizes ticks via /bin/sh so the demo works without
+# extra setup. Try it as a model for wiring a real follow command.
+app:
+  title: Streaming exec demo
+  theme: nord
+
+data_sources:
+  ticker:
+    type: exec
+    follow: true
+    command:
+      - sh
+      - -c
+      # Emit one line per second forever. The `i=$((i+1)); echo …; sleep 1`
+      # loop is the lowest-common-denominator stand-in for `kubectl logs -f`.
+      - 'i=0; while true; do i=$((i+1)); printf "%s tick %d\n" "$(date +%H:%M:%S)" "$i"; sleep 1; done'
+
+components:
+  stream:
+    type: logview
+    title: Live stdout (follow mode)
+    searchable: true
+    source: ticker
+    # color_rules apply to streaming lines as they arrive — useful for
+    # log-level coloring without any client-side transformation.
+    color_rules:
+      - {when: "~tick [0-9]*[05]$", color: theme:accent}   # every 5th tick
+      - {when: "~^",                 color: theme:bar-fg}
+
+screen:
+  title: Stream
+  layout:
+    component: stream

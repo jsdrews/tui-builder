@@ -22,33 +22,88 @@ type Config struct {
 	Initial string `yaml:"initial,omitempty"`
 }
 
-// DataSource fetches data that one or more components bind to. v1 supports
-// http only. ${selection.foo} tokens in URL / Headers / Body are
-// substituted at push time (same machinery as static fields).
+// DataSource fetches data that one or more components bind to. Supported
+// `type:` values: http, exec, file, merge. ${selection.*} and ${env.*}
+// tokens substitute at push time across most string fields.
+//
+// Per-type field reference:
+//
+//	http   url, method, headers, body, format, root, refresh, timeout
+//	exec   command, env, format, root, refresh, timeout
+//	file   path, format, root, refresh
+//	merge  sources, tag_field, on_error, refresh
 type DataSource struct {
-	// Type selects the fetch mechanism. v1: "http".
+	// Type selects the fetch mechanism.
 	Type string `yaml:"type"`
-	// URL is the request URL (http).
-	URL string `yaml:"url,omitempty"`
-	// Method defaults to GET (http).
-	Method string `yaml:"method,omitempty"`
-	// Headers are sent with the request (http).
-	Headers map[string]string `yaml:"headers,omitempty"`
-	// Body is the request body, sent as-is (http).
-	Body string `yaml:"body,omitempty"`
+
+	// Shared by http / exec / file / merge.
 	// Root is a dot-path into the response selecting the iterable root
 	// for list/table bindings. Empty = response itself.
 	Root string `yaml:"root,omitempty"`
+	// Refresh is the polling interval (e.g. "30s", "1m"). Empty = fetch
+	// once on screen activate. Driven by tea.Tick.
+	Refresh string `yaml:"refresh,omitempty"`
+	// Timeout caps per-fetch latency. Default 10s for http/exec, n/a
+	// for file (synchronous read) and merge (defers to children).
+	Timeout string `yaml:"timeout,omitempty"`
 	// Format selects how the response body is parsed:
 	//   "" / "json"   parse as JSON, hand the typed value to bindings (default)
 	//   "text"        keep the body as a raw string — required for logview
 	//                 bindings against plain-text endpoints (e.g. kube pod logs)
 	Format string `yaml:"format,omitempty"`
-	// Refresh is the polling interval (e.g. "30s", "1m"). Empty = fetch
-	// once on screen activate.
-	Refresh string `yaml:"refresh,omitempty"`
-	// Timeout overrides the default 10s request timeout.
-	Timeout string `yaml:"timeout,omitempty"`
+
+	// http fields.
+	URL     string            `yaml:"url,omitempty"`
+	Method  string            `yaml:"method,omitempty"`
+	Headers map[string]string `yaml:"headers,omitempty"`
+	Body    string            `yaml:"body,omitempty"`
+
+	// websocket fields.
+	// InitialMessages are text frames sent immediately after the
+	// connection upgrades — useful for protocols (bitstamp, Kraken,
+	// Coinbase, many custom buses) that require a subscribe handshake
+	// before the server starts emitting. ${selection.*} / ${env.*}
+	// substitute per entry. Sent in order, fire-and-forget; failures
+	// don't terminate the stream but do appear as one error event.
+	InitialMessages []string `yaml:"initial_messages,omitempty"`
+
+	// exec fields.
+	// Command is the argv ([cmd, arg, arg, ...]). The first element is
+	// looked up in $PATH; subsequent elements are passed as-is.
+	// ${selection.*} and ${env.*} substitute per element.
+	Command []string `yaml:"command,omitempty"`
+	// Env adds (or overrides) environment variables on top of the
+	// process's own environment. ${env.*} can reference outer env;
+	// ${selection.*} substitutes in values.
+	Env map[string]string `yaml:"env,omitempty"`
+	// Follow turns exec into a streaming source: the subprocess is
+	// started (not waited on), its stdout is read line-by-line, and
+	// each line is delivered as an Event to a bound logview. Use for
+	// `kubectl logs -f`, `tail -f`, `journalctl -f`, anything that
+	// emits a continuous line stream. Refresh is ignored when Follow
+	// is true (the stream is the refresh).
+	Follow bool `yaml:"follow,omitempty"`
+
+	// file fields.
+	// Path is the file to read. ${selection.*} / ${env.*} substitute.
+	Path string `yaml:"path,omitempty"`
+
+	// merge fields.
+	// Sources is the list of source names whose results are unioned. The
+	// referenced sources are built independently; merge resolves and
+	// fetches them concurrently each refresh.
+	Sources []string `yaml:"sources,omitempty"`
+	// TagField, when set, injects {<TagField>: <child-source-name>}
+	// into every map-shaped item from each child so a downstream column
+	// or list_item path can identify which source the item came from.
+	// Non-map items pass through untouched.
+	TagField string `yaml:"tag_field,omitempty"`
+	// OnError chooses what happens when a child source errors during a
+	// merge fetch:
+	//   "" / "fail" (default) — any child error aborts the merge
+	//   "skip"                — drop the failed child, return the rest
+	//                            (only errors if EVERY child fails)
+	OnError string `yaml:"on_error,omitempty"`
 }
 
 // App configures the surrounding tuilib app shell.
@@ -199,6 +254,13 @@ type Component struct {
 	// or hex strings ("#ff8800").
 	Colors *Colors `yaml:"colors,omitempty"`
 
+	// ColorRules drive data-aware coloring for components with a single
+	// value stream — list items and logview lines. (For table, rules
+	// live per Column; for inspector, per InspectorField.) Rules
+	// evaluate in order, first match wraps the rendered text with
+	// ansi.CellColor.
+	ColorRules []ColorRule `yaml:"color_rules,omitempty"`
+
 	// list fields
 	Items []string `yaml:"items,omitempty"`
 
@@ -206,6 +268,22 @@ type Component struct {
 	Columns     []Column `yaml:"columns,omitempty"`
 	Rows        [][]any  `yaml:"rows,omitempty"`
 	InitialSort *Sort    `yaml:"initial_sort,omitempty"`
+	// MaxRows caps the table when bound to a streaming source — each
+	// arriving JSON frame is prepended as a new row, oldest rows
+	// dropped past this size. 0 (default) implies 100 for streaming
+	// tables (unbounded growth would eat memory); ignored for
+	// non-streaming bindings and for keyed-upsert mode (see RowKey).
+	// Set explicitly to override or to -1 for truly unbounded.
+	MaxRows int `yaml:"max_rows,omitempty"`
+	// RowKey turns a streaming-bound table into a keyed-upsert view —
+	// the L1 order-book / status-table / "one row per X" pattern. The
+	// dot-path picks a key out of each event; when an event arrives
+	// whose key matches an existing row, that row is updated in
+	// place (cursor stays put). When the key is new, the row appends.
+	// Without RowKey, streaming events prepend to a ring buffer
+	// (live-tape pattern). MaxRows is ignored in keyed mode — row
+	// count is naturally bounded by the number of distinct keys.
+	RowKey Path `yaml:"row_key,omitempty"`
 
 	// logview fields
 	Lines      []string `yaml:"lines,omitempty"`
@@ -249,9 +327,31 @@ type Column struct {
 	//   "number"       strconv.ParseFloat after stripping commas
 	//   "si"           number + K/M/B/G/T suffix (1K=1e3, 1M=1e6, …)
 	Sort string `yaml:"sort,omitempty"`
-	// Value is the dot-path used by a data-source-bound table to pluck
-	// the cell from each iterable-root element (e.g. "name.common").
-	Value string `yaml:"value,omitempty"`
+	// Value is the dot-path (or fallback chain of dot-paths) used by a
+	// data-source-bound table to pluck the cell from each iterable-root
+	// element. A scalar string ("name.common") is the common case; a
+	// list of strings is tried in order and the first non-empty result
+	// wins — useful for kube-style computed fields where the
+	// authoritative value lives under different keys depending on
+	// state (e.g. container waiting reason → terminated reason →
+	// pod phase).
+	Value Path `yaml:"value,omitempty"`
+	// ColorRules apply data-driven coloring per cell in this column.
+	// Rules are evaluated in order; the first match wraps the cell value
+	// with ansi.CellColor (preserves the selected-row background). When
+	// no rule matches the cell is rendered plain. See ColorRule for the
+	// `when:` syntax.
+	ColorRules []ColorRule `yaml:"color_rules,omitempty"`
+}
+
+// ColorRule pairs a `when:` matcher with a `color:`. Recognised `when:`
+// syntax: exact case-insensitive string, "~regex", numeric comparison
+// ("> 5", "<= 10", "== 0", "!= 0", with optional K/M/B/G/T suffix on
+// the right-hand side), or empty (always — useful as a terminal default
+// rule).
+type ColorRule struct {
+	When  string `yaml:"when,omitempty"`
+	Color string `yaml:"color"`
 }
 
 // TreeNode is a node in a tree component's root. Children may be empty
@@ -267,10 +367,13 @@ type TreeNode struct {
 // When the inspector is data-source-bound, Path overrides Value: the
 // resolved dot-path into the source response becomes the displayed value.
 type InspectorField struct {
-	Label    string           `yaml:"label"`
-	Value    string           `yaml:"value,omitempty"`
-	Path     string           `yaml:"path,omitempty"`
-	Children []InspectorField `yaml:"children,omitempty"`
+	Label string `yaml:"label"`
+	Value string `yaml:"value,omitempty"`
+	Path  string `yaml:"path,omitempty"`
+	// ColorRules wrap this field's rendered value with ansi.CellColor
+	// when a rule matches. Same syntax as Column.ColorRules.
+	ColorRules []ColorRule      `yaml:"color_rules,omitempty"`
+	Children   []InspectorField `yaml:"children,omitempty"`
 }
 
 // Colors is the per-component palette override. Each field maps to one

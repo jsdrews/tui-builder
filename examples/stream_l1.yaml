@@ -1,0 +1,141 @@
+# stream_l1.yaml — L1 ticker built by JOINING two Binance streams.
+#
+# This example demonstrates four things stacked together:
+#
+#   1. WebSocket source (data type: websocket)
+#   2. `merge` composing two STREAMING sources into one
+#   3. `row_key` upsert-by-symbol on the resulting table
+#   4. Deep merge: each source contributes different fields to the
+#      same row, neither loses data when the other ticks
+#
+# Two streams:
+#   - bookTicker  ── best bid / best ask + qty, ticks several × / sec
+#   - @ticker     ── last-trade price, 24h % change, 24h volume + stats,
+#                    ticks ~1× / sec
+#
+# Both keyed by symbol (`data.s`). Where they overlap (bid/ask), the
+# bookTicker stream wins by virtue of being fresher (more frequent
+# updates). Where they don't (price, change%, volume, high/low),
+# bookTicker carries no info, so the ticker fields survive and the row
+# accumulates a complete L1+stats view of each symbol.
+#
+# This is the same "compose N sources, key by row" pattern used for
+# cross-cluster k8s in examples/kube_multi.yaml. There the sources are
+# polled HTTP; here they're streaming WebSockets. Same `merge` source
+# type, same row_key semantics — the difference is the wire protocol.
+#
+# Geography: binance.us URLs work in the US. International users:
+# swap `binance.us` for `binance.com`.
+app:
+  title: Crypto L1 (bookTicker × @ticker merged)
+  theme: nord
+
+data_sources:
+  # Stream 1: best bid / best ask, fast.
+  book:
+    type: websocket
+    url: wss://stream.binance.us:9443/stream?streams=btcusdt@bookTicker/ethusdt@bookTicker/solusdt@bookTicker/adausdt@bookTicker/xrpusdt@bookTicker/dogeusdt@bookTicker/avaxusdt@bookTicker
+    timeout: 10s
+
+  # Stream 2: last price + 24h stats, slower (~1Hz / symbol).
+  ticker:
+    type: websocket
+    url: wss://stream.binance.us:9443/stream?streams=btcusdt@ticker/ethusdt@ticker/solusdt@ticker/adausdt@ticker/xrpusdt@ticker/dogeusdt@ticker/avaxusdt@ticker
+    timeout: 10s
+
+  # The join. Merge subscribes to both children and fans every frame
+  # into one channel — the consuming table doesn't have to know there
+  # are two underlying connections.
+  l1:
+    type: merge
+    sources: [book, ticker]
+
+components:
+  status:
+    type: logview
+    title: Connection state (both streams)
+    source: l1
+    color_rules:
+      - {when: "~^\\(",        color: theme:muted}    # synthetic diagnostics
+      - {when: '~^\{"stream"', color: theme:subtle}   # constant chatter
+
+  board:
+    type: table
+    title: L1 (one row per symbol; bid/ask from book + price/stats from ticker)
+    source: l1
+    row_key: "data.s"
+    initial_sort: {column: Symbol, desc: false}
+    columns:
+      - {title: Symbol, width: 10, sortable: true, value: "data.s"}
+      # Last price + 24h stats: only ticker carries these. They appear
+      # ~1s after a row first becomes visible (when the first ticker
+      # frame for that symbol arrives), then update at ~1Hz.
+      - title: Price
+        width: 14
+        align: right
+        sortable: true
+        sort: number
+        value: "data.c"
+      - title: 24h %
+        width: 9
+        align: right
+        sortable: true
+        sort: number
+        value: "data.P"
+        color_rules:
+          - {when: "<0",  color: red}
+          - {when: ">0",  color: green}
+          - {when: "==0", color: gray}
+      # Best bid + size, best ask + size. Both streams carry all four
+      # (b/B/a/A) — bookTicker wins because it arrives more often
+      # (deep merge: latest writer wins field-by-field).
+      - title: Best bid
+        width: 14
+        align: right
+        sortable: true
+        sort: number
+        value: "data.b"
+      - title: Bid qty
+        width: 12
+        align: right
+        sortable: true
+        sort: number
+        value: "data.B"
+      - title: Best ask
+        width: 14
+        align: right
+        sortable: true
+        sort: number
+        value: "data.a"
+      - title: Ask qty
+        width: 12
+        align: right
+        sortable: true
+        sort: number
+        value: "data.A"
+      # 24h volume / high / low: ticker only.
+      - title: 24h vol
+        width: 14
+        align: right
+        sortable: true
+        sort: si
+        value: "data.v"
+      - title: 24h high
+        width: 14
+        align: right
+        sortable: true
+        sort: number
+        value: "data.h"
+      - title: 24h low
+        width: 14
+        align: right
+        sortable: true
+        sort: number
+        value: "data.l"
+
+screen:
+  title: L1
+  layout:
+    vstack:
+      - {fixed: 8, component: status}
+      - {flex: 1,  component: board}

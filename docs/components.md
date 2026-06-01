@@ -206,17 +206,68 @@ app:
 
 data_sources:                 # optional — components bind to these via `source:`
   <name>:
-    type: http                # only http for v1
-    url: <string>             # may contain ${selection.*} when pushed
-    method: GET               # default
-    headers: {<k>: <v>, ...}  # optional
-    body: <string>            # optional, sent as-is
-    root: <dot-path>          # optional — slice into the response (empty = use response root)
+    type: http | exec | file | merge | websocket
+    # ---- shared by every type ----
+    root: <dot-path>          # slice into the response (empty = use whole result)
     format: json | text       # default json; use text for plain-text endpoints
-                              # (kube pod logs, etc.) — required for logview bindings
+                              # (kube pod logs etc.) — required for logview bindings
                               # against non-JSON sources
-    refresh: <duration>       # optional — polling interval (e.g. "5m"); omit for fetch-once
-    timeout: <duration>       # default 10s
+    refresh: <duration>       # polling interval (e.g. "5m"); omit / 0s = fetch once
+    timeout: <duration>       # default 10s for http/exec, n/a for file/merge
+
+    # ---- http ----
+    url: <string>             # may contain ${selection.*}/${env.*}
+    method: GET               # default
+    headers: {<k>: <v>, ...}
+    body: <string>            # sent as-is
+
+    # ---- exec ----
+    # Runs a subprocess; one-shot (parse stdout) or streaming
+    # (line-by-line follow). Inherits the program's env plus any `env:`
+    # overrides on top.
+    command: [<argv>, ...]    # first element looked up in $PATH
+    env:   {<k>: <v>, ...}
+    follow: <bool>            # default false. true: stream mode — process
+                              # is long-running, stdout lines arrive as
+                              # Events into a bound logview. Covers
+                              # `kubectl logs -f`, `tail -f`,
+                              # `journalctl -f`, `docker logs -f`.
+
+    # ---- file ----
+    # Reads a file from disk on each fetch.
+    path: <string>            # e.g. ./examples/fixtures/x.json
+
+    # ---- websocket ----
+    # Opens a long-lived connection; each text frame is delivered as
+    # an Event to a bound logview. Headers apply on the initial HTTP
+    # upgrade request (good for `Authorization: Bearer …` auth).
+    # initial_messages are text frames sent immediately after the
+    # connection upgrades — required by protocols (bitstamp, coinbase,
+    # kraken, many custom buses) where the server doesn't emit until
+    # the client subscribes. ${selection.*} / ${env.*} substitute per
+    # entry; frames are sent in order.
+    url: <ws-or-wss-url>
+    headers: {<k>: <v>, ...}
+    initial_messages:
+      - <string>          # e.g. '{"event":"bts:subscribe","data":{"channel":"..."}}'
+
+    # ---- merge ----
+    # Fans out to N children concurrently, unions their results into a
+    # []any. Children can be any source type (including other merges).
+    sources:  [<name>, ...]   # references other top-level source names
+    tag_field: <string>       # optional — injects {<TagField>: <child-name>}
+                              # into every map-shaped item so downstream
+                              # bindings can identify which child a row
+                              # came from. Non-map items pass through.
+    on_error: fail | skip     # default fail. skip: drop failed children
+                              # and return the surviving union (only
+                              # errors when EVERY child fails).
+    # merge auto-detects whether its children are streaming. When ALL
+    # children implement Subscribe (e.g. websocket / exec follow),
+    # merge fans events from every child into one channel — events
+    # arrive as they happen, no polling. When any child can't stream,
+    # merge falls back to the polling Fetch path (existing behavior).
+    # The two modes share `tag_field` / `on_error` semantics.
 
 components:
   <name>:
@@ -225,6 +276,9 @@ components:
     source: <data-source-name>  # optional — populates the component dynamically;
                                 # static items/rows/fields are ignored when set
     item: <dot-path>            # list: where to pluck each display string (when source: is set)
+    color_rules:                # list / logview only — applies to every item/line.
+                                # (table → per Column, inspector → per InspectorField.)
+      - {when: <string>, color: <color>}
     colors:                     # optional — per-component color overrides, all fields optional.
                                 # Values accept:
                                 #   named colors (red, bright_green, gray, ...)
@@ -264,6 +318,16 @@ components:
     items: [string, ...]
 
     # table
+    max_rows: <int>            # streaming-table only: ring buffer size
+                               # (default 100). Each arriving JSON frame
+                               # prepends a row; oldest trimmed past this.
+                               # -1 = unbounded. Ignored when row_key is set.
+    row_key: <dot-path>        # streaming-table only: switches table to
+                               # KEYED UPSERT mode (L1 / status-grid pattern).
+                               # Each event identifies its row via this path;
+                               # matching keys update in place, new keys
+                               # append. Without row_key, streaming tables
+                               # work as a prepend+trim ring buffer.
     columns:
       - title: <string>
         width: <int>           # 0=auto, >0=fixed
@@ -273,6 +337,17 @@ components:
         sortable: <bool>
         sort: string | number | si
         value: <dot-path>      # when source: is set — pluck this cell from each item
+        color_rules:           # optional — data-driven cell coloring; rules eval in order,
+                               # first match wraps the cell with ansi.CellColor.
+                               # `when:` syntax:
+                               #   ""            wildcard (terminal default rule)
+                               #   "Running"     exact case-insensitive string match
+                               #   "~^Run"       case-insensitive regex
+                               #   ">5" / ">=2M" numeric comparison (K/M/B/G/T suffix ok);
+                               #                 operators: > >= < <= == !=
+                               # `color:` accepts the same values as colors.* above
+                               # (named, 0-255, hex, theme:token).
+          - {when: <string>, color: <color>}
     rows:
       - [<cell>, <cell>, ...]   # cell is string OR
                                 # {value: <string>, color: <name|0-255>} OR
@@ -295,6 +370,8 @@ components:
       - label: <string>
         value: <string>            # optional — empty for header rows; static
         path:  <dot-path>          # optional — when source: is set, overrides value
+        color_rules:               # optional — same syntax as Column.color_rules
+          - {when: <string>, color: <color>}
         children: [<InspectorField>, ...]
     initial_depth: <int>           # shared with tree
 
@@ -373,4 +450,12 @@ initial: <screen-name>         # required when `screens:` is set
 | `examples/http_refresh.yaml` | Live crypto prices via CoinGecko, `refresh: 10s`. Watch the `Updated` column flip every cycle; filter/sort/cursor survive each refresh. Press `r` to refetch on demand |
 | `examples/colors.yaml` | Per-component `colors:` overrides across list / table / inspector — different token per pane to show what each field affects |
 | `examples/kube.yaml` | Kubernetes namespaces → pods → pod inspector + tailing logview. Talks to `http://localhost:8001` (run `kubectl proxy --port=8001` first). Uses `format: text` + logview binding for the log tail |
+| `examples/exec_local.yaml` | `type: exec` — runs `git log` (via sh) and renders the last 20 commits in a table. Demonstrates how any JSON-emitting CLI becomes a tui-builder source |
+| `examples/file_fixture.yaml` | `type: file` — reads `examples/fixtures/people.json` with `refresh: 5s`; edit the file in another window and watch the table update |
+| `examples/merge_sources.yaml` | `type: merge` — composes a file + two exec sources into a single table with `tag_field: source`. Same primitive composes cross-cluster / cross-account / cross-anything |
+| `examples/stream_exec.yaml` | `type: exec` with `follow: true` — long-running subprocess; stdout lines stream into a logview as they arrive. Substitute `kubectl logs -f`, `tail -f`, etc. for the demo's tick loop |
+| `examples/stream_websocket.yaml` | `type: websocket` — connects on activate; each text frame appends to a logview. Headers handle auth on the upgrade request |
+| `examples/stream_trades_table.yaml` | Same websocket stream as above, but feeding a **live table** with `max_rows: 100`. Each JSON frame projects into a row via column `value:` paths and prepends to a ring buffer. Plus a side-by-side logview showing raw frames + connection state |
+| `examples/stream_l1.yaml` | **L1 ticker JOINED from two streams**: Binance.us bookTicker (fast bid/ask) + @ticker (slower last-price + 24h stats) merged by symbol via `row_key: data.s`. Deep-merge keeps both sources' fields alive on each row. Demonstrates streaming + merge + keyed upsert together |
+| `examples/kube_multi.yaml` | Multi-cluster: 3 kube clusters merged into one pods table via `type: merge`. Tagged + colored by cluster. Use `task kube:multi:up && task kube:multi:proxy:all && task kube:multi:demo` |
 | `examples/demo.yaml` | Kitchen-sink: list + table side-by-side |

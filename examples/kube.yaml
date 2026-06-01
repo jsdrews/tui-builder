@@ -67,6 +67,14 @@ components:
     colors:
       border_active: theme:accent
       selected:      theme:accent
+    # color_rules on a list apply per item. Regex (~) is the natural
+    # match for "names that start with kube-"; later exact matches
+    # promote our demo namespaces in the palette accent so they stand
+    # out against the system noise.
+    color_rules:
+      - {when: "~^kube-", color: gray}
+      - {when: default,   color: theme:accent}
+      - {when: demo,      color: green}
 
   pods_table:
     type: table
@@ -74,22 +82,60 @@ components:
     filterable: true
     source: pods
     initial_sort: {column: Name, desc: false}
-    # colors:
-    #   border_active:    theme:accent
-    #   header:           theme:accent
-    #   selected_fg:      theme:bar-fg
-    #   selected_bg:      theme:current
-    #   column_separator: theme:subtle
-    #   header_rule:      theme:accent
     columns:
-      - {title: Name,      width: 36, sortable: true,                value: "metadata.name"}
-      - {title: Namespace, width: 18, sortable: true,                value: "metadata.namespace"}
-      - {title: Status,    width: 12, sortable: true,                value: "status.phase"}
-      - {title: Ready,     width: 6,  align: right,                  value: "status.containerStatuses.0.ready"}
-      - {title: Restarts,  width: 8,  sortable: true, sort: number, align: right, value: "status.containerStatuses.0.restartCount"}
-      - {title: Node,      width: 24,                                 value: "spec.nodeName"}
-      - {title: Pod IP,    width: 16,                                 value: "status.podIP"}
-      - {title: Started,   width: 22, sortable: true,                value: "status.startTime"}
+      - {title: Name,      width: 36, sortable: true, value: "metadata.name"}
+      - {title: Namespace, width: 18, sortable: true, value: "metadata.namespace"}
+      # Data-driven cell colors: `color_rules` evaluate in order, first
+      # match wraps the cell with ansi.CellColor (selected-row bg
+      # passes through). `when:` accepts exact strings, "~regex",
+      # ">N" / ">=N" / "<N" / "<=N" / "==N" / "!=N" comparisons, or
+      # empty for a terminal default. `color:` takes the same forms as
+      # the per-component colors: block (named / 0-255 / hex / theme:*).
+      # `value:` accepts a single dot-path OR a fallback chain (list of
+      # paths, first non-empty wins). This is how kubectl computes its
+      # STATUS column: container waiting reason (CrashLoopBackOff,
+      # ImagePullBackOff, …) wins over terminated reason (Error,
+      # Completed) which wins over pod phase (Running, Pending, …).
+      # status.phase alone shows "Running" for crash-looping pods.
+      - title: Status
+        width: 18
+        sortable: true
+        value:
+          - "status.containerStatuses.0.state.waiting.reason"
+          - "status.containerStatuses.0.state.terminated.reason"
+          - "status.phase"
+        color_rules:
+          - {when: Running,           color: green}
+          - {when: Pending,           color: yellow}
+          - {when: Succeeded,         color: theme:accent}
+          - {when: Completed,         color: theme:accent}
+          - {when: Failed,            color: red}
+          - {when: Error,             color: red}
+          - {when: CrashLoopBackOff,  color: red}
+          - {when: ImagePullBackOff,  color: red}
+          - {when: ErrImagePull,      color: red}
+          - {when: ContainerCreating, color: yellow}
+          - {when: Unknown,           color: gray}
+      - title: Ready
+        width: 6
+        align: right
+        value: "status.containerStatuses.0.ready"
+        color_rules:
+          - {when: "true",  color: green}
+          - {when: "false", color: red}
+      - title: Restarts
+        width: 8
+        sortable: true
+        sort: number
+        align: right
+        value: "status.containerStatuses.0.restartCount"
+        color_rules:
+          - {when: "0",   color: gray}
+          - {when: ">5",  color: red}
+          - {when: ">0",  color: yellow}
+      - {title: Node,    width: 24, value: "spec.nodeName"}
+      - {title: Pod IP,  width: 16, value: "status.podIP"}
+      - {title: Started, width: 22, sortable: true, value: "status.startTime"}
 
   pod_inspector:
     type: inspector
@@ -106,8 +152,22 @@ components:
       - {label: name,       path: "metadata.name"}
       - {label: namespace,  path: "metadata.namespace"}
       - {label: nodeName,   path: "spec.nodeName"}
-      - {label: phase,      path: "status.phase"}
-      - {label: podIP,      path: "status.podIP"}
+      # ColorRules also apply per inspector field — value text wrapped
+      # with ansi.CellColor on match (same syntax as table color_rules).
+      - label: phase
+        path: "status.phase"
+        color_rules:
+          - {when: Running,   color: green}
+          - {when: Pending,   color: yellow}
+          - {when: Succeeded, color: theme:accent}
+          - {when: Failed,    color: red}
+      - label: podIP
+        path: "status.podIP"
+        # Empty-value detection: if the IP wasn't assigned yet, highlight
+        # in yellow so a starting-up pod stands out from a healthy one.
+        color_rules:
+          - {when: "",       color: yellow}
+          - {when: "~^",     color: theme:bar-fg}
       - {label: hostIP,     path: "status.hostIP"}
       - label: metadata
         children:
@@ -117,7 +177,12 @@ components:
       - label: spec
         children:
           - {label: serviceAccountName, path: "spec.serviceAccountName"}
-          - {label: restartPolicy,      path: "spec.restartPolicy"}
+          - label: restartPolicy
+            path: "spec.restartPolicy"
+            color_rules:
+              - {when: Always, color: green}
+              - {when: Never,  color: gray}
+              - {when: OnFailure, color: yellow}
           - label: container[0]
             children:
               - {label: name,            path: "spec.containers.0.name"}
@@ -125,20 +190,45 @@ components:
               - {label: imagePullPolicy, path: "spec.containers.0.imagePullPolicy"}
       - label: status
         children:
-          - {label: phase,     path: "status.phase"}
+          - label: phase
+            path: "status.phase"
+            color_rules:
+              - {when: Running,   color: green}
+              - {when: Pending,   color: yellow}
+              - {when: Succeeded, color: theme:accent}
+              - {when: Failed,    color: red}
           - {label: startTime, path: "status.startTime"}
           - label: containerStatus[0]
             children:
-              - {label: ready,        path: "status.containerStatuses.0.ready"}
-              - {label: restartCount, path: "status.containerStatuses.0.restartCount"}
-              - {label: image,        path: "status.containerStatuses.0.image"}
-              - {label: imageID,      path: "status.containerStatuses.0.imageID"}
+              - label: ready
+                path: "status.containerStatuses.0.ready"
+                color_rules:
+                  - {when: "true",  color: green}
+                  - {when: "false", color: red}
+              - label: restartCount
+                path: "status.containerStatuses.0.restartCount"
+                color_rules:
+                  - {when: "0",  color: gray}
+                  - {when: ">5", color: red}
+                  - {when: ">0", color: yellow}
+              - {label: image,   path: "status.containerStatuses.0.image"}
+              - {label: imageID, path: "status.containerStatuses.0.imageID"}
 
   pod_logs_view:
     type: logview
     title: ${selection.Name} — logs (tail 200, refresh 2s)
     searchable: true
     source: pod_logs
+    # color_rules on a logview match per line (whole-line wrap). Regex
+    # via the `~` prefix is the natural choice — log levels typically
+    # appear as a token somewhere in the line. First-match wins, so
+    # tighter patterns go first.
+    color_rules:
+      - {when: "~\\b(ERROR|FATAL|PANIC)\\b", color: red}
+      - {when: "~\\bWARN(ING)?\\b",          color: yellow}
+      - {when: "~\\bINFO\\b",                color: theme:accent}
+      - {when: "~\\b(DEBUG|TRACE)\\b",       color: gray}
+      - {when: server,                       color: green}
     colors:
       border_active:   theme:accent
       match:           theme:accent

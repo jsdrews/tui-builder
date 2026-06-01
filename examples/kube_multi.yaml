@@ -1,0 +1,133 @@
+# kube_multi.yaml — pods across 3 local kube clusters merged into one
+# searchable table.
+#
+# Prereq (one terminal each — see Taskfile.yml `kube:multi:*` tasks):
+#   kubectl --context kind-tb-prod    proxy --port=8001
+#   kubectl --context kind-tb-staging proxy --port=8002
+#   kubectl --context kind-tb-dev     proxy --port=8003
+#
+# Or run `task kube:multi:up` to create the 3 kind clusters + seed
+# workloads, then `task kube:multi:proxy:all` to background all three
+# kubectl proxies, then `task kube:multi:demo`.
+#
+# How it works:
+#   - Three http data sources, one per cluster, each hitting the
+#     proxy port for that cluster.
+#   - A `merge` source named `pods_all` fans out to all three children
+#     concurrently every 5s. Each pod dict gets `{cluster: <name>}`
+#     injected via `tag_field: cluster`, so a single table column
+#     surfaces which cluster a row came from.
+#   - `on_error: skip` keeps the table populated when one cluster is
+#     down (only errors when EVERY cluster is unreachable).
+#   - All the normal table features compose: filter (`/`), sort, color
+#     rules per column, etc.
+#
+# Add a cluster: drop a new http source + add its name to
+# pods_all.sources. Remove one: delete the source + remove from the
+# merge list. The same pattern scales across any number of clusters /
+# regions / accounts / environments.
+app:
+  title: Pods across clusters
+  theme: nord
+
+data_sources:
+  pods_prod:
+    type: http
+    url: http://localhost:8001/api/v1/pods
+    root: items
+    refresh: 5s
+    timeout: 10s
+
+  pods_staging:
+    type: http
+    url: http://localhost:8002/api/v1/pods
+    root: items
+    refresh: 5s
+    timeout: 10s
+
+  pods_dev:
+    type: http
+    url: http://localhost:8003/api/v1/pods
+    root: items
+    refresh: 5s
+    timeout: 10s
+
+  pods_all:
+    type: merge
+    sources: [pods_prod, pods_staging, pods_dev]
+    tag_field: cluster
+    on_error: skip
+    refresh: 5s
+
+components:
+  all_pods:
+    type: table
+    title: All pods (3 clusters merged)
+    filterable: true
+    source: pods_all
+    initial_sort: {column: Cluster, desc: false}
+    colors:
+      border_active:    theme:accent
+      header:           theme:accent
+      selected_fg:      theme:bar-fg
+      selected_bg:      theme:current
+      column_separator: theme:subtle
+      header_rule:      theme:accent
+    columns:
+      # The tag_field arrives as `cluster` on every row; the merge
+      # composer wrote it. Color it so each cluster pops visually.
+      - title: Cluster
+        width: 14
+        sortable: true
+        value: cluster
+        color_rules:
+          - {when: pods_prod,    color: red}
+          - {when: pods_staging, color: yellow}
+          - {when: pods_dev,     color: green}
+      - {title: Namespace, width: 18, sortable: true, value: "metadata.namespace"}
+      - {title: Name,      width: 38, sortable: true, value: "metadata.name"}
+      # kubectl-style STATUS fallback chain — container waiting reason
+      # beats terminated reason beats pod phase.
+      - title: Status
+        width: 18
+        sortable: true
+        value:
+          - "status.containerStatuses.0.state.waiting.reason"
+          - "status.containerStatuses.0.state.terminated.reason"
+          - "status.phase"
+        color_rules:
+          - {when: Running,           color: green}
+          - {when: Pending,           color: yellow}
+          - {when: Succeeded,         color: theme:accent}
+          - {when: Completed,         color: theme:accent}
+          - {when: Failed,            color: red}
+          - {when: Error,             color: red}
+          - {when: CrashLoopBackOff,  color: red}
+          - {when: ImagePullBackOff,  color: red}
+          - {when: ErrImagePull,      color: red}
+          - {when: ContainerCreating, color: yellow}
+          - {when: Unknown,           color: gray}
+      - title: Ready
+        width: 6
+        align: right
+        value: "status.containerStatuses.0.ready"
+        color_rules:
+          - {when: "true",  color: green}
+          - {when: "false", color: red}
+      - title: Restarts
+        width: 8
+        sortable: true
+        sort: number
+        align: right
+        value: "status.containerStatuses.0.restartCount"
+        color_rules:
+          - {when: "0",  color: gray}
+          - {when: ">5", color: red}
+          - {when: ">0", color: yellow}
+      - {title: Node,    width: 24, value: "spec.nodeName"}
+      - {title: Started, width: 22, sortable: true, value: "status.startTime"}
+
+screen:
+  title: All clusters
+  layout:
+    component: all_pods

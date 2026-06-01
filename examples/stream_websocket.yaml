@@ -1,0 +1,64 @@
+# stream_websocket.yaml — websocket source → logview, live BTC/USD trades.
+#
+# Many real-world WebSocket APIs (bitstamp, coinbase, kraken, custom
+# event buses) won't start emitting until the client sends a subscribe
+# message. `initial_messages:` is a list of text frames sent
+# immediately after the connection upgrades. ${selection.*} and
+# ${env.*} substitute per entry, so you can parameterize channel
+# names, auth tokens, etc.
+#
+# This example subscribes to bitstamp's live_trades_btcusd channel.
+#
+# What you'll see in the logview (in order — every line appears as it
+# happens; nothing blocks on the dial because Subscribe is async):
+#   1. "(connecting to wss://ws.bitstamp.net)"
+#      — emitted immediately on screen open; proves the TUI isn't frozen
+#   2. "(connected to wss://ws.bitstamp.net; sent 1 initial message(s))"
+#      — dial + subscribe write both succeeded; arrives ~1-3s after (1)
+#   3. {"event":"bts:subscription_succeeded",...}
+#      — bitstamp's confirmation of the subscribe
+#   4. {"data":{...},"event":"trade",...}
+#      — live trade frames, ongoing (several per second)
+#
+# If you see (1) but not (2), the dial is in flight or failed (a
+# subsequent error event will arrive on failure — check the statusbar).
+# If you see (1)+(2) but not (3), bitstamp accepted the subscribe but
+# isn't emitting — likely a geo / network issue from your machine.
+#
+# Authentication: `headers:` apply on the initial HTTP upgrade request,
+# so `Authorization: "Bearer ${env.TOKEN}"` etc. compose normally.
+app:
+  title: Streaming websocket demo (live BTC trades)
+  theme: nord
+
+data_sources:
+  trades:
+    type: websocket
+    url: wss://ws.bitstamp.net
+    timeout: 10s
+    initial_messages:
+      # bitstamp protocol: send a JSON subscribe frame to start the
+      # data flow. The server begins emitting trade events on the
+      # named channel immediately after.
+      - '{"event":"bts:subscribe","data":{"channel":"live_trades_btcusd"}}'
+
+components:
+  feed:
+    type: logview
+    title: Live BTC/USD trades
+    searchable: true
+    source: trades
+    color_rules:
+      # The synthetic "(connecting…)" / "(connected…)" diagnostic lines
+      # in a calm color so they don't visually compete with real data.
+      - {when: "~^\\(",                       color: theme:muted}
+      # Buy-side / sell-side coloring via regex on the JSON payload.
+      # bitstamp emits `"type":0` for buys and `"type":1` for sells.
+      - {when: '~"type":\s*0',                color: green}
+      - {when: '~"type":\s*1',                color: red}
+      - {when: "~bts:subscription_succeeded", color: theme:accent}
+
+screen:
+  title: Feed
+  layout:
+    component: feed

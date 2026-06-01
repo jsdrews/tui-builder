@@ -20,6 +20,7 @@ type httpSource struct {
 	headers map[string]string
 	body    string
 	format  string // "json" (default) or "text"
+	root    string // dot-path applied to parsed JSON before return
 	timeout time.Duration
 	refresh time.Duration
 }
@@ -51,6 +52,7 @@ func newHTTP(d *cfg.DataSource) (Source, error) {
 		headers: d.Headers,
 		body:    d.Body,
 		format:  d.Format,
+		root:    d.Root,
 		timeout: timeout,
 		refresh: refresh,
 	}, nil
@@ -99,5 +101,5 @@ func (s *httpSource) Fetch(ctx context.Context) (any, error) {
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, fmt.Errorf("parse json: %w", err)
 	}
-	return out, nil
+	return applyRoot(out, s.root), nil
 }

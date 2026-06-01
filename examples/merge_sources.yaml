@@ -1,0 +1,87 @@
+# merge_sources.yaml — fan out to N children, union the rows into one
+# table. Each row gets tagged with which child it came from so you can
+# filter / sort / group by source.
+#
+# This example merges three heterogeneous people sources — a local file
+# fixture, a synthesized "fresh" subprocess (echoes inline JSON), and a
+# tiny third group — into one searchable table. The same primitive
+# composes across clusters / accounts / regions / environments — give
+# `merge` the source names, set `tag_field`, point a table at the
+# composed source.
+#
+# `on_error: skip` keeps the data flowing when one child fails (only
+# errors when every child fails). Default is `on_error: fail`.
+app:
+  title: Merged people directory
+  theme: nord
+
+data_sources:
+  # Local file fixture (existing).
+  people_a:
+    type: file
+    path: ./examples/fixtures/people.json
+    root: people
+
+  # Subprocess that prints a small JSON array — stands in for a CLI
+  # like `aws … describe-… --output json` or a custom script.
+  people_b:
+    type: exec
+    command:
+      - sh
+      - -c
+      - |
+        cat <<'JSON'
+        [
+          {"name":"Vint Cerf",       "role":"Architect", "team":"Networking", "joined":"2019-10-01"},
+          {"name":"Tim Berners-Lee", "role":"Director",  "team":"Web",        "joined":"2018-05-12"},
+          {"name":"Radia Perlman",   "role":"Engineer",  "team":"Networking", "joined":"2020-07-09"}
+        ]
+        JSON
+
+  # Inline (via another exec) — could just as easily be another file
+  # source or an http source.
+  people_c:
+    type: exec
+    command:
+      - sh
+      - -c
+      - |
+        echo '[{"name":"Frances Allen","role":"Researcher","team":"Compilers","joined":"2017-02-14"}]'
+
+  # The composer. Children are fetched concurrently every refresh;
+  # results are unioned in cfg.Sources order. Each map-shaped item gets
+  # the originating child's name written into the `source` field so the
+  # downstream table can show + filter on it.
+  people_all:
+    type: merge
+    sources: [people_a, people_b, people_c]
+    tag_field: source
+    on_error: skip
+    refresh: 30s
+
+components:
+  all_people:
+    type: table
+    title: All people (merged)
+    filterable: true
+    source: people_all
+    initial_sort: {column: Joined, desc: true}
+    columns:
+      # The injected tag — column shows which child the row came from.
+      - title: Source
+        width: 12
+        sortable: true
+        value: source
+        color_rules:
+          - {when: people_a, color: theme:accent}
+          - {when: people_b, color: green}
+          - {when: people_c, color: yellow}
+      - {title: Name,   width: 22, sortable: true, value: name}
+      - {title: Role,   width: 14, sortable: true, value: role}
+      - {title: Team,   width: 16, sortable: true, value: team}
+      - {title: Joined, width: 12, sortable: true, value: joined}
+
+screen:
+  title: People (merged)
+  layout:
+    component: all_people

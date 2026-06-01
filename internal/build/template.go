@@ -140,10 +140,11 @@ func cloneInspectorFields(in []cfg.InspectorField, sel Selection) []cfg.Inspecto
 	out := make([]cfg.InspectorField, len(in))
 	for i, f := range in {
 		out[i] = cfg.InspectorField{
-			Label:    substitute(f.Label, sel),
-			Value:    substitute(f.Value, sel),
-			Path:     f.Path,
-			Children: cloneInspectorFields(f.Children, sel),
+			Label:      substitute(f.Label, sel),
+			Value:      substitute(f.Value, sel),
+			Path:       f.Path,
+			ColorRules: f.ColorRules,
+			Children:   cloneInspectorFields(f.Children, sel),
 		}
 	}
 	return out

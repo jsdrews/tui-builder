@@ -45,6 +45,12 @@ type Component struct {
 	Logview   *logview.Model
 	Tree      *tree.Model
 	Inspector *inspector.Model
+
+	// StreamRows is the ring buffer used by KTable components bound to
+	// a streaming source. Newest events first; trimmed to Cfg.MaxRows
+	// (defaulted to 100 for streaming bindings) on every append. nil
+	// for non-streaming tables and non-table kinds.
+	StreamRows []any
 }
 
 // NewComponent builds a Component from a config leaf and the active theme.
@@ -133,7 +139,10 @@ func buildList(c *cfg.Component, th theme.Theme) list.Model {
 	opts := th.List()
 	opts.Title = c.Title
 	if c.Source == "" {
-		opts.Items = append([]string(nil), c.Items...)
+		opts.Items = make([]string, len(c.Items))
+		for i, item := range c.Items {
+			opts.Items[i] = applyColorRules(item, c.ColorRules, th)
+		}
 	}
 	opts.Filterable = c.Filterable
 	if c.FilterPlaceholder != "" {
@@ -218,7 +227,16 @@ func buildTable(c *cfg.Component, th theme.Theme) table.Model {
 		for i, row := range c.Rows {
 			cells := make([]string, len(row))
 			for j, v := range row {
-				cells[j] = renderCell(v)
+				// Bare-string cells go through column color_rules so
+				// hand-authored static tables can use the same rule
+				// language as data-bound ones. Mapping cells
+				// ({value, color} or {label, url}) keep their explicit
+				// styling — they're already declaring intent per cell.
+				if s, ok := v.(string); ok && j < len(c.Columns) && len(c.Columns[j].ColorRules) > 0 {
+					cells[j] = applyColorRules(s, c.Columns[j].ColorRules, th)
+				} else {
+					cells[j] = renderCell(v)
+				}
 			}
 			opts.Rows[i] = table.Row(cells)
 		}
@@ -283,7 +301,14 @@ func buildLogview(c *cfg.Component, th theme.Theme) logview.Model {
 	}
 	m := logview.New(opts)
 	if len(c.Lines) > 0 {
-		m.AppendLines(c.Lines)
+		lines := c.Lines
+		if len(c.ColorRules) > 0 {
+			lines = make([]string, len(c.Lines))
+			for i, ln := range c.Lines {
+				lines[i] = applyColorRules(ln, c.ColorRules, th)
+			}
+		}
+		m.AppendLines(lines)
 	}
 	if c.InitialQuery != "" {
 		m.SetQuery(c.InitialQuery)
@@ -345,7 +370,7 @@ func buildTree(c *cfg.Component, th theme.Theme) tree.Model {
 
 // ----------------------------------------------------- inspector ---
 
-func convertFields(in []cfg.InspectorField) []inspector.Field {
+func convertFields(in []cfg.InspectorField, th theme.Theme) []inspector.Field {
 	if len(in) == 0 {
 		return nil
 	}
@@ -353,8 +378,8 @@ func convertFields(in []cfg.InspectorField) []inspector.Field {
 	for i, f := range in {
 		out[i] = inspector.Field{
 			Label:    f.Label,
-			Value:    f.Value,
-			Children: convertFields(f.Children),
+			Value:    applyColorRules(f.Value, f.ColorRules, th),
+			Children: convertFields(f.Children, th),
 		}
 	}
 	return out
@@ -366,7 +391,7 @@ func buildInspector(c *cfg.Component, th theme.Theme) inspector.Model {
 	opts.Filterable = c.Filterable
 	opts.InitialDepth = c.InitialDepth
 	if c.Source == "" {
-		opts.Fields = convertFields(c.Fields)
+		opts.Fields = convertFields(c.Fields, th)
 	}
 	if c.FilterPlaceholder != "" {
 		opts.Filter.Placeholder = c.FilterPlaceholder

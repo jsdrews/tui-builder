@@ -111,3 +111,126 @@ tasks:
         msg: kind not installed
     cmds:
       - kind delete cluster --name tui-builder
+
+  # ---- Multi-cluster kube demo --------------------------------------------
+  # Three kind clusters (tb-prod / tb-staging / tb-dev) seeded with
+  # different workloads, joined into one TUI table via a `merge` source.
+  #
+  # Workflow (each `proxy:*` task is foreground — run in its own terminal):
+  #   terminal 1:  task kube:multi:up
+  #   terminal 1:  task kube:multi:proxy:prod      # leave running
+  #   terminal 2:  task kube:multi:proxy:staging   # leave running
+  #   terminal 3:  task kube:multi:proxy:dev       # leave running
+  #   terminal 4:  task kube:multi:check           # verify the 3 are reachable
+  #   terminal 4:  task kube:multi:demo            # opens the TUI
+  #   When done:  ctrl+c each proxy terminal, then `task kube:multi:down`
+
+  kube:multi:up:
+    desc: Create 3 local kind clusters (tb-prod / tb-staging / tb-dev) + seed workloads
+    preconditions:
+      - sh: command -v kind >/dev/null
+        msg: kind not installed — run `brew install kind`
+      - sh: command -v kubectl >/dev/null
+        msg: kubectl not installed — run `brew install kubectl`
+    cmds:
+      # Create clusters idempotently.
+      - cmd: |
+          for c in tb-prod tb-staging tb-dev; do
+            if kind get clusters 2>/dev/null | grep -q "^$c$"; then
+              echo "kind cluster `$c` already exists — skipping create"
+            else
+              kind create cluster --name "$c"
+            fi
+          done
+        silent: true
+      # Seed differing workloads per cluster so the merged table is interesting.
+      # prod: stable services
+      - kubectl --context kind-tb-prod create deployment api      --image=nginx --replicas=4 || true
+      - kubectl --context kind-tb-prod create deployment web      --image=nginx --replicas=3 || true
+      - kubectl --context kind-tb-prod create deployment redis    --image=redis --replicas=1 || true
+      # staging: similar but smaller
+      - kubectl --context kind-tb-staging create deployment api   --image=nginx --replicas=2 || true
+      - kubectl --context kind-tb-staging create deployment web   --image=nginx --replicas=2 || true
+      - kubectl --context kind-tb-staging create deployment cache --image=redis --replicas=1 || true
+      # dev: noisy + a deliberate crash-looper to exercise color rules
+      - kubectl --context kind-tb-dev create deployment scratch   --image=busybox --replicas=1 -- sleep infinity || true
+      - kubectl --context kind-tb-dev create deployment broken    --image=busybox -- /bin/sh -c "exit 1" || true
+      - echo
+      - echo "Ready. Run each proxy in its own terminal:"
+      - "echo \"  task kube:multi:proxy:prod      # terminal 1\""
+      - "echo \"  task kube:multi:proxy:staging   # terminal 2\""
+      - "echo \"  task kube:multi:proxy:dev       # terminal 3\""
+      - "echo \"  task kube:multi:demo            # main TUI\""
+
+  kube:multi:proxy:prod:
+    desc: Run kubectl proxy for tb-prod on :8001 (foreground — leave running)
+    cmds:
+      - kubectl --context kind-tb-prod proxy --port=8001
+
+  kube:multi:proxy:staging:
+    desc: Run kubectl proxy for tb-staging on :8002 (foreground — leave running)
+    cmds:
+      - kubectl --context kind-tb-staging proxy --port=8002
+
+  kube:multi:proxy:dev:
+    desc: Run kubectl proxy for tb-dev on :8003 (foreground — leave running)
+    cmds:
+      - kubectl --context kind-tb-dev proxy --port=8003
+
+  kube:multi:proxy:status:
+    desc: Show whether each proxy port is currently bound (regardless of who's listening)
+    cmds:
+      - cmd: |
+          for entry in "tb-prod 8001" "tb-staging 8002" "tb-dev 8003"; do
+            set -- $entry
+            ctx="$1"; port="$2"
+            pid="$(lsof -t -iTCP:${port} -sTCP:LISTEN 2>/dev/null | head -1)"
+            if [ -n "$pid" ]; then
+              printf "%-12s :%s  pid %s (%s)\n" "$ctx" "$port" "$pid" \
+                "$(ps -p "$pid" -o comm= 2>/dev/null | xargs -I{} basename {})"
+            else
+              printf "%-12s :%s  not running\n" "$ctx" "$port"
+            fi
+          done
+        silent: true
+
+  kube:multi:check:
+    desc: Diagnose the multi-cluster setup — clusters present? proxies up? returning pods?
+    cmds:
+      - cmd: |
+          echo "==== kind clusters ===="
+          kind get clusters 2>/dev/null | grep -E '^(tb-prod|tb-staging|tb-dev)$' || echo "(none found — run task kube:multi:up)"
+          echo
+          for entry in "tb-prod 8001" "tb-staging 8002" "tb-dev 8003"; do
+            set -- $entry
+            ctx="$1"; port="$2"
+            echo "==== $ctx (port $port) ===="
+            pid="$(lsof -t -iTCP:${port} -sTCP:LISTEN 2>/dev/null | head -1)"
+            if [ -z "$pid" ]; then
+              echo "proxy:    NOT RUNNING (run task kube:multi:proxy:$ctx in another terminal)"
+              continue
+            fi
+            echo "proxy:    pid $pid bound to :$port"
+            if ! curl -sf "http://localhost:${port}/api/v1/pods" >/dev/null; then
+              echo "endpoint: /api/v1/pods FAILED"
+              continue
+            fi
+            count="$(curl -s "http://localhost:${port}/api/v1/pods" | grep -o '"name"' | wc -l | tr -d ' ')"
+            echo "endpoint: /api/v1/pods OK ($count pod metadata.name occurrences)"
+          done
+        silent: true
+
+  kube:multi:demo:
+    desc: Run the multi-cluster pods example (requires kube:multi:up + 3× proxy:* running)
+    cmds:
+      - go run ./cmd/tui-builder examples/kube_multi.yaml
+
+  kube:multi:down:
+    desc: Delete all 3 multi-cluster kind clusters
+    preconditions:
+      - sh: command -v kind >/dev/null
+        msg: kind not installed
+    cmds:
+      - kind delete cluster --name tb-prod    || true
+      - kind delete cluster --name tb-staging || true
+      - kind delete cluster --name tb-dev     || true

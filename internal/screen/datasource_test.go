@@ -38,9 +38,9 @@ func TestDataSourceFetchApply(t *testing.T) {
 				Title:  "Places",
 				Source: "places",
 				Columns: []cfg.Column{
-					{Title: "Name",       Width: 14, Value: "name.common"},
-					{Title: "Region",     Width: 12, Value: "region"},
-					{Title: "Population", Width: 12, Value: "population", Sort: "number", Align: "right", Sortable: true},
+					{Title: "Name",       Width: 14, Value: cfg.Path{"name.common"}},
+					{Title: "Region",     Width: 12, Value: cfg.Path{"region"}},
+					{Title: "Population", Width: 12, Value: cfg.Path{"population"}, Sort: "number", Align: "right", Sortable: true},
 				},
 			},
 		},

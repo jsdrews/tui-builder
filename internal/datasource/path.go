@@ -41,6 +41,20 @@ func Get(v any, path string) any {
 	return cur
 }
 
+// FirstString tries each path in order against v and returns the first
+// non-empty rendered string. Empty when every path resolves to "" /
+// nil. Used by table column / inspector field bindings that accept a
+// fallback chain — `kubectl`-style computed fields where the
+// authoritative value lives under different keys depending on state.
+func FirstString(v any, paths []string) string {
+	for _, p := range paths {
+		if s := String(v, p); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
 // String resolves a path and renders the result as a display string.
 // Strings pass through, numbers / booleans format predictably, nested
 // values fall back to fmt.Sprint.
@@ -93,6 +107,17 @@ func splitPath(p string) []string {
 	}
 	flush()
 	return out
+}
+
+// applyRoot slices v by the dot-path root, returning v unchanged when
+// root is empty. Sources call this at the end of Fetch so the value
+// they hand back is already "useful" — bindings (and merge composers)
+// can consume it without a second slicing step.
+func applyRoot(v any, root string) any {
+	if root == "" {
+		return v
+	}
+	return Get(v, root)
 }
 
 // Iter returns v as a slice when v is a JSON array, or wraps a single
