@@ -30,12 +30,26 @@ data_sources:
     refresh: 5m
     timeout: 15s
 
+# Pipelines are the data layer's first-class addressable unit. A passthrough
+# pipeline like `all_countries` just wraps the underlying source — useful
+# as the "named entry point" for both the TUI binding below AND the wrangl
+# CLI. Try:
+#
+#   wrangl examples/http_countries.yaml --list
+#   wrangl examples/http_countries.yaml all_countries | jq '.[0].name.common'
+#
+# Operators (filter, project, sort, derive) layer on top of this in later
+# phases without changing the binding contract.
+pipelines:
+  all_countries:
+    from: countries
+
 components:
   countries:
     type: table
     title: Countries
     filterable: true
-    source: countries
+    pipeline: all_countries
     columns:
       - {title: Code,       width: 6,  sortable: true, value: cca2}
       - {title: Name,       width: 26, sortable: true, value: name.common}

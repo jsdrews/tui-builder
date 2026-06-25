@@ -203,6 +203,19 @@ app:
   version: <string>           # statusbar right
   theme: <name>               # one of theme.All() names
   help_verbose: <bool>        # true = legacy inline footer, false (default) = minimal "? help"
+  prompts:                    # optional — boot-time params collected via a form modal
+                              # BEFORE the main screen renders. Each value is set as
+                              # an env var keyed by `key`, so ${env.<KEY>} works
+                              # downstream. Pre-fills from any existing env var of
+                              # the same name. Cancel (esc) aborts the program.
+    - key:   <string>         # env var name + token key
+      label: <string>         # field label shown in the form
+      type:  text | select | confirm   # default text
+      placeholder:   <string> # text only
+      initial:       <string> # text default (overridden by current env if set)
+      options:       [<string>, ...]   # select choices
+      initial_index: <int>    # select default index
+      initial_bool:  <bool>   # confirm default
 
 data_sources:                 # optional — components bind to these via `source:`
   <name>:
@@ -393,7 +406,7 @@ screens:
         label:       <string>  # shown in the help strip
         source:      <component>  # which list/table's selection feeds ${selection.*}
         confirm:     <string>  # optional yes/no modal message before dispatch
-                               # (${selection.*}/${env.*} substituted in here too)
+                               # (${selection.*}/${env.*}/${prompt.*} substituted)
         notice:      <string>  # optional banner during slow handoffs (interactive only)
         interactive: <bool>    # default true (uses pkg/runner — TTY handoff, brief
                                # flicker, right for vim/ssh/kubectl exec).
@@ -401,7 +414,14 @@ screens:
                                # stdout/stderr, never suspends — right for one-shot
                                # commands (delete/scale/open). Errors surface in
                                # the alert; success goes to the statusbar.
-        run:         [<argv...>] # ${selection.*} + ${env.*} substituted at fire time
+        prompts:               # optional — collect input via a form modal BEFORE
+                               # dispatch. Values feed ${prompt.<key>} into run argv
+                               # AND confirm message AND notice. Same field shapes
+                               # as app.prompts (text / select / confirm). Cancel
+                               # from the form aborts the action.
+          - {key: <string>, label: <string>, type: text|select|confirm, ...}
+        run:         [<argv...>] # ${selection.*} + ${env.*} + ${prompt.*} substituted
+                               # at fire time (after any prompts have been collected)
 initial: <screen-name>         # required when `screens:` is set
 
 # Template tokens (substituted in titles, URLs, headers, body, items,
@@ -412,11 +432,16 @@ initial: <screen-name>         # required when `screens:` is set
 #   ${selection.N}          — table source: 1-based cell index
 #   ${selection.COLNAME}    — table source: cell by column-title prefix
 #   ${env.NAME}             — os.Getenv("NAME") (empty when unset).
-#                             Use for tokens / API keys so they stay out of
-#                             YAML, e.g. "Bearer ${env.GITHUB_TOKEN}".
+#                             Use for tokens / API keys / boot-time params
+#                             (app.prompts values are written to env, so
+#                             they share this namespace).
+#   ${prompt.KEY}           — value collected from an action's `prompts:`
+#                             form. Substituted at action-fire time, after
+#                             the form submits.
 #
-# Selection tokens substitute at push time; env tokens also substitute at
-# push time (env vars are usually stable for the run).
+# Selection tokens substitute at push time; env tokens substitute at push
+# time too (boot params already in env by that point); prompt tokens
+# substitute at action-fire time.
 
 # Node is one of:
 #   {vstack: [<Item>, ...]}
@@ -457,5 +482,7 @@ initial: <screen-name>         # required when `screens:` is set
 | `examples/stream_websocket.yaml` | `type: websocket` — connects on activate; each text frame appends to a logview. Headers handle auth on the upgrade request |
 | `examples/stream_trades_table.yaml` | Same websocket stream as above, but feeding a **live table** with `max_rows: 100`. Each JSON frame projects into a row via column `value:` paths and prepends to a ring buffer. Plus a side-by-side logview showing raw frames + connection state |
 | `examples/stream_l1.yaml` | **L1 ticker JOINED from two streams**: Binance.us bookTicker (fast bid/ask) + @ticker (slower last-price + 24h stats) merged by symbol via `row_key: data.s`. Deep-merge keeps both sources' fields alive on each row. Demonstrates streaming + merge + keyed upsert together |
+| `examples/prompts_boot.yaml` | **Boot-time params via `app.prompts`**: form modal collects GitHub username + sort field + an archived-repos toggle before the main screen renders. Values become env vars and feed `${env.USER}` into the URL, the title, and a column |
+| `examples/action_prompts.yaml` | **Action prompts**: keys fire a form modal that collects values before the action's subprocess dispatches. `${prompt.<key>}` substitutes into run argv + confirm message + notice |
 | `examples/kube_multi.yaml` | Multi-cluster: 3 kube clusters merged into one pods table via `type: merge`. Tagged + colored by cluster. Use `task kube:multi:up && task kube:multi:proxy:all && task kube:multi:demo` |
 | `examples/demo.yaml` | Kitchen-sink: list + table side-by-side |

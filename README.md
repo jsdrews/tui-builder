@@ -9,6 +9,20 @@ Built on top of [tuilib](https://github.com/jsdrews/tuilib): the
 component library does the rendering and theming; tui-builder turns
 declarative config into a live composition.
 
+**Two binaries, one config.** Data wrangling is a first-class concern,
+not a TUI implementation detail:
+
+- **`wrangl`** — runs the data layer only and dumps JSON / NDJSON to
+  stdout. Pipe it into `jq`, `duckdb`, `miller`, a notebook, or another
+  pipeline. Zero terminal-UI dependencies.
+- **`tui-builder`** — uses the same data layer, then renders it
+  through tuilib components. The TUI is one sink, not the product.
+
+A `pipelines:` block in the YAML declares named, addressable pipelines
+over your sources. Today they're passthroughs (a stable name you can
+bind components to and ask `wrangl` to dump). Operators (`filter`,
+`project`, `union`, `join`) layer on top in later phases.
+
 ```
 ┌ All pods (3 clusters merged) ────────────────────────────────────┐
 │ Cluster      │ Namespace │ Name                    │ Status      │
@@ -42,7 +56,7 @@ declarative config into a live composition.
 ```sh
 git clone git@github.com:jsdrews/tui-builder.git
 cd tui-builder
-task build            # → bin/tui-builder, bin/example-launcher
+task build            # → bin/tui-builder, bin/example-launcher, bin/wrangl
 
 # Browse every example in a launcher TUI:
 task examples
@@ -51,9 +65,38 @@ task examples
 task example NAME=table
 task example NAME=http_countries        # live REST API
 task example NAME=merge_sources         # local merge of file + 2 exec sources
+
+# Or skip the TUI entirely and pipe data:
+go run ./cmd/wrangl --list examples/http_countries.yaml
+go run ./cmd/wrangl examples/http_countries.yaml all_countries | jq '.[0].name.common'
 ```
 
 `task --list` shows the full menu.
+
+## Two ways to consume a config
+
+Once you've written a YAML config with `data_sources:` + `pipelines:`,
+you can either render it as a TUI or just dump the data:
+
+```sh
+# Render the TUI:
+bin/tui-builder examples/http_countries.yaml
+
+# Or dump every defined source / pipeline:
+bin/wrangl --list examples/http_countries.yaml
+# NAME            KIND                     LIFECYCLE              UPSTREAM
+# all_countries   pipeline / passthrough   polled (refresh: 5m)   countries
+# countries       source / http            polled (refresh: 5m)
+
+# Or pipe one pipeline's output downstream:
+bin/wrangl examples/http_countries.yaml all_countries | jq '.[0]'
+bin/wrangl --limit 50 examples/stream_l1.yaml l1 | jq '.data.s'
+```
+
+`wrangl` is the same data layer the TUI uses — the architecture
+guarantees there's no second pipeline implementation drifting out of
+sync. A CI check enforces that `cmd/wrangl` and the data-layer packages
+never import any TUI code.
 
 ## A first config
 
@@ -277,6 +320,8 @@ via `task examples`.
 | `examples/stream_websocket.yaml` | `websocket` source → logview |
 | `examples/stream_trades_table.yaml` | `websocket` source → live table (`max_rows: 100` ring buffer of bitstamp BTC/USD trades) |
 | `examples/stream_l1.yaml` | L1 ticker JOINED from two Binance.us streams (`bookTicker` for fast bid/ask + `@ticker` for last price + 24h stats), merged by symbol via `row_key: data.s`. Deep-merge composes both sources' fields onto each row |
+| `examples/prompts_boot.yaml` | Boot-time form modal collects params (`app.prompts`) before the main screen renders; values become env vars, feed into the source URL via `${env.USER}` |
+| `examples/action_prompts.yaml` | Per-action form modal collects input (`action.prompts`); `${prompt.<key>}` substitutes into run argv + confirm message at fire time |
 | `examples/kube.yaml` | Single-cluster kube: namespaces → pods → pod detail + logs |
 | `examples/kube_multi.yaml` | Multi-cluster kube: 3 clusters merged into one table |
 
@@ -328,19 +373,31 @@ endpoint and counts the pods.
 
 ```
 cmd/
-  tui-builder/        # CLI: tui-builder <config.yaml>
+  tui-builder/        # CLI: tui-builder <config.yaml>      (TUI sink)
+  wrangl/             # CLI: wrangl [flags] <config.yaml>    (data sink: JSON / NDJSON)
   example-launcher/   # TUI for browsing every example
 internal/
-  config/             # YAML schema (one Go struct per shape) + validator
-  build/              # cfg → live tuilib components + binding layer
+  config/             # YAML schema (one Go struct per shape) + validator + DAG check
   datasource/         # Source interface + http / exec / file / websocket / merge
-  screen/             # screen.Screen impl: focus, push/pop, modals, lifecycle
+  pipeline/           # named pipelines over sources (passthrough today; operators TBD)
+  output/             # JSON / NDJSON stdout sink used by wrangl
+  build/              # cfg → live tuilib components + binding layer       [TUI side]
+  screen/             # screen.Screen impl: focus, push/pop, modals, lifecycle [TUI side]
 examples/             # one YAML per feature, plus the kube demos
+scripts/
+  check-data-layer-boundary.sh   # enforces no-TUI-imports in the data layer
 docs/
   components.md       # full schema cheat sheet + per-component reference
 AGENTS.md             # rules for AI agents working in this repo
 Taskfile.yml          # go-task entry points (`task --list`)
 ```
+
+The horizontal split — `config / datasource / pipeline / output / cmd/wrangl`
+above; `build / screen / cmd/tui-builder` below — is enforced by a CI
+check (`scripts/check-data-layer-boundary.sh`). The data layer must
+stay buildable, testable, and runnable without dragging in Bubble Tea
+or tuilib. If you ever need a TUI helper from the data layer, that's a
+sign the boundary is wrong, not that you need an exception.
 
 ## Where to go next
 

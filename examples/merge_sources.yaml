@@ -50,8 +50,10 @@ data_sources:
 
   # The composer. Children are fetched concurrently every refresh;
   # results are unioned in cfg.Sources order. Each map-shaped item gets
-  # the originating child's name written into the `source` field so the
-  # downstream table can show + filter on it.
+  # the originating child's name written under the default `_meta` key
+  # (so framework metadata stays segregated from the upstream people
+  # fields). Downstream column / inspector paths reach it via
+  # `_meta.source`. Set `meta_key: ""` to opt out and write flat.
   people_all:
     type: merge
     sources: [people_a, people_b, people_c]
@@ -68,10 +70,12 @@ components:
     initial_sort: {column: Joined, desc: true}
     columns:
       # The injected tag — column shows which child the row came from.
+      # Lives under `_meta` (the default segregation key), so the path
+      # is `_meta.source`, not bare `source`.
       - title: Source
         width: 12
         sortable: true
-        value: source
+        value: _meta.source
         color_rules:
           - {when: people_a, color: theme:accent}
           - {when: people_b, color: green}

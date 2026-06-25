@@ -108,8 +108,16 @@ func Build(defs map[string]*cfg.DataSource) (map[string]Source, error) {
 		)
 		switch def.Type {
 		case "merge":
-			children := make(map[string]Source, len(def.Sources))
-			for _, child := range def.Sources {
+			// Resolve children from BOTH legal shapes — the shorthand
+			// (Sources + TagField) and the explicit per-child form
+			// (Children with tags). The validator already ensures
+			// exactly one is set.
+			childRefs := def.Sources
+			for _, ch := range def.Children {
+				childRefs = append(childRefs, ch.Source)
+			}
+			children := make(map[string]Source, len(childRefs))
+			for _, child := range childRefs {
 				cs, cerr := build(child)
 				if cerr != nil {
 					return nil, fmt.Errorf("%s: %w", name, cerr)

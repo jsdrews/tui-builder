@@ -19,8 +19,6 @@ import (
 
 	"github.com/jsdrews/tuilib/pkg/app"
 	"github.com/jsdrews/tuilib/pkg/theme"
-
-	tqscreen "github.com/jsdrews/tui-builder/internal/screen"
 )
 
 func main() {
@@ -48,7 +46,7 @@ func run() error {
 	themes := theme.All()
 	initial := themes[0]
 
-	root := tqscreen.NewLauncher(paths, initial)
+	root := NewLauncher(paths, initial)
 
 	prog := tea.NewProgram(
 		app.New(app.Options{

@@ -25,15 +25,26 @@ type Selection struct {
 	Columns []string
 }
 
-// SubstituteAll runs ${selection.*}/${env.*} substitution on every entry
-// in argv and returns a new slice. Used by action dispatch: the run argv
-// references the focused row's selection at fire time (not push time).
-func SubstituteAll(argv []string, sel Selection) []string {
+// SubstituteAll runs ${selection.*}/${env.*}/${prompt.*} substitution
+// on every entry in argv and returns a new slice. Used by action
+// dispatch — the run argv references the focused row's selection AND
+// any prompt values entered moments before dispatch. Pass nil for
+// prompts when there were none.
+func SubstituteAll(argv []string, sel Selection, prompts map[string]string) []string {
 	out := make([]string, len(argv))
 	for i, s := range argv {
-		out[i] = substitute(s, sel)
+		out[i] = substituteAll(s, sel, prompts)
 	}
 	return out
+}
+
+// Substitute resolves ${selection.*} and ${env.*} tokens in s against
+// the given Selection. Used by push-site `bind:` resolution to turn a
+// template like `${selection.Namespace}` into the focused row's actual
+// namespace value before that value is passed into a destination
+// source's parameter binder.
+func Substitute(s string, sel Selection) string {
+	return substituteAll(s, sel, nil)
 }
 
 // SubstituteScreen returns deep-copied Screen + Components + DataSources
@@ -41,18 +52,112 @@ func SubstituteAll(argv []string, sel Selection) []string {
 // left untouched, so each push can re-substitute against a fresh
 // selection. DataSources go through the same substitution so a child's
 // URL / headers / body can reference the parent row.
-func SubstituteScreen(s *cfg.Screen, components map[string]*cfg.Component, dataSources map[string]*cfg.DataSource, sel Selection) (*cfg.Screen, map[string]*cfg.Component, map[string]*cfg.DataSource) {
+//
+// When params is non-nil, every cloned data source that declares
+// `parameters:` ALSO has BindParams called against the subset of
+// params it actually declares. This is how the explicit push-site
+// bind: block feeds into the destination screen's parameterized
+// sources. Missing required params surface as an error so the caller
+// (tryPush) can pop an alert instead of building a broken screen.
+//
+// Pass nil for params to skip parameter binding (single-screen New
+// and initial multi-screen construction — no push site context).
+// Parameterized sources in that path will be left with unresolved
+// ${params.*} templates and will fail at fetch with a clear URL.
+func SubstituteScreen(s *cfg.Screen, components map[string]*cfg.Component, dataSources map[string]*cfg.DataSource, sel Selection, params map[string]string) (*cfg.Screen, map[string]*cfg.Component, map[string]*cfg.DataSource, error) {
 	out := *s
 	out.Title = substitute(s.Title, sel)
 	comps := map[string]*cfg.Component{}
 	for name, c := range components {
 		comps[name] = cloneComponent(c, sel)
 	}
+	// Determine which sources THIS screen actually references via its
+	// layout's components. The Multi config keeps ALL screens' sources
+	// in a single map (so child screens can resolve them after a
+	// push); applying param-binding indiscriminately would try to
+	// satisfy required params on OTHER screens' sources and fail —
+	// e.g. pushing to "pods" with bind {namespace: ...} would error on
+	// `pod_detail` needing a `name` it can't see.
+	used := usedSources(&s.Layout, components)
 	sources := map[string]*cfg.DataSource{}
 	for name, d := range dataSources {
-		sources[name] = cloneDataSource(d, sel)
+		cloned := cloneDataSource(d, sel)
+		if used[name] {
+			if err := applyBindParams(cloned, params); err != nil {
+				return nil, nil, nil, fmt.Errorf("data_sources.%s: %w", name, err)
+			}
+		}
+		sources[name] = cloned
 	}
-	return &out, comps, sources
+	return &out, comps, sources, nil
+}
+
+// usedSources walks a screen's layout tree and returns the set of
+// data-source names referenced by any component on the screen — both
+// direct `source:` bindings and via pipelines (`pipeline:` chains
+// resolved through their `from:` upstreams).
+//
+// Pipeline chains terminate at the first defined data source name
+// they reference; if the chain is malformed the validator has already
+// rejected the config, so we don't need to defend against that here.
+func usedSources(n *cfg.Node, components map[string]*cfg.Component) map[string]bool {
+	used := map[string]bool{}
+	walkUsed(n, components, used)
+	return used
+}
+
+func walkUsed(n *cfg.Node, components map[string]*cfg.Component, used map[string]bool) {
+	if n == nil {
+		return
+	}
+	if n.Component != "" {
+		if c, ok := components[n.Component]; ok && c != nil {
+			if c.Source != "" {
+				used[c.Source] = true
+			}
+			// Pipeline binding: the destination source the pipeline
+			// (eventually) resolves to is what carries the parameter
+			// schema. We don't walk pipeline chains here; callers
+			// that need that resolution can do it elsewhere. For now
+			// just record the pipeline name so its underlying source
+			// can be reached via the pipeline registry at fetch.
+			if c.Pipeline != "" {
+				used[c.Pipeline] = true
+			}
+		}
+	}
+	for _, it := range n.VStack {
+		walkUsed(&it.Node, components, used)
+	}
+	for _, it := range n.HStack {
+		walkUsed(&it.Node, components, used)
+	}
+	if n.ZStack != nil {
+		walkUsed(&n.ZStack.Base, components, used)
+		walkUsed(&n.ZStack.Overlay, components, used)
+	}
+}
+
+// applyBindParams resolves the destination source's parameters from
+// the screen-wide params map. We filter the screen-wide map down to
+// the source's declared params before calling BindParams so unrelated
+// keys don't trigger BindParams's "extra params" rejection.
+func applyBindParams(d *cfg.DataSource, params map[string]string) error {
+	if d == nil || len(d.Parameters) == 0 {
+		return nil
+	}
+	if params == nil {
+		// No push context — leave templates as-is. Fetch will fail
+		// with the unresolved URL visible in the error.
+		return nil
+	}
+	subset := make(map[string]string, len(d.Parameters))
+	for name := range d.Parameters {
+		if v, ok := params[name]; ok {
+			subset[name] = v
+		}
+	}
+	return d.BindParams(subset)
 }
 
 func cloneDataSource(d *cfg.DataSource, sel Selection) *cfg.DataSource {
@@ -170,32 +275,43 @@ func substituteCell(v any, sel Selection) any {
 	return v
 }
 
-// tokenRe matches two token families:
+// tokenRe matches three token families:
 //
 //	${selection}            — parent row's primary string
 //	${selection.SUFFIX}     — table cell by 1-based index or column-title prefix
 //	${env.NAME}             — os.Getenv("NAME") (empty when unset)
+//	${prompt.KEY}           — value collected from a form prompt at action-fire time
 //
-// The first capture group is the namespace ("selection" or "env"); the
-// second is the optional suffix.
-var tokenRe = regexp.MustCompile(`\$\{(selection|env)(?:\.([A-Za-z0-9_]+))?\}`)
+// The first capture group is the namespace; the second is the optional suffix.
+var tokenRe = regexp.MustCompile(`\$\{(selection|env|prompt)(?:\.([A-Za-z0-9_]+))?\}`)
 
 func substitute(s string, sel Selection) string {
+	return substituteAll(s, sel, nil)
+}
+
+// substituteAll is the general form — sel for ${selection.*}, prompts
+// for ${prompt.*}. Either map can be nil.
+func substituteAll(s string, sel Selection, prompts map[string]string) string {
 	if s == "" || !strings.Contains(s, "${") {
 		return s
 	}
 	return tokenRe.ReplaceAllStringFunc(s, func(match string) string {
 		groups := tokenRe.FindStringSubmatch(match)
-		return resolveToken(groups[1], groups[2], sel)
+		return resolveToken(groups[1], groups[2], sel, prompts)
 	})
 }
 
-func resolveToken(namespace, key string, sel Selection) string {
+func resolveToken(namespace, key string, sel Selection, prompts map[string]string) string {
 	switch namespace {
 	case "selection":
 		return resolveSelection(key, sel)
 	case "env":
 		return os.Getenv(key)
+	case "prompt":
+		if key == "" {
+			return ""
+		}
+		return prompts[key]
 	}
 	return ""
 }
@@ -212,10 +328,17 @@ func resolveSelection(key string, sel Selection) string {
 		}
 		return ""
 	}
-	// Name: case-insensitive prefix match against column titles.
-	lk := strings.ToLower(key)
+	// Exact (case-insensitive) match against column titles. Misses
+	// pass through as the literal ${selection.X} so the unresolved
+	// token is visible in URLs / argv — easier to spot than silent
+	// substitution to "".
+	//
+	// Earlier versions also fell back to a case-insensitive prefix
+	// match. That was a footgun (${selection.Name} silently matched a
+	// "Namespace" column) and nothing in examples/ relied on it. Exact
+	// is safer and the savings of the prefix sugar weren't worth it.
 	for i, col := range sel.Columns {
-		if strings.HasPrefix(strings.ToLower(col), lk) {
+		if strings.EqualFold(col, key) {
 			if i < len(sel.Cells) {
 				return sel.Cells[i]
 			}

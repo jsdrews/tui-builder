@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Build all
+        run: go build ./...
+
+      - name: Test all
+        run: go test ./...
+
+      # Architectural guard: the data layer (datasource, pipeline, output,
+      # config, cmd/wrangl) MUST stay free of any TUI imports. The script
+      # walks the transitive import graph for each package and fails if it
+      # finds internal/screen, internal/build, or any tuilib import.
+      # Rationale: wrangl is the data-first binary; if it accidentally
+      # pulls in Bubble Tea, the separation we've designed is broken.
+      - name: Data-layer import boundary
+        run: ./scripts/check-data-layer-boundary.sh

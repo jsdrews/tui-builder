@@ -27,6 +27,9 @@ app:
   theme: nord
 
 data_sources:
+  # namespaces is self-contained — no caller input needed. Lifecycle
+  # stays polled (refresh: 30s); the TUI and wrangl both run it the
+  # same way.
   namespaces:
     type: http
     url: http://localhost:8001/api/v1/namespaces
@@ -34,28 +37,55 @@ data_sources:
     refresh: 30s
     timeout: 10s
 
+  # pods takes one required parameter (namespace). At push time, the
+  # parent screen's `bind:` block (see screens.namespaces.on_enter)
+  # resolves ${selection} → the picked namespace name and feeds it
+  # into ${params.namespace}. From wrangl: `--param namespace=default`.
   pods:
     type: http
-    url: http://localhost:8001/api/v1/namespaces/${selection}/pods
+    parameters:
+      namespace:
+        type: string
+        required: true
+        description: Kubernetes namespace to list pods in
+    url: http://localhost:8001/api/v1/namespaces/${params.namespace}/pods
     root: items
     refresh: 5s
     timeout: 10s
 
+  # pod_detail and pod_logs are both two-param (namespace + pod name).
+  # In the TUI they're bound at the pods→detail push site; from wrangl
+  # you pass both: `--param namespace=default --param name=nginx-xyz`.
   pod_detail:
     type: http
-    url: http://localhost:8001/api/v1/namespaces/${selection.Namespace}/pods/${selection.Name}
+    parameters:
+      namespace: { type: string, required: true, description: pod namespace }
+      name:      { type: string, required: true, description: pod name }
+    url: http://localhost:8001/api/v1/namespaces/${params.namespace}/pods/${params.name}
     refresh: 5s
     timeout: 10s
 
   pod_logs:
     type: http
-    # tailLines caps the response — the kube logs endpoint returns plain
-    # text, so we use format:text instead of json. Each refresh replaces
-    # the buffer with the most recent N lines.
-    url: http://localhost:8001/api/v1/namespaces/${selection.Namespace}/pods/${selection.Name}/log?tailLines=200
+    parameters:
+      namespace: { type: string, required: true, description: pod namespace }
+      name:      { type: string, required: true, description: pod name }
+    # follow: true holds the request open and reads the response body
+    # line-by-line — each log line becomes a streaming Event. This is
+    # the kube API's `?follow=true` mode: server sends new lines as
+    # they're written, no polling required.
+    #
+    # From wrangl, pair with --raw to see plain `kubectl logs`-style
+    # output instead of JSON-quoted lines:
+    #
+    #   task wrangl -- examples/kube.yaml pod_logs \
+    #     --param namespace=demo --param name=hello-... --raw
+    #
+    # tailLines=200 seeds the stream with recent history; new lines
+    # follow as the pod emits them.
+    url: http://localhost:8001/api/v1/namespaces/${params.namespace}/pods/${params.name}/log?follow=true&tailLines=200
+    follow: true
     format: text
-    refresh: 2s
-    timeout: 10s
 
 components:
   namespaces_list:
@@ -238,14 +268,28 @@ screens:
   namespaces:
     title: Namespaces
     layout: {component: namespaces_list}
+    # Push site: when the user hits enter on a namespace row, push the
+    # `pods` screen with the selected namespace name fed into the
+    # destination's `pods` source via its declared `namespace` param.
     on_enter:
-      - {source: namespaces_list, push: pods}
+      - source: namespaces_list
+        push: pods
+        bind:
+          namespace: ${selection}
 
   pods:
     title: ${selection}
     layout: {component: pods_table}
+    # The pods table is bound to a parameterized source — both columns
+    # (Namespace, Name) of the selected row feed into the destination
+    # screen's `pod_detail` AND `pod_logs` params. Same map, both
+    # destinations see the same values.
     on_enter:
-      - {source: pods_table, push: detail}
+      - source: pods_table
+        push: detail
+        bind:
+          namespace: ${selection.Namespace}
+          name:      ${selection.Name}
     # Actions: while focused on the pods table, these keys dispatch a
     # subprocess via tuilib's pkg/runner. The TUI suspends, the
     # subprocess gets the TTY, and we resume on exit. ${selection.Col}

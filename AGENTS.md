@@ -12,29 +12,70 @@ reference, see [`docs/components.md`](docs/components.md).
 
 ## The mental model
 
-tui-builder is a YAML → tuilib bridge. There are three layers:
+tui-builder has two halves, split by what they do with the same config:
 
 ```
-   YAML config  ──►  internal/config  ──►  internal/build  ──►  internal/screen ──►  tuilib pkg/app
-                    (structs + valid.)    (cfg → live comps)    (screen.Screen)
+                          ┌───────────────────────────── data layer ─────────────────────────────┐
+   YAML config  ──►  internal/config  ──►  internal/datasource  ──►  internal/pipeline  ──┬──►  internal/output  ──►  stdout (cmd/wrangl)
+                    (structs + valid.)    (Source impls)            (named pipelines)     │
+                                                                                          ▼
+                                                                              ┌───── TUI layer ──────────────────────────────┐
+                                                                              internal/build  ──►  internal/screen  ──►  tuilib pkg/app
+                                                                              (cfg → live comps)    (screen.Screen)
 ```
+
+**Data layer** (the heart of the product):
 
 - **`internal/config`** owns the schema. One Go struct per YAML shape.
-  Yaml tags drive Unmarshal; `Validate()` walks the tree.
+  Yaml tags drive Unmarshal; `Validate()` walks the tree (including
+  cycle detection for `pipelines:` references).
+- **`internal/datasource`** owns the `Source` interface and the
+  concrete kinds (http, exec, file, websocket, merge). Self-contained;
+  no awareness of components, screens, or rendering.
+- **`internal/pipeline`** is the named, addressable composition layer
+  over sources. Today every `Pipeline` is a passthrough (one declared
+  upstream, no operator). Future operator types (filter, project,
+  union, join) satisfy the same `ds.Source` interface — neither the
+  TUI binding nor `wrangl` will need to special-case them.
+- **`internal/output`** is the JSON / NDJSON stdout sink used by
+  `wrangl`. One-shot sources emit one JSON value; streams emit
+  NDJSON.
+
+**TUI layer** (one of two consumers of the data layer):
+
 - **`internal/build`** maps `cfg.Component` → live tuilib components
   (`pkg/list.Model`, `pkg/table.Model`, …) by populating the right
   `Options` struct and calling `New(opts)`. Also owns layout-tree
   construction, data binding (`ApplyData`), template substitution
   (`${selection.*}` / `${env.*}`), and color-rule evaluation.
 - **`internal/screen`** is one config-driven `screen.Screen` impl.
-  Holds focus state, the data-source registry, modal state (confirm /
+  Holds focus state, the pipeline registry, modal state (confirm /
   alert), action dispatch, and the streaming-event pump. Multi-screen
   is implemented as the same `Model` type pushed/popped from tuilib's
   `screen.Stack`.
 
-The CLI binary (`cmd/tui-builder`) is ~80 lines: load YAML, build the
-root screen, hand to `app.New`, run. The launcher (`cmd/example-launcher`)
-is a list-of-yamls + a `screen.Push` per selection.
+The TUI CLI (`cmd/tui-builder`) and the data CLI (`cmd/wrangl`) are
+both ~100 lines each: load YAML, build sources + pipelines, hand off
+to the screen or the output package respectively. The launcher
+(`cmd/example-launcher`) is a list-of-yamls + a `screen.Push` per
+selection.
+
+### Hard rule: the data layer never imports the TUI
+
+The five packages above the dotted line —
+`internal/datasource`, `internal/pipeline`, `internal/output`,
+`internal/config`, `cmd/wrangl` — MUST NOT import
+`internal/screen`, `internal/build`, or any `tuilib` package. This
+is enforced in CI by `scripts/check-data-layer-boundary.sh`
+(walks `go list -deps` for each data-layer package).
+
+Why: data wrangling is the product, the TUI is one sink. The split
+keeps `wrangl` cheap to build and link, keeps the data layer
+testable without a TTY, and forces honest separation — if you ever
+need a TUI helper from the data layer, the helper belongs in the
+data layer, not the screen package. If you genuinely can't avoid
+the dependency, surface it explicitly — change the architecture
+deliberately, don't quietly grow the import graph.
 
 ## The universal contract: `datasource.Source`
 
@@ -62,6 +103,41 @@ of the source.
 detects the interface at `OnEnter`, opens the subscription, and pumps
 events into the bound logview. Non-streaming sources fall back to the
 poll-via-`tea.Tick` path.
+
+## Pipelines: named, addressable data over sources
+
+The `pipelines:` block in YAML declares named pipelines over sources
+(or over other pipelines). A pipeline is what the TUI's `pipeline:`
+binding and `wrangl <name>` both consume. Today the only "operator"
+is passthrough — `from: <source-or-pipeline>` and that's it.
+
+```yaml
+data_sources:
+  countries: { type: http, url: …, refresh: 5m }
+
+pipelines:
+  all_countries:           # named, addressable; bound by components OR wrangl
+    from: countries
+```
+
+Components bind to either a source or a pipeline (mutually
+exclusive; validated at load):
+
+```yaml
+components:
+  countries:
+    type: table
+    pipeline: all_countries   # preferred — operators land here in the future
+    # source: countries       # also still works for un-pipelined sources
+```
+
+Future operators (filter, project, sort, union, join) layer on top of
+this without changing the binding contract — the component and
+`wrangl` both keep asking for a name; the pipeline does whatever
+shaping it does internally.
+
+When asked to add a new operator type, the shape is parallel to
+adding a new source kind ("Adding a new pipeline operator" below).
 
 ## How a YAML field becomes pixels
 
@@ -151,6 +227,24 @@ Mirror this shape for any new component or new field. State-preserving
 rebuild on `SetTheme` lives in `Component.Rebuild`; mirror the same
 field flow there using tuilib's accessor methods to preserve cursor /
 value / sort / filter state across the rebuild.
+
+### 3a. The data-layer / TUI-layer boundary is enforced in CI. Don't break it.
+
+`scripts/check-data-layer-boundary.sh` fails the build if anything in
+`internal/config`, `internal/datasource`, `internal/pipeline`,
+`internal/output`, or `cmd/wrangl` transitively imports
+`internal/screen`, `internal/build`, or any `tuilib` package.
+
+If you're tempted to import a TUI helper from the data layer:
+
+- The right move is almost always to move the helper into the data
+  layer (or into a small shared `internal/*` package the data layer
+  can own).
+- The wrong move is to disable the boundary check or add an
+  exception. Don't.
+- If the import genuinely belongs in both halves (truly shared, with
+  no TUI ties), that's a sign you've found a new data-layer package
+  that should exist. Create it cleanly; don't reach across.
 
 ### 3. The `Source` interface is the universal contract. Don't extend it lightly.
 
@@ -253,6 +347,39 @@ sub-screens behind one tab strip). Steps in order:
 
 Look at the inspector or logview commits as the template — they each
 followed this checklist.
+
+## Adding a new pipeline operator
+
+The current pipeline is passthrough — `from: X` and nothing else.
+When operator types (filter, project, union, join, …) land, they
+follow this shape:
+
+1. **Schema.** Add fields to `cfg.Pipeline` for the operator's
+   parameters (e.g. `Filter string`, `Where Expr`, `Sources []string`).
+   Update `validatePipelines` to require the right fields per operator
+   kind and reject combinations that don't make sense.
+2. **Implementation.** Add an operator file in `internal/pipeline/`
+   (e.g. `filter.go`). It implements `ds.Source` — `Fetch` runs the
+   operator over its upstream's `Fetch` result, `Refresh` delegates
+   to the upstream's cadence (or computes a sensible one for
+   composers). `Subscribe` either threads the operator inline over
+   the upstream events (cheap operators) or returns `ds.ErrNotStreaming`
+   to fall back to polling (expensive ones — joins).
+3. **Wire it into Build.** Extend the resolver in `Build()` to
+   construct the right operator from the config kind.
+4. **Tests.** Unit tests using the in-package `fakeSource` /
+   `fakeStreamer` patterns from `pipeline_test.go`. Don't pull in
+   real http/exec/file for operator tests — they're transformations,
+   so feed them fake data.
+5. **Docs.** New operator section in `docs/components.md`, plus an
+   example YAML demonstrating the smallest compelling use.
+6. **wrangl.** Nothing to do — `wrangl <name>` already works
+   uniformly across passthrough and any future operator, because
+   they all satisfy `ds.Source`.
+
+The architectural promise to keep: operators NEVER reach into the
+TUI. They're pure data layer. If an operator depends on a screen
+construct, the design is wrong.
 
 ## Adding a new data source type
 

@@ -23,6 +23,7 @@ import (
 	"github.com/jsdrews/tuilib/pkg/alert"
 	"github.com/jsdrews/tuilib/pkg/app"
 	"github.com/jsdrews/tuilib/pkg/confirm"
+	"github.com/jsdrews/tuilib/pkg/form"
 	"github.com/jsdrews/tuilib/pkg/layout"
 	"github.com/jsdrews/tuilib/pkg/runner"
 	tscreen "github.com/jsdrews/tuilib/pkg/screen"
@@ -31,16 +32,19 @@ import (
 	"github.com/jsdrews/tui-builder/internal/build"
 	cfg "github.com/jsdrews/tui-builder/internal/config"
 	ds "github.com/jsdrews/tui-builder/internal/datasource"
+	"github.com/jsdrews/tui-builder/internal/pipeline"
 )
 
 // Multi is the shared context for a multi-screen app: every named screen,
-// the top-level components map, and the top-level data sources map.
-// Passed once to every Model so any screen can build + push its on_enter
-// targets, and so pushed screens get the same data sources.
+// the top-level components map, the top-level data sources map, and the
+// top-level pipelines map. Passed once to every Model so any screen can
+// build + push its on_enter targets, and so pushed screens get the same
+// data layer.
 type Multi struct {
 	Screens     map[string]*cfg.Screen
 	Components  map[string]*cfg.Component
 	DataSources map[string]*cfg.DataSource
+	Pipelines   map[string]*cfg.Pipeline
 }
 
 // sourceEntry tracks a live data source bound to one or more components.
@@ -95,10 +99,10 @@ type Model struct {
 	title    string
 	th       theme.Theme
 	tree     *build.Tree
-	focus    int               // index into tree.All(); -1 means no component focused
-	multi    *Multi            // nil for single-screen mode
-	bindings map[string]string // component name -> target screen name (this screen's on_enter)
-	actions  []cfg.Action      // per-key subprocess bindings for this screen
+	focus    int                            // index into tree.All(); -1 means no component focused
+	multi    *Multi                         // nil for single-screen mode
+	bindings map[string]*cfg.OnEnterBinding // component name -> the full on_enter binding (target screen + bind: map for params)
+	actions  []cfg.Action                   // per-key subprocess bindings for this screen
 
 	// Data-source state. sources is keyed by source name; sourceUsers
 	// indexes the bound components per source so a single fetch can fan
@@ -121,6 +125,15 @@ type Model struct {
 	// button; dismissed on enter/space/esc/o.
 	alertModal *alert.Model
 
+	// Form-modal state. Shown when an action declares `prompts:` —
+	// each prompt becomes a field, on submit the values feed into
+	// ${prompt.*} substitution for the rest of the action's flow
+	// (confirm message + run argv). pendingAction / pendingSel carry
+	// the action context across the modal.
+	formModal     *form.Model
+	pendingAction cfg.Action
+	pendingSel    build.Selection
+
 	// inFlightStderr captures the dispatched interactive subprocess's
 	// stderr so the alert can show the actual error text. Set in
 	// dispatch() on the interactive path; consumed and cleared on the
@@ -130,9 +143,21 @@ type Model struct {
 }
 
 // New builds a single-screen Model. Components are looked up by name in
-// the layout tree.
-func New(s *cfg.Screen, components map[string]*cfg.Component, dataSources map[string]*cfg.DataSource, th theme.Theme) (*Model, error) {
-	return build_(s, components, dataSources, th, nil)
+// the layout tree. SubstituteScreen with an empty selection applies
+// ${env.*} substitution to URLs / headers / argv / etc. — without this
+// step, env tokens in single-screen configs would be passed through
+// literally (multi-screen already substitutes via NewMulti).
+//
+// params is nil here — there's no push site context in single-screen
+// mode. Parameterized sources will be constructed with unresolved
+// ${params.*} templates and will surface errors at fetch time. Use
+// wrangl --param for now, or have your source declare defaults.
+func New(s *cfg.Screen, components map[string]*cfg.Component, dataSources map[string]*cfg.DataSource, pipelines map[string]*cfg.Pipeline, th theme.Theme) (*Model, error) {
+	subS, subC, subD, err := build.SubstituteScreen(s, components, dataSources, build.Selection{}, nil)
+	if err != nil {
+		return nil, err
+	}
+	return build_(subS, subC, subD, pipelines, th, nil)
 }
 
 // NewMulti builds a Model from one screen in a multi-screen Config. The
@@ -140,16 +165,26 @@ func New(s *cfg.Screen, components map[string]*cfg.Component, dataSources map[st
 // the screen.Stack. The selection captured at push time substitutes
 // ${selection} tokens in the pushed screen's config — and in any
 // data-source URL/headers/body referenced from that screen.
-func NewMulti(screenName string, multi *Multi, sel build.Selection, th theme.Theme) (*Model, error) {
+//
+// params carries the push-site `bind:` block's resolved values for the
+// destination screen's parameterized sources. Pass nil on the initial
+// multi-screen construction (no push has fired yet) and on screens
+// whose on_enter has no Bind: map. Missing required params surface as
+// a build error so tryPush can pop an alert instead of constructing
+// a half-broken screen.
+func NewMulti(screenName string, multi *Multi, sel build.Selection, params map[string]string, th theme.Theme) (*Model, error) {
 	src, ok := multi.Screens[screenName]
 	if !ok {
 		return nil, fmt.Errorf("screen %q not defined", screenName)
 	}
-	subScreen, subComponents, subSources := build.SubstituteScreen(src, multi.Components, multi.DataSources, sel)
-	return build_(subScreen, subComponents, subSources, th, multi)
+	subScreen, subComponents, subSources, err := build.SubstituteScreen(src, multi.Components, multi.DataSources, sel, params)
+	if err != nil {
+		return nil, err
+	}
+	return build_(subScreen, subComponents, subSources, multi.Pipelines, th, multi)
 }
 
-func build_(s *cfg.Screen, components map[string]*cfg.Component, dataSources map[string]*cfg.DataSource, th theme.Theme, multi *Multi) (*Model, error) {
+func build_(s *cfg.Screen, components map[string]*cfg.Component, dataSources map[string]*cfg.DataSource, pipelines map[string]*cfg.Pipeline, th theme.Theme, multi *Multi) (*Model, error) {
 	tree, err := build.Build(&s.Layout, components, th)
 	if err != nil {
 		return nil, err
@@ -159,9 +194,10 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, dataSources map
 		m.focus = 0
 	}
 	if multi != nil {
-		m.bindings = map[string]string{}
-		for _, b := range s.OnEnter {
-			m.bindings[b.Source] = b.Push
+		m.bindings = map[string]*cfg.OnEnterBinding{}
+		for i := range s.OnEnter {
+			b := s.OnEnter[i] // take address of a stable copy, not the loop var
+			m.bindings[b.Source] = &b
 		}
 	}
 	m.actions = append([]cfg.Action(nil), s.Actions...)
@@ -173,21 +209,36 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, dataSources map
 	if err != nil {
 		return nil, err
 	}
+	// Then build pipelines on top of the source registry. The pipeline
+	// layer treats sources and pipelines uniformly — both are addressable
+	// by name and both satisfy ds.Source — so the binding loop below
+	// doesn't need to know the difference.
+	reg, err := pipeline.Build(live, dataSources, pipelines, nil)
+	if err != nil {
+		return nil, err
+	}
 	m.sources = map[string]*sourceEntry{}
 	m.sourceUsers = map[string][]string{}
 	for _, name := range tree.Order {
 		c := tree.Components[name]
-		srcName := c.Cfg.Source
-		if srcName == "" {
+		// Component.Source and Component.Pipeline are mutually exclusive
+		// (config validator enforces). Pipeline takes precedence if both
+		// fields are set somehow.
+		boundName := c.Cfg.Pipeline
+		if boundName == "" {
+			boundName = c.Cfg.Source
+		}
+		if boundName == "" {
 			continue
 		}
-		if _, ok := dataSources[srcName]; !ok {
-			return nil, fmt.Errorf("component %q: source %q not defined", name, srcName)
+		bound := reg.Get(boundName)
+		if bound == nil {
+			return nil, fmt.Errorf("component %q: pipeline/source %q not defined", name, boundName)
 		}
-		if _, ok := m.sources[srcName]; !ok {
-			m.sources[srcName] = &sourceEntry{src: live[srcName]}
+		if _, ok := m.sources[boundName]; !ok {
+			m.sources[boundName] = &sourceEntry{src: bound}
 		}
-		m.sourceUsers[srcName] = append(m.sourceUsers[srcName], name)
+		m.sourceUsers[boundName] = append(m.sourceUsers[boundName], name)
 	}
 	return m, nil
 }
@@ -260,11 +311,10 @@ func nextStreamMsg(source string, ch <-chan ds.Event) tea.Cmd {
 }
 
 // Layout returns the live layout.Node tree built from the YAML config.
-// When a modal (alert or confirm) is active it overlays a centered
-// dialog on top of the body via ZStack — base still renders behind so
-// the user sees what they're acting on. Alerts take precedence (they
-// only arise after a dispatch attempt completed; at most one modal is
-// up at a time in practice).
+// When a modal is active it overlays a centered dialog on top of the
+// body via ZStack — base still renders behind so the user sees what
+// they're acting on. Precedence (only one can be up at a time in
+// practice): alert > confirm > form.
 func (m *Model) Layout() layout.Node {
 	body := m.tree.RenderNode()
 	switch {
@@ -272,6 +322,14 @@ func (m *Model) Layout() layout.Node {
 		return layout.ZStack(body, layout.Center(70, 9, layout.Sized(m.alertModal)))
 	case m.confirmModal != nil:
 		return layout.ZStack(body, layout.Center(60, 7, layout.Sized(m.confirmModal)))
+	case m.formModal != nil:
+		// Height scales with the field count: 3 rows per field (input
+		// is bordered) + 3 for title + submit button + breathing room.
+		h := 3 + 3*len(m.pendingAction.Prompts)
+		if h < 9 {
+			h = 9
+		}
+		return layout.ZStack(body, layout.Center(60, h, layout.Sized(m.formModal)))
 	}
 	return body
 }
@@ -291,6 +349,29 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		}
 		next, cmd := m.alertModal.Update(msg)
 		m.alertModal = &next
+		return m, cmd
+	}
+	// Form modal — opened when an action declares prompts. On submit,
+	// pull values out and proceed to confirm/dispatch via
+	// actionAfterPrompts. On cancel, abort the action entirely.
+	if m.formModal != nil {
+		switch x := msg.(type) {
+		case form.SubmittedMsg:
+			prompts := stringifyFormValues(x.Values)
+			action := m.pendingAction
+			sel := m.pendingSel
+			m.formModal = nil
+			m.pendingAction = cfg.Action{}
+			m.pendingSel = build.Selection{}
+			return m, m.actionAfterPrompts(action, sel, prompts)
+		case form.CancelledMsg:
+			m.formModal = nil
+			m.pendingAction = cfg.Action{}
+			m.pendingSel = build.Selection{}
+			return m, nil
+		}
+		next, cmd := m.formModal.Update(msg)
+		m.formModal = &next
 		return m, cmd
 	}
 	// Confirm modal takes precedence — it's a real modal so every key
@@ -485,7 +566,7 @@ func setLoading(c *build.Component, on bool) tea.Cmd {
 // keystrokes (filter typing). Also true while any modal is showing so
 // q/t/esc-pop are routed to the modal, not the app shell.
 func (m *Model) IsCapturingKeys() bool {
-	if m.alertModal != nil || m.confirmModal != nil {
+	if m.alertModal != nil || m.confirmModal != nil || m.formModal != nil {
 		return true
 	}
 	c := m.current()
@@ -633,24 +714,44 @@ func (m *Model) tryAction(k tea.KeyMsg) (tea.Cmd, bool) {
 			continue
 		}
 		sel := selectionFrom(cur)
-		argv := build.SubstituteAll(a.Run, sel)
-		if len(argv) == 0 {
-			return nil, true
+		// Three possible paths, top-down:
+		//   1. prompts: → form modal collects values, then continues
+		//   2. confirm: → confirm modal (with substituted message)
+		//   3. dispatch
+		// We capture the action and selection into pendingAction so
+		// the form's onSubmit can resume the flow with the same data.
+		if len(a.Prompts) > 0 {
+			form := m.newPromptForm(a.Prompts)
+			m.formModal = &form
+			m.pendingAction = a
+			m.pendingSel = sel
+			return form.Init(), true
 		}
-		// With `confirm:` set, show the modal first; otherwise dispatch
-		// immediately.
-		if a.Confirm != "" {
-			msg := build.SubstituteAll([]string{a.Confirm}, sel)[0]
-			modal := m.newConfirmModal(a.Label, msg)
-			m.confirmModal = &modal
-			m.pendingArgv = argv
-			m.pendingNotice = a.Notice
-			m.pendingInteractive = a.InteractiveDefault()
-			return nil, true
-		}
-		return m.dispatch(argv, a.Notice, a.InteractiveDefault()), true
+		return m.actionAfterPrompts(a, sel, nil), true
 	}
 	return nil, false
+}
+
+// actionAfterPrompts is the second leg of action dispatch — runs after
+// any prompts have been collected (or immediately, if there were no
+// prompts). Performs final substitution with the prompt values and
+// either pops the confirm modal or dispatches directly.
+func (m *Model) actionAfterPrompts(a cfg.Action, sel build.Selection, prompts map[string]string) tea.Cmd {
+	argv := build.SubstituteAll(a.Run, sel, prompts)
+	if len(argv) == 0 {
+		return nil
+	}
+	if a.Confirm != "" {
+		msg := build.SubstituteAll([]string{a.Confirm}, sel, prompts)[0]
+		modal := m.newConfirmModal(a.Label, msg)
+		m.confirmModal = &modal
+		m.pendingArgv = argv
+		m.pendingNotice = build.SubstituteAll([]string{a.Notice}, sel, prompts)[0]
+		m.pendingInteractive = a.InteractiveDefault()
+		return nil
+	}
+	notice := build.SubstituteAll([]string{a.Notice}, sel, prompts)[0]
+	return m.dispatch(argv, notice, a.InteractiveDefault())
 }
 
 // dispatch routes a fully-substituted argv to either pkg/runner
@@ -704,6 +805,68 @@ func (m *Model) actionOutcome(captured string, err error) tea.Cmd {
 		return nil
 	}
 	return app.Info("action complete")
+}
+
+// newPromptForm builds the form modal for an action's prompts. Maps
+// each cfg.Prompt to the matching tuilib form.Field constructor.
+func (m *Model) newPromptForm(prompts []cfg.Prompt) form.Model {
+	fields := make([]form.Field, len(prompts))
+	for i, p := range prompts {
+		switch p.Type {
+		case "select":
+			fields[i] = form.Select(form.SelectOptions{
+				Key:     p.Key,
+				Label:   labelOr(p.Label, p.Key),
+				Options: append([]string(nil), p.Options...),
+				Initial: p.InitialIdx,
+			})
+		case "confirm":
+			fields[i] = form.Confirm(form.ConfirmOptions{
+				Key:     p.Key,
+				Label:   labelOr(p.Label, p.Key),
+				Initial: p.InitialBool,
+			})
+		default: // text
+			fields[i] = form.Text(form.TextOptions{
+				Key:         p.Key,
+				Label:       labelOr(p.Label, p.Key),
+				Placeholder: p.Placeholder,
+				Initial:     p.Initial,
+			})
+		}
+	}
+	opts := m.th.Form().With(fields)
+	opts.SubmitText = "Run"
+	return form.New(opts)
+}
+
+func labelOr(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
+}
+
+// stringifyFormValues coerces form.SubmittedMsg.Values (any-typed) into
+// the string map ${prompt.*} substitution wants. Booleans become
+// "true"/"false"; everything else uses fmt.Sprint.
+func stringifyFormValues(in map[string]any) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		switch x := v.(type) {
+		case string:
+			out[k] = x
+		case bool:
+			if x {
+				out[k] = "true"
+			} else {
+				out[k] = "false"
+			}
+		default:
+			out[k] = fmt.Sprint(v)
+		}
+	}
+	return out
 }
 
 // newConfirmModal builds a yes/no confirm dialog using the active theme.
@@ -770,14 +933,24 @@ func (m *Model) tryPush() (tea.Cmd, bool) {
 		return nil, false
 	}
 	name := m.tree.Order[m.focus]
-	target, ok := m.bindings[name]
+	binding, ok := m.bindings[name]
 	if !ok {
 		return nil, false
 	}
 	sel := selectionFrom(cur)
-	child, err := NewMulti(target, m.multi, sel, m.th)
+	// Resolve the push-site bind: block against the focused row's
+	// selection. We always pass a non-nil map (possibly empty) — the
+	// push IS a binding context, even if the user forgot to declare
+	// bind:. That lets applyBindParams enforce required params with a
+	// clean "missing required" error instead of silently constructing
+	// a screen that 404s on first fetch.
+	params := make(map[string]string, len(binding.Bind))
+	for k, v := range binding.Bind {
+		params[k] = build.Substitute(v, sel)
+	}
+	child, err := NewMulti(binding.Push, m.multi, sel, params, m.th)
 	if err != nil {
-		return app.Error(fmt.Sprintf("%s: %v", target, err)), true
+		return app.Error(fmt.Sprintf("%s: %v", binding.Push, err)), true
 	}
 	return tscreen.Push(child), true
 }

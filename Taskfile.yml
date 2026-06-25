@@ -7,11 +7,12 @@ tasks:
       - task --list
 
   build:
-    desc: Compile both binaries into ./bin
+    desc: Compile all binaries into ./bin
     cmds:
       - mkdir -p bin
       - go build -o bin/tui-builder ./cmd/tui-builder
       - go build -o bin/example-launcher ./cmd/example-launcher
+      - go build -o bin/wrangl ./cmd/wrangl
     sources:
       - cmd/**/*.go
       - internal/**/*.go
@@ -20,6 +21,7 @@ tasks:
     generates:
       - bin/tui-builder
       - bin/example-launcher
+      - bin/wrangl
 
   examples:
     desc: Open the launcher listing every YAML in examples/
@@ -33,11 +35,36 @@ tasks:
     cmds:
       - go run ./cmd/tui-builder examples/{{.NAME}}.yaml
 
+  wrangl:
+    desc: "Run wrangl from the directory you invoked task from — pass args after `--`. Example: `task wrangl -- --list examples/http_countries.yaml`"
+    # Build the binary from the project root (where the go module lives),
+    # then run it from the user's shell CWD. That way relative paths in
+    # CLI_ARGS (`./foo.yaml`, `../bar.yaml`) resolve the way you'd
+    # expect — like calling wrangl directly.
+    cmds:
+      - go build -o bin/wrangl ./cmd/wrangl
+      - cd "{{.USER_WORKING_DIR}}" && "{{.TASKFILE_DIR}}/bin/wrangl" {{.CLI_ARGS}}
+
+  wrangl:sources:
+    desc: List the sources / pipelines defined in every examples/*.yaml
+    # Build once, then run --list against each example. Reuses the shared
+    # build task so we don't recompile per file like `task wrangl` would.
+    deps: [build]
+    cmds:
+      - cmd: |
+          for f in examples/*.yaml; do
+            echo "=== $f ==="
+            bin/wrangl --list "$f"
+            echo
+          done
+        silent: true
+
   test:
-    desc: Run go vet + go test
+    desc: Run go vet + go test + the data-layer import boundary check
     cmds:
       - go vet ./...
       - go test ./...
+      - ./scripts/check-data-layer-boundary.sh
 
   vet:
     desc: Run go vet

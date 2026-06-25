@@ -15,27 +15,43 @@ import (
 
 // mergeSource fans out to N children concurrently, unions their results
 // into a single slice, and optionally tags each map-shaped item with
-// which child source it came from. The composer for cross-cluster /
-// cross-account / cross-anything views.
+// per-child metadata. The composer for cross-cluster / cross-account /
+// cross-anything views.
 //
 // Result shape: always `[]any`. Children that return slices are
 // flattened in; children that return a single object are appended as
 // one element. Children whose result is not slice-or-map are appended
-// untagged (the TagField is meaningless for scalars).
+// untagged (tag injection is meaningless for scalars).
 //
-// Children are resolved at Build time (Datasource.Build wires them in)
-// so cycles are impossible by then.
+// Two configuration shapes feed the same internal model:
+//
+//   - Shorthand: cfg.Sources + cfg.TagField → one synthetic tag per
+//     child, value = child source name. The legacy shape.
+//   - Long form: cfg.Children — each entry declares an arbitrary tags
+//     map; merge writes every key/value into rows from that child.
+//
+// Children are resolved at Build time so cycles are impossible by then.
 type mergeSource struct {
-	children []namedChild // stable order from cfg.Sources
-	tagField string
+	children []namedChild // stable order
+	metaKey  string       // empty = flat top-level injection (legacy)
 	onError  errorMode
 	root     string
 	refresh  time.Duration
 }
 
+// defaultMetaKey is the JSON key merge writes tag maps under when the
+// config doesn't explicitly choose one. Conventional `_` prefix marks
+// "framework-injected, not user data."
+const defaultMetaKey = "_meta"
+
 type namedChild struct {
 	name string
 	src  Source
+	// tags get injected into every map-shaped row this child
+	// produces. nil = no injection. The merge composer reads this
+	// per-child rather than holding a single global TagField, so
+	// both schema shapes share one code path.
+	tags map[string]string
 }
 
 type errorMode int
@@ -45,16 +61,55 @@ const (
 	skipBroken
 )
 
+// NewMerge constructs a merge composer from a cfg.DataSource (the
+// merge SOURCE) and a map of resolved child sources. Exposed so the
+// pipeline package can reuse this proven implementation for its
+// `union` operator without duplicating the streaming / snapshot /
+// per-child-tag machinery.
+//
+// The caller is responsible for resolving children from cfg.Sources
+// or cfg.Children (whichever shape the config uses) into the map
+// before calling.
+func NewMerge(d *cfg.DataSource, children map[string]Source) (Source, error) {
+	return newMerge(d, children)
+}
+
 func newMerge(d *cfg.DataSource, children map[string]Source) (Source, error) {
-	// Preserve the cfg.Sources order — children render in the order the
-	// user wrote, not Go's map iteration order.
-	ordered := make([]namedChild, 0, len(d.Sources))
-	for _, name := range d.Sources {
-		s, ok := children[name]
-		if !ok {
-			return nil, fmt.Errorf("merge child %q missing from registry", name)
+	// Compose the internal child list from whichever schema shape the
+	// user wrote. We collapse both into the same []namedChild so the
+	// downstream Fetch/Subscribe code is shape-agnostic.
+	var ordered []namedChild
+	switch {
+	case len(d.Children) > 0:
+		// Long form: each MergeChild carries its own tags map.
+		ordered = make([]namedChild, 0, len(d.Children))
+		for _, ch := range d.Children {
+			s, ok := children[ch.Source]
+			if !ok {
+				return nil, fmt.Errorf("merge child %q missing from registry", ch.Source)
+			}
+			ordered = append(ordered, namedChild{
+				name: ch.Source,
+				src:  s,
+				tags: copyTags(ch.Tags),
+			})
 		}
-		ordered = append(ordered, namedChild{name: name, src: s})
+	default:
+		// Shorthand: each child gets ONE synthetic tag whose key is the
+		// shared TagField and whose value is the source name. Same
+		// effect as the legacy behavior, expressed in the new model.
+		ordered = make([]namedChild, 0, len(d.Sources))
+		for _, name := range d.Sources {
+			s, ok := children[name]
+			if !ok {
+				return nil, fmt.Errorf("merge child %q missing from registry", name)
+			}
+			var tags map[string]string
+			if d.TagField != "" {
+				tags = map[string]string{d.TagField: name}
+			}
+			ordered = append(ordered, namedChild{name: name, src: s, tags: tags})
+		}
 	}
 	mode := failFast
 	if d.OnError == "skip" {
@@ -68,13 +123,31 @@ func newMerge(d *cfg.DataSource, children map[string]Source) (Source, error) {
 		}
 		refresh = r
 	}
+	// MetaKey: default → "_meta", explicit empty → flat (opt-out).
+	metaKey := defaultMetaKey
+	if d.MetaKey != nil {
+		metaKey = *d.MetaKey
+	}
 	return &mergeSource{
 		children: ordered,
-		tagField: d.TagField,
+		metaKey:  metaKey,
 		onError:  mode,
 		root:     d.Root,
 		refresh:  refresh,
 	}, nil
+}
+
+// copyTags returns an independent map so downstream mutations on the
+// merge's runtime state don't leak back into the parsed cfg.
+func copyTags(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func (m *mergeSource) Refresh() time.Duration { return m.refresh }
@@ -113,7 +186,7 @@ func (m *mergeSource) Subscribe(ctx context.Context) (<-chan Event, error) {
 			return nil, fmt.Errorf("%s: %w", c.name, err)
 		}
 		wg.Add(1)
-		go func(name string, in <-chan Event) {
+		go func(name string, tags map[string]string, metaKey string, in <-chan Event) {
 			defer wg.Done()
 			for ev := range in {
 				if ev.Err != nil {
@@ -128,29 +201,27 @@ func (m *mergeSource) Subscribe(ctx context.Context) (<-chan Event, error) {
 				// bindings can see which child a frame came from
 				// (same convention as snapshot merges). Non-map
 				// payloads and non-JSON lines pass through untouched.
-				line := tagInline(ev.Line, m.tagField, name)
+				line := tagInline(ev.Line, tags, metaKey)
 				select {
 				case out <- Event{Line: line}:
 				case <-ctx.Done():
 					return
 				}
 			}
-		}(c.name, childCh)
+		}(c.name, c.tags, m.metaKey, childCh)
 	}
 	go func() { wg.Wait(); close(out) }()
 	return out, nil
 }
 
-// tagInline rewrites a top-level JSON object's payload to include
-// {<tagField>: <source>} so consumers can identify the origin. Falls
-// back to returning the line unchanged when:
-//   - tagField is empty (caller doesn't want tagging)
+// tagInline writes every key in tags into the JSON object on line —
+// nested under metaKey when set, flat at the top level when metaKey
+// is empty. Returns line unchanged when:
+//   - tags is nil / empty (caller doesn't want tagging)
 //   - the line isn't a JSON object (e.g. an array, a string, or the
 //     synthetic "(connecting…)" diagnostic from streaming sources)
-//
-// Tagging is purely additive — existing fields in the payload survive.
-func tagInline(line, tagField, source string) string {
-	if tagField == "" {
+func tagInline(line string, tags map[string]string, metaKey string) string {
+	if len(tags) == 0 {
 		return line
 	}
 	trimmed := strings.TrimSpace(line)
@@ -161,7 +232,7 @@ func tagInline(line, tagField, source string) string {
 	if err := json.Unmarshal([]byte(line), &obj); err != nil {
 		return line
 	}
-	obj[tagField] = source
+	injectTags(obj, tags, metaKey)
 	b, err := json.Marshal(obj)
 	if err != nil {
 		return line
@@ -213,7 +284,7 @@ func (m *mergeSource) Fetch(ctx context.Context) (any, error) {
 			continue
 		}
 		succeeds++
-		appendChild(&out, r.data, m.tagField, r.name)
+		appendChild(&out, r.data, m.children[r.idx].tags, m.metaKey)
 	}
 	// In skip mode, only fail when every child failed. Otherwise return
 	// the partial union — surfacing partial errors via the Source
@@ -243,24 +314,26 @@ func (m *mergeSource) Fetch(ctx context.Context) (any, error) {
 // appendChild adds one child's data to the accumulating result slice.
 // Slices flatten in (with per-item tagging); single objects append as
 // one element; everything else passes through untouched.
-func appendChild(out *[]any, data any, tagField, source string) {
+func appendChild(out *[]any, data any, tags map[string]string, metaKey string) {
 	switch x := data.(type) {
 	case []any:
 		for _, item := range x {
-			*out = append(*out, tagItem(item, tagField, source))
+			*out = append(*out, tagItem(item, tags, metaKey))
 		}
 	case nil:
 		// nothing to merge
 	default:
-		*out = append(*out, tagItem(data, tagField, source))
+		*out = append(*out, tagItem(data, tags, metaKey))
 	}
 }
 
-// tagItem injects {tagField: source} into a map-shaped item. Non-map
-// items pass through — the tag is silently dropped because there's
-// nowhere coherent to put it. Mutates a copy, not the original.
-func tagItem(item any, tagField, source string) any {
-	if tagField == "" {
+// tagItem writes every key/value in tags into a map-shaped item — nested
+// under metaKey when set, flat at the top level when metaKey is empty.
+// Non-map items pass through — tags are silently dropped because
+// there's nowhere coherent to put them. Mutates a copy, not the
+// original.
+func tagItem(item any, tags map[string]string, metaKey string) any {
+	if len(tags) == 0 {
 		return item
 	}
 	m, ok := item.(map[string]any)
@@ -271,6 +344,31 @@ func tagItem(item any, tagField, source string) any {
 	for k, v := range m {
 		cp[k] = v
 	}
-	cp[tagField] = source
+	injectTags(cp, tags, metaKey)
 	return cp
+}
+
+// injectTags is the shared writer used by both the snapshot (tagItem)
+// and streaming (tagInline) paths. Centralised so the nesting rule
+// stays consistent across both code paths.
+func injectTags(obj map[string]any, tags map[string]string, metaKey string) {
+	if metaKey == "" {
+		for k, v := range tags {
+			obj[k] = v
+		}
+		return
+	}
+	// Nested under metaKey. If the upstream payload already has a
+	// value at that key (very unlikely for the conventional `_meta`),
+	// MERGE it so we don't blow away preexisting metadata.
+	nested := map[string]any{}
+	if existing, ok := obj[metaKey].(map[string]any); ok {
+		for k, v := range existing {
+			nested[k] = v
+		}
+	}
+	for k, v := range tags {
+		nested[k] = v
+	}
+	obj[metaKey] = nested
 }
