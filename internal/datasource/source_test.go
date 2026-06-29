@@ -19,8 +19,8 @@ func TestFileSourceJSON(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"items":[{"name":"a"},{"name":"b"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	live, err := Build(map[string]*cfg.DataSource{
-		"f": {Type: "file", Path: path, Root: "items"},
+	live, err := Build(map[string]*cfg.Source{
+		"f": cfg.NewEntry(&cfg.Source{Type: "file", Root: "items", Path: path}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -43,11 +43,8 @@ func TestExecSourceJSON(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("requires sh")
 	}
-	live, err := Build(map[string]*cfg.DataSource{
-		"e": {
-			Type:    "exec",
-			Command: []string{"sh", "-c", `echo '[{"x":1},{"x":2},{"x":3}]'`},
-		},
+	live, err := Build(map[string]*cfg.Source{
+		"e": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"sh", "-c", `echo '[{"x":1},{"x":2},{"x":3}]'`}}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -72,20 +69,12 @@ func TestMergeSourceFanout(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("requires sh")
 	}
-	defs := map[string]*cfg.DataSource{
-		"a": {
-			Type:    "exec",
-			Command: []string{"sh", "-c", `echo '[{"n":"a1"},{"n":"a2"}]'`},
-		},
-		"b": {
-			Type:    "exec",
-			Command: []string{"sh", "-c", `echo '[{"n":"b1"}]'`},
-		},
-		"all": {
-			Type:     "merge",
-			Sources:  []string{"a", "b"},
-			TagField: "src",
-		},
+	defs := map[string]*cfg.Source{
+		"a": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"sh", "-c", `echo '[{"n":"a1"},{"n":"a2"}]'`}}),
+		"b": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"sh", "-c", `echo '[{"n":"b1"}]'`}}),
+		"all": cfg.NewEntry(&cfg.Source{Type: "merge", Sources: []string{"a", "b"},
+			TagField: "src"},
+		),
 	}
 	live, err := Build(defs)
 	if err != nil {
@@ -122,16 +111,14 @@ func TestMergeChildrenPerChildTags(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("requires sh")
 	}
-	defs := map[string]*cfg.DataSource{
-		"a": {Type: "exec", Command: []string{"sh", "-c", `echo '[{"n":"a1"}]'`}},
-		"b": {Type: "exec", Command: []string{"sh", "-c", `echo '[{"n":"b1"}]'`}},
-		"all": {
-			Type: "merge",
-			Children: []cfg.MergeChild{
-				{Source: "a", Tags: map[string]string{"cluster": "prod", "cluster_url": "http://prod"}},
-				{Source: "b", Tags: map[string]string{"cluster": "dev", "cluster_url": "http://dev"}},
-			},
-		},
+	defs := map[string]*cfg.Source{
+		"a": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"sh", "-c", `echo '[{"n":"a1"}]'`}}),
+		"b": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"sh", "-c", `echo '[{"n":"b1"}]'`}}),
+		"all": cfg.NewEntry(&cfg.Source{Type: "merge", Children: []cfg.MergeChild{
+			{Source: "a", Tags: map[string]string{"cluster": "prod", "cluster_url": "http://prod"}},
+			{Source: "b", Tags: map[string]string{"cluster": "dev", "cluster_url": "http://dev"}},
+		}},
+		),
 	}
 	live, err := Build(defs)
 	if err != nil {
@@ -173,14 +160,12 @@ func TestMergeMetaKeyFlat(t *testing.T) {
 		t.Skip("requires sh")
 	}
 	flat := ""
-	defs := map[string]*cfg.DataSource{
-		"a": {Type: "exec", Command: []string{"sh", "-c", `echo '[{"n":"a1"}]'`}},
-		"all": {
-			Type:     "merge",
-			Sources:  []string{"a"},
+	defs := map[string]*cfg.Source{
+		"a": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"sh", "-c", `echo '[{"n":"a1"}]'`}}),
+		"all": cfg.NewEntry(&cfg.Source{Type: "merge", Sources: []string{"a"},
 			TagField: "src",
-			MetaKey:  &flat,
-		},
+			MetaKey:  &flat},
+		),
 	}
 	live, err := Build(defs)
 	if err != nil {
@@ -204,20 +189,14 @@ func TestMergeMetaKeyFlat(t *testing.T) {
 // mutually exclusive. The validator catches misconfigurations at load
 // time rather than silently dropping one shape.
 func TestMergeValidatorRejectsBothShapes(t *testing.T) {
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"a": {Type: "exec", Command: []string{"true"}},
-			"b": {Type: "exec", Command: []string{"true"}},
-			"all": {
-				Type:     "merge",
-				Sources:  []string{"a"},
-				Children: []cfg.MergeChild{{Source: "b"}},
-			},
-		},
-		Components: map[string]*cfg.Component{
-			"x": {Type: "list", Source: "all", Item: "name"},
-		},
-		Screen: cfg.Screen{Layout: cfg.Node{Component: "x"}},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"a": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"true"}}),
+		"b": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"true"}}),
+		"all": cfg.NewEntry(&cfg.Source{Type: "merge", Sources: []string{"a"},
+			Children: []cfg.MergeChild{{Source: "b"}}},
+		)}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"x": {Type: "list", Source: "all", Item: "name"},
+	},
+		Screen: cfg.Screen{Layout: cfg.Node{Component: "x"}}},
 	}
 	if err := c.Validate(); err == nil {
 		t.Fatalf("expected validator to reject both sources: and children:; passed")
@@ -229,19 +208,13 @@ func TestMergeValidatorRejectsBothShapes(t *testing.T) {
 // own tags map, so tag_field is meaningless and likely a config
 // mistake. Reject loudly.
 func TestMergeValidatorRejectsTagFieldWithChildren(t *testing.T) {
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"a": {Type: "exec", Command: []string{"true"}},
-			"all": {
-				Type:     "merge",
-				Children: []cfg.MergeChild{{Source: "a"}},
-				TagField: "cluster",
-			},
-		},
-		Components: map[string]*cfg.Component{
-			"x": {Type: "list", Source: "all", Item: "name"},
-		},
-		Screen: cfg.Screen{Layout: cfg.Node{Component: "x"}},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"a": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"true"}}),
+		"all": cfg.NewEntry(&cfg.Source{Type: "merge", Children: []cfg.MergeChild{{Source: "a"}},
+			TagField: "cluster"},
+		)}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"x": {Type: "list", Source: "all", Item: "name"},
+	},
+		Screen: cfg.Screen{Layout: cfg.Node{Component: "x"}}},
 	}
 	if err := c.Validate(); err == nil {
 		t.Fatalf("expected validator to reject tag_field combined with children:; passed")
@@ -257,10 +230,10 @@ func TestMergeOnErrorSkip(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("requires sh")
 	}
-	defs := map[string]*cfg.DataSource{
-		"good": {Type: "exec", Command: []string{"sh", "-c", `echo '[{"n":"ok"}]'`}},
-		"bad":  {Type: "exec", Command: []string{"sh", "-c", "exit 1"}},
-		"all":  {Type: "merge", Sources: []string{"good", "bad"}, OnError: "skip"},
+	defs := map[string]*cfg.Source{
+		"good": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"sh", "-c", `echo '[{"n":"ok"}]'`}}),
+		"bad":  cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"sh", "-c", "exit 1"}}),
+		"all":  cfg.NewEntry(&cfg.Source{Type: "merge", Sources: []string{"good", "bad"}, OnError: "skip"}),
 	}
 	live, err := Build(defs)
 	if err != nil {
@@ -294,22 +267,12 @@ func TestMergeWithRootedChildren(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("requires sh")
 	}
-	defs := map[string]*cfg.DataSource{
-		"prod": {
-			Type:    "exec",
-			Command: []string{"sh", "-c", `echo '{"kind":"PodList","items":[{"name":"p1"},{"name":"p2"}]}'`},
-			Root:    "items",
-		},
-		"staging": {
-			Type:    "exec",
-			Command: []string{"sh", "-c", `echo '{"kind":"PodList","items":[{"name":"s1"}]}'`},
-			Root:    "items",
-		},
-		"all": {
-			Type:     "merge",
-			Sources:  []string{"prod", "staging"},
-			TagField: "cluster",
-		},
+	defs := map[string]*cfg.Source{
+		"prod":    cfg.NewEntry(&cfg.Source{Type: "exec", Root: "items", Command: []string{"sh", "-c", `echo '{"kind":"PodList","items":[{"name":"p1"},{"name":"p2"}]}'`}}),
+		"staging": cfg.NewEntry(&cfg.Source{Type: "exec", Root: "items", Command: []string{"sh", "-c", `echo '{"kind":"PodList","items":[{"name":"s1"}]}'`}}),
+		"all": cfg.NewEntry(&cfg.Source{Type: "merge", Sources: []string{"prod", "staging"},
+			TagField: "cluster"},
+		),
 	}
 	live, err := Build(defs)
 	if err != nil {
@@ -339,10 +302,10 @@ func TestMergeOnErrorFail(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("requires sh")
 	}
-	defs := map[string]*cfg.DataSource{
-		"good": {Type: "exec", Command: []string{"sh", "-c", `echo '[{"n":"ok"}]'`}},
-		"bad":  {Type: "exec", Command: []string{"sh", "-c", "exit 1"}},
-		"all":  {Type: "merge", Sources: []string{"good", "bad"}}, // on_error defaults to fail
+	defs := map[string]*cfg.Source{
+		"good": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"sh", "-c", `echo '[{"n":"ok"}]'`}}),
+		"bad":  cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"sh", "-c", "exit 1"}}),
+		"all":  cfg.NewEntry(&cfg.Source{Type: "merge", Sources: []string{"good", "bad"}}), // on_error defaults to fail
 	}
 	live, err := Build(defs)
 	if err != nil {

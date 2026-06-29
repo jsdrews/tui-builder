@@ -13,14 +13,13 @@ func TestUnionShorthandFlattensChildren(t *testing.T) {
 	b := &fakeSource{data: []any{map[string]any{"n": "b1"}}}
 	reg, err := Build(
 		map[string]ds.Source{"a": a, "b": b},
-		nil,
-		map[string]*cfg.Pipeline{
-			"all": {Union: &cfg.UnionOp{
-				Sources:  []string{"a", "b"},
-				TagField: "src",
-			}},
+
+		map[string]*cfg.Source{
+			"all": cfg.NewEntry(&cfg.Source{Type: "union", Sources: []string{"a", "b"},
+				TagField: "src"},
+			),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -57,16 +56,15 @@ func TestUnionChildrenPerChildTags(t *testing.T) {
 	b := &fakeSource{data: []any{map[string]any{"n": "b1"}}}
 	reg, err := Build(
 		map[string]ds.Source{"a": a, "b": b},
-		nil,
-		map[string]*cfg.Pipeline{
-			"all": {Union: &cfg.UnionOp{
-				Children: []cfg.MergeChild{
-					{Source: "a", Tags: map[string]string{"cluster": "prod", "cluster_url": "http://prod"}},
-					{Source: "b", Tags: map[string]string{"cluster": "dev", "cluster_url": "http://dev"}},
-				},
+
+		map[string]*cfg.Source{
+			"all": cfg.NewEntry(&cfg.Source{Type: "union", Children: []cfg.MergeChild{
+				{Source: "a", Tags: map[string]string{"cluster": "prod", "cluster_url": "http://prod"}},
+				{Source: "b", Tags: map[string]string{"cluster": "dev", "cluster_url": "http://dev"}},
 			}},
+			),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -110,17 +108,16 @@ func TestUnionAcceptsPipelineAsChild(t *testing.T) {
 	}}
 	reg, err := Build(
 		map[string]ds.Source{"a": a, "b": b},
-		nil,
-		map[string]*cfg.Pipeline{
+
+		map[string]*cfg.Source{
 			// First filter source A — children can be any operator.
-			"a_running": {Filter: &cfg.FilterOp{From: "a", Where: "phase == 'Running'"}},
+			"a_running": cfg.NewEntry(&cfg.Source{Type: "filter", From: "a", Where: "phase == 'Running'"}),
 			// Then union the filtered pipeline with the raw source.
-			"all": {Union: &cfg.UnionOp{
-				Sources:  []string{"a_running", "b"},
-				TagField: "src",
-			}},
+			"all": cfg.NewEntry(&cfg.Source{Type: "union", Sources: []string{"a_running", "b"},
+				TagField: "src"},
+			),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -155,15 +152,14 @@ func TestUnionMetaKeyFlat(t *testing.T) {
 	flat := ""
 	reg, err := Build(
 		map[string]ds.Source{"a": a},
-		nil,
-		map[string]*cfg.Pipeline{
-			"all": {Union: &cfg.UnionOp{
-				Sources:  []string{"a"},
+
+		map[string]*cfg.Source{
+			"all": cfg.NewEntry(&cfg.Source{Type: "union", Sources: []string{"a"},
 				TagField: "src",
-				MetaKey:  &flat,
-			}},
+				MetaKey:  &flat},
+			),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -180,21 +176,15 @@ func TestUnionMetaKeyFlat(t *testing.T) {
 }
 
 func TestUnionValidatorRejectsBothShapes(t *testing.T) {
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"a": {Type: "exec", Command: []string{"true"}},
-			"b": {Type: "exec", Command: []string{"true"}},
-		},
-		Pipelines: map[string]*cfg.Pipeline{
-			"bad": {Union: &cfg.UnionOp{
-				Sources:  []string{"a"},
-				Children: []cfg.MergeChild{{Source: "b"}},
-			}},
-		},
-		Components: map[string]*cfg.Component{
-			"x": {Type: "list", Items: []string{"x"}},
-		},
-		Screen: cfg.Screen{Layout: cfg.Node{Component: "x"}},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"a": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"true"}}),
+		"b": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"true"}}),
+
+		"bad": cfg.NewEntry(&cfg.Source{Type: "union", Sources: []string{"a"},
+			Children: []cfg.MergeChild{{Source: "b"}}},
+		)}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"x": {Type: "list", Items: []string{"x"}},
+	},
+		Screen: cfg.Screen{Layout: cfg.Node{Component: "x"}}},
 	}
 	if err := c.Validate(); err == nil {
 		t.Errorf("expected validator to reject both sources: and children: on union")
@@ -202,20 +192,14 @@ func TestUnionValidatorRejectsBothShapes(t *testing.T) {
 }
 
 func TestUnionValidatorRejectsTagFieldWithChildren(t *testing.T) {
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"a": {Type: "exec", Command: []string{"true"}},
-		},
-		Pipelines: map[string]*cfg.Pipeline{
-			"bad": {Union: &cfg.UnionOp{
-				Children: []cfg.MergeChild{{Source: "a"}},
-				TagField: "cluster",
-			}},
-		},
-		Components: map[string]*cfg.Component{
-			"x": {Type: "list", Items: []string{"x"}},
-		},
-		Screen: cfg.Screen{Layout: cfg.Node{Component: "x"}},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"a": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"true"}}),
+
+		"bad": cfg.NewEntry(&cfg.Source{Type: "union", Children: []cfg.MergeChild{{Source: "a"}},
+			TagField: "cluster"},
+		)}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"x": {Type: "list", Items: []string{"x"}},
+	},
+		Screen: cfg.Screen{Layout: cfg.Node{Component: "x"}}},
 	}
 	if err := c.Validate(); err == nil {
 		t.Errorf("expected validator to reject tag_field with children on union")

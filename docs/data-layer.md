@@ -12,6 +12,47 @@ For TUI-side schema (components, layout, theming), see
 
 ---
 
+## Top-level config shape
+
+A tui-builder YAML config has three top-level blocks:
+
+```yaml
+app:
+  title: My app                # config-wide metadata
+
+data:                          # the data layer — read by wrangl and the TUI
+  sources:                     # unified map — every entry carries a `type:`
+    countries:       { type: http, url: https://restcountries.com/v3.1/all }
+    sorted_countries: { type: sort, from: countries, by: "name.common" }
+
+tui:                           # the presentation layer — ignored by wrangl
+  components:
+    table: { type: table, source: sorted_countries, columns: [...] }
+  screen:                      # single-screen — mutually exclusive with `screens:`
+    layout: { component: table }
+  # screens / initial:         # multi-screen alternative
+```
+
+The split is intentional: `data:` is consumed by both wrangl and the
+TUI; `tui:` is only consumed by the TUI binary. Splitting them in YAML
+mirrors the package boundary enforced in code (see
+`scripts/check-data-layer-boundary.sh`).
+
+Inside `data.sources:`, every entry's `type:` picks its kind from one
+of the leaf kinds (`http`, `exec`, `file`, `websocket`, `static`,
+`merge`) or operator kinds (`passthrough`, `filter`, `project`,
+`derive`, `sort`, `union`, `compose`, `join`, `cache`). Leaves fetch
+externally; operators transform an upstream named via `from:` (or
+fan out over `sources:` / `parts:` / `lookups:`). There is no
+separate `data.pipelines:` block — leaves and operators share one
+map and resolve through one registry.
+
+**Throughout this doc**, snippets that focus on a single kind show
+just the entry being discussed — in a real config those entries live
+under `data.sources.<name>:`.
+
+---
+
 ## The model
 
 Every data source implements one contract:
@@ -47,9 +88,8 @@ Operators (`filter`, `project`, `union`, `join`) will land later
 without changing the contract.
 
 ```yaml
-pipelines:
-  all_countries:
-    from: countries        # source name OR another pipeline name
+all_countries:
+  from: countries        # source name OR another pipeline name
 ```
 
 Components and wrangl can target either a source or a pipeline by
@@ -167,14 +207,13 @@ When the TUI pushes from screen A to screen B and B's sources need
 parameters, declare them inline at the push site:
 
 ```yaml
-screens:
-  pods:
-    on_enter:
-      - source: pods_table
-        push: detail
-        bind:
-          namespace: ${selection.Namespace}
-          name:      ${selection.Name}
+pods:
+  on_enter:
+    - source: pods_table
+      push: detail
+      bind:
+        namespace: ${selection.Namespace}
+        name:      ${selection.Name}
 ```
 
 The bind values are resolved against the focused row at push time
@@ -257,6 +296,53 @@ one event per stdout line).
 set; on-demand when required params without defaults; otherwise
 one-shot.
 
+### `static`
+
+Inline data declared right in the YAML. No I/O, no network.
+
+**Use for:** fixtures, lookup tables (region codes → names, status
+labels), pipeline tests without external dependencies, demos that
+work offline.
+
+| Field | Required | Notes |
+|---|---|---|
+| `type: static` | ✓ | |
+| `data` | ✓ | inline YAML payload — list, object, scalar, anything |
+| `root` | ✗ | dot-path slicing into the data (mirrors http / file `root:`); useful when the inline value is a wrapper like `{items: [...]}` |
+
+```yaml
+# Flat list
+regions:
+  type: static
+  data: [us-east-1, us-west-2, eu-west-1]
+
+# List of objects
+people:
+  type: static
+  data:
+    - {name: Ada Lovelace,    role: Engineer}
+    - {name: Grace Hopper,    role: Director}
+
+# Wrapper object + root slicing
+pods:
+  type: static
+  root: items
+  data:
+    kind: PodList
+    items:
+      - {metadata: {name: pod-a}, status: {phase: Running}}
+      - {metadata: {name: pod-b}, status: {phase: Pending}}
+```
+
+**Emits:** the `data:` payload as-is (after `root:` slicing).
+
+**Lifecycle:** one-shot. No streaming, no refresh.
+
+Static sources compose with every pipeline operator — filter, sort,
+join, etc. — exactly like any other source, which makes them a
+natural scaffold for developing or testing a pipeline before pointing
+it at a real upstream.
+
 ### `file`
 
 Read a file off disk.
@@ -336,13 +422,12 @@ pipeline. The operator block is a tagged union — set one of
 configs with zero or multiple operators set.
 
 ```yaml
-pipelines:
-  <name>:
-    from: <upstream-name>           # passthrough
-  <name>:
-    filter:                          # filter operator
-      from: <upstream-name>
-      where: <expression>
+<name>:
+  from: <upstream-name>           # passthrough
+<name>:
+  filter:                          # filter operator
+    from: <upstream-name>
+    where: <expression>
 ```
 
 Pipelines are first-class data-layer nodes:
@@ -350,12 +435,124 @@ Pipelines are first-class data-layer nodes:
 - A stable public name decoupled from the underlying source kind (so
   you can swap an `http` source for an `exec` source without touching
   any component or wrangl invocation).
-- A graph point that future operators (`project`, `derive`, `sort`,
-  `union`, `compose`, `join`) plug into without changing the
-  binding contract.
+- A graph point where transforms (`filter`, `project`, `derive`,
+  `sort`), composers (`union`, `compose`), joins, and caches plug
+  in without changing the binding contract.
+- Their own typed `parameters:` block, bindable via wrangl `--param`
+  and visible in operator expressions as `params.X`.
 
 Components and wrangl can target either sources or pipelines by name.
 The `Registry.Get(name)` lookup checks pipelines first.
+
+**Hidden / private convention**: names prefixed with `_` are treated
+as "hidden" by `wrangl --list` — they don't show up in the default
+listing but stay fully callable from wrangl, from component
+bindings, and as upstreams in other pipelines. Use this for raw
+intermediate pipelines you don't want consumers binding to directly:
+
+```yaml
+_raw:        { from: kubectl_clusters_raw }           # private
+_kind_only:  { filter: { from: _raw, where: "hasPrefix(name, 'kind-')" } }
+clusters:    { project: { from: _kind_only, keep: { name: name, server: cluster.server } } }
+```
+
+`wrangl --list <config>` shows only `clusters`. `wrangl --list --all`
+(or `-a`) reveals everything.
+
+**Operator catalog at a glance**:
+
+| Operator | Arity | Shape | Streams |
+|---|---|---|---|
+| `from:` (passthrough) | 1 → 1 | identity wrapper | yes (delegates) |
+| `filter:` | 1 → 1 | drop items not matching predicate | yes (per-event check) |
+| `project:` | 1 → 1 | rebuild each item from declared keys | yes |
+| `derive:` | 1 → 1 | add computed fields per item | yes |
+| `sort:` | 1 → 1 | reorder by key expression | no (snapshot only) |
+| `union:` | N → 1 | flatten homogeneous children, tag rows | yes (when all children stream) |
+| `compose:` | N → 1 | bundle heterogeneous children into named buckets | no |
+| `join:` | driver + lookups → 1 | per-row lookup fetch + enrichment | no |
+| `cache:` | 1 → 1 | TTL-memoise upstream Fetch | streams pass-through |
+
+### Inline `pipe:` chains
+
+When a chain's intermediate steps aren't useful on their own, declare
+them inline via `pipe:` instead of giving each one a name:
+
+```yaml
+short_summary:
+  from: users
+  pipe:
+    - filter:  { where: "len(username) >= 8" }
+    - project:
+        keep:
+          username: username
+          name:     name
+          domain:   "lower(website)"
+    - sort: { by: username }
+```
+
+This desugars at load into a chain of anonymous pipelines linked by
+`from:` — `_short_summary_step1` (filter), `_short_summary_step2`
+(project), and the user-facing `short_summary` becomes the final
+`sort`. The intermediates use the hidden-name convention so they
+stay out of `wrangl --list` by default (`--list --all` reveals them).
+
+Rules:
+
+- `from:` on the parent pipeline is required — it's the input to the
+  first stage.
+- `from:` on a stage operator is forbidden — stage input is implicit
+  (previous stage's output, or the parent's `from:` for stage 1).
+- Each stage is exactly one operator. Stages are constrained to
+  single-input operators (`filter`, `project`, `derive`, `sort`,
+  `cache`). Multi-input operators (`union`, `compose`, `join`) take
+  extra upstreams that don't fit the implicit-previous-step model —
+  declare those as named pipelines and feed them via `from:`.
+- `pipe:` is mutually exclusive with the single-operator fields on
+  the same pipeline.
+- A single-stage `pipe:` is sugar for the operator itself — no
+  intermediate pipelines are created.
+
+When to break the chain into named pipelines instead:
+
+- An intermediate step is independently useful (other pipelines or
+  components consume it directly).
+- You want to attach `parameters:` to one of the intermediate steps
+  (parameters live on a named pipeline, not on a stage).
+
+#### `pipe:` on a source
+
+The same sugar works directly on a leaf source. A source declared as
+
+```yaml
+biz_only:
+  type: http
+  url: https://example.test/users
+  pipe:
+    - filter: { where: "hasSuffix(website, '.biz')" }
+```
+
+desugars at load into a `_biz_only_raw` leaf source (hidden) and a
+pipeline `biz_only` with `from: _biz_only_raw, pipe: [...]`. The
+user-facing name is still `biz_only` — components and wrangl bind to
+the transformed output, and the raw response stays addressable as
+`_biz_only_raw` for debugging.
+
+Use when the source you consume downstream is always the transformed
+shape and the raw response isn't independently useful. Rules:
+
+- `type:` must be set to one of the leaf kinds (http / exec / file /
+  websocket / static). Operator kinds (filter / sort / etc.) are
+  declared as their own entries with `from:` pointing at this one.
+- `type: merge` is rejected — merge is multi-input and doesn't fit
+  the implicit-previous-step model. Declare a pipeline with `union:`
+  or `compose:` if you need transforms on merged data.
+- Stage rules are identical to pipeline-level `pipe:` above.
+- `parameters:` on the source still bind to the raw fetch — `wrangl
+  --param key=val biz_only` routes through to `_biz_only_raw` since
+  the synthesized pipeline declares no parameters.
+
+Runnable example: `examples/inline_pipe_demo.yaml`.
 
 ### Pipeline parameters
 
@@ -365,13 +562,12 @@ values are available in every operator expression as `params.<name>`,
 alongside the item being processed.
 
 ```yaml
-pipelines:
-  long_usernames:
-    parameters:
-      min: { type: int, default: "8", description: "minimum username length" }
-    filter:
-      from: users
-      where: "len(username) >= int(params.min)"
+long_usernames:
+  parameters:
+    min: { type: int, default: "8", description: "minimum username length" }
+  filter:
+    from: users
+    where: "len(username) >= int(params.min)"
 ```
 
 | Where bindings come from | Behavior |
@@ -402,9 +598,8 @@ literally has a top-level `params` key.
 ### `from:` — passthrough
 
 ```yaml
-pipelines:
-  pods:
-    from: pods_raw
+pods:
+  from: pods_raw
 ```
 
 `Fetch` / `Subscribe` delegate unchanged. Useful as a stable public
@@ -413,16 +608,15 @@ name even when no transform is needed yet.
 ### `filter:` — drop items not matching a predicate
 
 ```yaml
-pipelines:
-  running_pods:
-    filter:
-      from: pods
-      where: "status.phase == 'Running'"
+running_pods:
+  filter:
+    from: pods
+    where: "status.phase == 'Running'"
 
-  errors_only:
-    filter:
-      from: app_logs                          # streaming text source
-      where: "item contains 'ERROR'"          # `item` = the raw line
+errors_only:
+  filter:
+    from: app_logs                          # streaming text source
+    where: "item contains 'ERROR'"          # `item` = the raw line
 ```
 
 **Inputs / outputs**:
@@ -463,15 +657,14 @@ runnable demo against jsonplaceholder.
 ### `project:` — slim items down to declared output keys
 
 ```yaml
-pipelines:
-  user_summary:
-    project:
-      from: users
-      keep:
-        id:       id
-        username: username
-        domain:   "lower(website)"
-        city:     "address.city"
+user_summary:
+  project:
+    from: users
+    keep:
+      id:       id
+      username: username
+      domain:   "lower(website)"
+      city:     "address.city"
 ```
 
 Each `keep:` value is an expression evaluated against the input item.
@@ -494,14 +687,13 @@ side of each `keep:` entry, the source expression is the RIGHT. So
 ### `derive:` — copy items and add computed fields
 
 ```yaml
-pipelines:
-  users_with_labels:
-    derive:
-      from: users
-      compute:
-        is_biz:       "hasSuffix(website, '.biz')"
-        username_len: "len(username)"
-        is_kube:      "hasPrefix(metadata.namespace, 'kube-')"
+users_with_labels:
+  derive:
+    from: users
+    compute:
+      is_biz:       "hasSuffix(website, '.biz')"
+      username_len: "len(username)"
+      is_kube:      "hasPrefix(metadata.namespace, 'kube-')"
 ```
 
 Every original field survives; each `compute:` entry adds a new field.
@@ -523,17 +715,16 @@ Mutations are copy-on-write — derive never alters the upstream items.
 ### `sort:` — reorder items by a key expression
 
 ```yaml
-pipelines:
-  pods_by_restarts:
-    sort:
-      from: pods
-      by: "status.containerStatuses.0.restartCount"
-      order: desc
+pods_by_restarts:
+  sort:
+    from: pods
+    by: "status.containerStatuses.0.restartCount"
+    order: desc
 
-  alphabetical:
-    sort:
-      from: users
-      by: "lower(name)"
+alphabetical:
+  sort:
+    from: users
+    by: "lower(name)"
 ```
 
 | Field | Required | Notes |
@@ -578,24 +769,22 @@ other pipelines.
 ```yaml
 # Shorthand: same as `merge sources: + tag_field:`. Each child gets
 # one synthetic tag whose value is the child source name.
-pipelines:
-  all_pods:
-    union:
-      sources: [pods_prod, pods_staging, pods_dev]
-      tag_field: cluster
-      on_error: skip
+all_pods:
+  union:
+    sources: [pods_prod, pods_staging, pods_dev]
+    tag_field: cluster
+    on_error: skip
 
 # Long form: per-child arbitrary tags. Use when rows need more
 # metadata than the source name.
-pipelines:
-  all_pods:
-    union:
-      children:
-        - source: pods_prod
-          tags: { cluster: prod,    cluster_url: "http://localhost:8001" }
-        - source: pods_staging
-          tags: { cluster: staging, cluster_url: "http://localhost:8002" }
-      on_error: skip
+all_pods:
+  union:
+    children:
+      - source: pods_prod
+        tags: { cluster: prod,    cluster_url: "http://localhost:8001" }
+      - source: pods_staging
+        tags: { cluster: staging, cluster_url: "http://localhost:8002" }
+    on_error: skip
 ```
 
 | Field | Required | Notes |
@@ -611,16 +800,15 @@ pipelines:
 ```yaml
 # Filter each cluster's pods first, THEN union. The merge SOURCE
 # can't do this — its children must be sources.
-pipelines:
-  prod_running:
-    filter: { from: pods_prod,    where: "status.phase == 'Running'" }
-  staging_running:
-    filter: { from: pods_staging, where: "status.phase == 'Running'" }
+prod_running:
+  filter: { from: pods_prod,    where: "status.phase == 'Running'" }
+staging_running:
+  filter: { from: pods_staging, where: "status.phase == 'Running'" }
 
-  all_running:
-    union:
-      sources: [prod_running, staging_running]
-      tag_field: cluster
+all_running:
+  union:
+    sources: [prod_running, staging_running]
+    tag_field: cluster
 ```
 
 Streaming follows merge's rule: union is streaming when every child
@@ -635,15 +823,14 @@ key in an output object. Useful for screens or wrangl consumers that
 want multiple unrelated data shapes from one addressable target.
 
 ```yaml
-pipelines:
-  fleet:
-    compose:
-      parts:
-        pods:        pods_all
-        deployments: deployments_all
-        services:    services_all
-      on_error: skip
-    # Output: {pods: [...], deployments: [...], services: [...]}
+fleet:
+  compose:
+    parts:
+      pods:        pods_all
+      deployments: deployments_all
+      services:    services_all
+    on_error: skip
+  # Output: {pods: [...], deployments: [...], services: [...]}
 ```
 
 | Field | Required | Notes |
@@ -680,32 +867,33 @@ row, and the row gets enriched with the result. The kubectl-describe-
 on-tree-highlight pattern, expressed at the data layer.
 
 ```yaml
-data_sources:
-  pods:
-    type: http
-    url: http://localhost:8001/api/v1/namespaces/default/pods
-    root: items
+data:
+  sources:
+    pods:
+      type: http
+      url: http://localhost:8001/api/v1/namespaces/default/pods
+      root: items
 
-  pod_detail:
-    type: http
-    parameters:
-      namespace: { type: string, required: true }
-      name:      { type: string, required: true }
-    url: http://localhost:8001/api/v1/namespaces/${params.namespace}/pods/${params.name}
+    pod_detail:
+      type: http
+      parameters:
+        namespace: { type: string, required: true }
+        name:      { type: string, required: true }
+      url: http://localhost:8001/api/v1/namespaces/${params.namespace}/pods/${params.name}
 
-pipelines:
-  pods_with_detail:
-    join:
-      driver:
-        from: pods                  # fetches once, yields N rows
-      lookups:
-        detail:
-          from: pod_detail          # invoked PER row with row-derived params
-          on:
-            namespace: metadata.namespace   # expression eval'd against the driver row
-            name:      metadata.name
-      emit: separate                 # or `merged`
-      on_error: fail                 # or `skip`
+  pipelines:
+    pods_with_detail:
+      join:
+        driver:
+          from: pods                  # fetches once, yields N rows
+        lookups:
+          detail:
+            from: pod_detail          # invoked PER row with row-derived params
+            on:
+              namespace: metadata.namespace   # expression eval'd against the driver row
+              name:      metadata.name
+        emit: separate                 # or `merged`
+        on_error: fail                 # or `skip`
 ```
 
 | Field | Required | Notes |
@@ -766,11 +954,10 @@ See [`examples/filter_demo.yaml`](../examples/filter_demo.yaml) →
 ### `cache:` — memoise an upstream's Fetch for a TTL
 
 ```yaml
-pipelines:
-  cached_users:
-    cache:
-      from: users
-      ttl: 30s
+cached_users:
+  cache:
+    from: users
+    ttl: 30s
 ```
 
 Reads within the TTL return the cached snapshot without hitting
@@ -789,29 +976,28 @@ the same source, caching the source ensures it's fetched once per
 TTL window instead of once per consumer:
 
 ```yaml
-pipelines:
-  # Expensive upstream cached for 30s.
-  cached_pods:
-    cache: { from: pods, ttl: 30s }
+# Expensive upstream cached for 30s.
+cached_pods:
+  cache: { from: pods, ttl: 30s }
 
-  # Three operators that all read from pods. Without cache, each
-  # call to `dashboard` would trigger three separate fetches. With
-  # cache, just one (per TTL window).
-  running:
-    filter: { from: cached_pods, where: "status.phase == 'Running'" }
-  by_age:
-    sort:   { from: cached_pods, by: "status.startTime", order: desc }
-  summary:
-    project:
-      from: cached_pods
-      keep: { name: metadata.name, phase: status.phase }
+# Three operators that all read from pods. Without cache, each
+# call to `dashboard` would trigger three separate fetches. With
+# cache, just one (per TTL window).
+running:
+  filter: { from: cached_pods, where: "status.phase == 'Running'" }
+by_age:
+  sort:   { from: cached_pods, by: "status.startTime", order: desc }
+summary:
+  project:
+    from: cached_pods
+    keep: { name: metadata.name, phase: status.phase }
 
-  dashboard:
-    compose:
-      parts:
-        running: running
-        by_age:  by_age
-        summary: summary
+dashboard:
+  compose:
+    parts:
+      running: running
+      by_age:  by_age
+      summary: summary
 ```
 
 **Streaming**: pass-through. The cache layer only memoises Fetch
@@ -826,13 +1012,12 @@ follow-up.
 
 ### `merge` (source) is still supported
 
-The `merge` data source pre-dates the union operator and remains
-fully functional. New configs should prefer `pipelines.X.union:` — it
-accepts pipeline children (so you can `filter → union → sort` in a
-single chain) and lives in the conceptually right layer (composition
-is a transform, not a fetch).
-
-Existing `data_sources.X: { type: merge, sources: [...] }` configs
+The `merge` kind pre-dates the union operator and remains
+fully functional. Under the unified schema the practical difference
+has shrunk — both fan out N upstreams — but `union` reads more
+naturally for "pipeline operator" intent, while `merge` carries leaf
+fields (`refresh`, `timeout`) that don't apply to a pure transform.
+Prefer `type: union` for new configs; existing `type: merge` entries
 keep working unchanged.
 
 ### Combining operators
@@ -843,31 +1028,30 @@ arbitrary as long as it's acyclic (the validator rejects cycles at
 load time).
 
 ```yaml
-pipelines:
-  # raw HTTP source
-  users:
-    from: users_raw
+# raw HTTP source
+users:
+  from: users_raw
 
-  # derive labels onto each user
-  labeled:
-    derive:
-      from: users
-      compute:
-        is_biz: "hasSuffix(website, '.biz')"
+# derive labels onto each user
+labeled:
+  derive:
+    from: users
+    compute:
+      is_biz: "hasSuffix(website, '.biz')"
 
-  # keep only the .biz users
-  biz_only:
-    filter:
-      from: labeled
-      where: "is_biz"
+# keep only the .biz users
+biz_only:
+  filter:
+    from: labeled
+    where: "is_biz"
 
-  # then project down to a flat shape for the consumer
-  biz_summary:
-    project:
-      from: biz_only
-      keep:
-        name:    name
-        website: website
+# then project down to a flat shape for the consumer
+biz_summary:
+  project:
+    from: biz_only
+    keep:
+      name:    name
+      website: website
 ```
 
 The full chain re-evaluates per fetch / per event. Build compiles
@@ -895,6 +1079,7 @@ to inspect, dump, or pipe.
 |---|---|
 | `wrangl <config>` | prints inventory of every source + pipeline (alias for `--list`) |
 | `wrangl --list <config>` | same |
+| `wrangl --list --all <config>` (or `-a`) | include hidden items — by convention names starting with `_` (private intermediates) are omitted from the listing but stay fully callable |
 | `wrangl <config> <target>` | dumps the named source/pipeline to stdout |
 | `wrangl <config> <target> --describe` | prints schema (kind, lifecycle, URL, parameters) |
 | `wrangl <config> <target> --param k=v` | binds a parameter; repeatable |

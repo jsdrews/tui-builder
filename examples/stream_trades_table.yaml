@@ -26,57 +26,58 @@ app:
   title: Live BTC/USD trades
   theme: nord
 
-data_sources:
-  trades:
-    type: websocket
-    url: wss://ws.bitstamp.net
-    timeout: 10s
-    initial_messages:
-      - '{"event":"bts:subscribe","data":{"channel":"live_trades_btcusd"}}'
+data:
+  sources:
+    trades:
+      type: websocket
+      url: wss://ws.bitstamp.net
+      timeout: 10s
+      initial_messages:
+        - '{"event":"bts:subscribe","data":{"channel":"live_trades_btcusd"}}'
 
-components:
-  raw_feed:
-    type: logview
-    title: Connection state + raw frames (debug)
-    searchable: true
-    source: trades
-    color_rules:
-      - {when: "~^\\(",                       color: theme:muted}
-      - {when: "~bts:subscription_succeeded", color: theme:accent}
-      - {when: '~"type":\s*0',                color: green}
-      - {when: '~"type":\s*1',                color: red}
+tui:
+  components:
+    raw_feed:
+      type: logview
+      title: Connection state + raw frames (debug)
+      searchable: true
+      source: trades
+      color_rules:
+        - {when: "~^\\(",                       color: theme:muted}
+        - {when: "~bts:subscription_succeeded", color: theme:accent}
+        - {when: '~"type":\s*0',                color: green}
+        - {when: '~"type":\s*1',                color: red}
 
-  trades_table:
-    type: table
-    title: Trades (newest first, ring buffer of 100)
-    source: trades
-    max_rows: 100
-    columns:
-      - {title: ID,        width: 12, value: "data.id"}
-      - {title: Time,      width: 22, value: "data.timestamp"}
-      - title: Side
-        width: 6
-        align: center
-        value: "data.type"
-        color_rules:
-          - {when: "0", color: green}
-          - {when: "1", color: red}
-      - title: Price (USD)
-        width: 16
-        align: right
-        sortable: true
-        sort: number
-        value: "data.price_str"
-      - title: Amount (BTC)
-        width: 16
-        align: right
-        sortable: true
-        sort: number
-        value: "data.amount_str"
-
-screen:
-  title: Trades
-  layout:
-    vstack:
-      - {fixed: 8, component: raw_feed}
-      - {flex: 1,  component: trades_table}
+    trades_table:
+      type: table
+      title: Trades (newest first, ring buffer of 100)
+      source: trades
+      max_rows: 100
+      columns:
+        - {title: ID,        width: 12, value: "data.id"}
+        - {title: Time,      width: 22, value: "data.timestamp"}
+        - title: Side
+          width: 6
+          align: center
+          value: "data.type"
+          color_rules:
+            - {when: "0", color: green}
+            - {when: "1", color: red}
+        - title: Price (USD)
+          width: 16
+          align: right
+          sortable: true
+          sort: number
+          value: "data.price_str"
+        - title: Amount (BTC)
+          width: 16
+          align: right
+          sortable: true
+          sort: number
+          value: "data.amount_str"
+  screen:
+    title: Trades
+    layout:
+      vstack:
+        - {fixed: 8, component: raw_feed}
+        - {flex: 1,  component: trades_table}

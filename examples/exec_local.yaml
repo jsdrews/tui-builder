@@ -12,38 +12,40 @@ app:
   title: Recent commits (exec)
   theme: nord
 
-data_sources:
-  commits:
-    type: exec
-    # The format the YAML schema cares about: an argv list. First entry
-    # is the binary (PATH-searched); the rest are passed as-is. No
-    # shell — quoting / globbing happens here, not in /bin/sh.
-    command:
-      - sh
-      - -c
-      - >
-        git log -n 20 --pretty=format:'%H%x09%h%x09%an%x09%ae%x09%aI%x09%s'
-        | awk -F'\t' 'BEGIN{print "["} NR>1{print ","} {gsub(/"/, "\\\"", $6); printf "{\"hash\":\"%s\",\"short\":\"%s\",\"author\":\"%s\",\"email\":\"%s\",\"date\":\"%s\",\"subject\":\"%s\"}", $1,$2,$3,$4,$5,$6} END{print "]"}'
-    # Optional: extra env on top of the inherited process env.
-    # env:
-    #   GIT_PAGER: cat
-    timeout: 10s
-    # No refresh: one fetch on screen entry. Press `r` to re-run.
+data:
+  sources:
+    commits:
+      type: exec
+      # The format the YAML schema cares about: an argv list. First entry
+      # is the binary (PATH-searched); the rest are passed as-is. No
+      # shell — quoting / globbing happens here, not in /bin/sh.
+      command:
+        - sh
+        - -c
+        - >
+          git log -n 20 --pretty=format:'%H%x09%h%x09%an%x09%ae%x09%aI%x09%s'
+          | awk -F'\t' 'BEGIN{print "["} NR>1{print ","} {gsub(/"/, "\\\"", $6); printf "{\"hash\":\"%s\",\"short\":\"%s\",\"author\":\"%s\",\"email\":\"%s\",\"date\":\"%s\",\"subject\":\"%s\"}", $1,$2,$3,$4,$5,$6} END{print "]"}'
+      # Optional: extra env on top of the inherited process env.
+      # env:
+      #   GIT_PAGER: cat
+      timeout: 10s
 
-components:
-  commits_table:
-    type: table
-    title: Recent commits
-    filterable: true
-    source: commits
-    initial_sort: {column: Date, desc: true}
-    columns:
-      - {title: SHA,     width: 9,  value: short}
-      - {title: Date,    width: 22, sortable: true, value: date}
-      - {title: Author,  width: 22, sortable: true, value: author}
-      - {title: Subject, width: 60, value: subject}
+tui:
+      # No refresh: one fetch on screen entry. Press `r` to re-run.
 
-screen:
-  title: Commits
-  layout:
-    component: commits_table
+  components:
+    commits_table:
+      type: table
+      title: Recent commits
+      filterable: true
+      source: commits
+      initial_sort: {column: Date, desc: true}
+      columns:
+        - {title: SHA,     width: 9,  value: short}
+        - {title: Date,    width: 22, sortable: true, value: date}
+        - {title: Author,  width: 22, sortable: true, value: author}
+        - {title: Subject, width: 60, value: subject}
+  screen:
+    title: Commits
+    layout:
+      component: commits_table

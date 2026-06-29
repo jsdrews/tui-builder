@@ -23,7 +23,7 @@ import (
 //   - Streaming text-line event: passes through unchanged (no place
 //     to add fields to a raw string; consumers using `item` style
 //     would use filter, not derive).
-func newDerive(name string, upstream ds.Source, def *cfg.DeriveOp, params map[string]string) (*Pipeline, error) {
+func newDerive(name string, upstream ds.Source, def *cfg.Source, params map[string]string) (*Pipeline, error) {
 	progs, err := compileMap(def.Compute, "derive.compute")
 	if err != nil {
 		return nil, err

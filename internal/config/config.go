@@ -6,19 +6,46 @@
 // same node fields.
 package config
 
-// Config is the top-level document. Either Screen (single-screen) or
-// Screens + Initial (multi-screen) must be set, not both.
+// Config is the top-level document. Layered into three blocks that
+// match the architectural boundary enforced in code:
 //
-// Pipelines (optional) sit between sources and consumers (components
-// in TUI mode; stdout in wrangl/data mode). v1 pipelines are passthrough
-// — they wrap a source or another pipeline and pass Fetch/Subscribe
-// through unchanged. Operators (filter, project, sort, etc.) layer on
-// top in later phases.
+//   - `app:`  — config-wide metadata (title, etc.).
+//   - `data:` — the data layer. Sources + pipelines live here. This
+//     block is completely independent of any TUI — wrangl
+//     reads only `app:` + `data:` and never touches `tui:`.
+//   - `tui:`  — the presentation layer. Components and screens live
+//     here. References data by name but doesn't define it.
+//
+// Either Tui.Screen (single-screen) or Tui.Screens + Tui.Initial
+// (multi-screen) must be set, not both.
 type Config struct {
-	App         App                    `yaml:"app"`
-	DataSources map[string]*DataSource `yaml:"data_sources,omitempty"`
-	Pipelines   map[string]*Pipeline   `yaml:"pipelines,omitempty"`
-	Components  map[string]*Component  `yaml:"components"`
+	App  App       `yaml:"app"`
+	Data DataBlock `yaml:"data,omitempty"`
+	TUI  TUIBlock  `yaml:"tui,omitempty"`
+}
+
+// DataBlock holds the data-layer definitions. Every entry under
+// `data.sources:` is a *Source whose `type:` field picks its kind.
+// Both leaf kinds (http / exec / file / websocket / static / merge)
+// and operator kinds (passthrough / filter / project / derive / sort
+// / union / compose / join / cache) share the single map and are
+// addressable by name from `tui.components` and from wrangl.
+type DataBlock struct {
+	// Sources is the unified data map. Every entry is a *Source
+	// whose `type:` field discriminates its kind (one of the leaf
+	// kinds — http / exec / file / websocket / static / merge — or
+	// operator kinds — passthrough / filter / project / derive / sort
+	// / union / compose / join / cache). Each kind reads only the
+	// fields it cares about; the others are silently ignored.
+	Sources map[string]*Source `yaml:"sources,omitempty"`
+}
+
+// TUIBlock holds the presentation-layer definitions: components and
+// screens. Components reference data by name (source or pipeline)
+// but never define data themselves — this is the data-layer / TUI-
+// layer boundary expressed in the YAML schema.
+type TUIBlock struct {
+	Components map[string]*Component `yaml:"components,omitempty"`
 	// Screen is the single-screen shorthand. Mutually exclusive with Screens.
 	Screen Screen `yaml:"screen,omitempty"`
 	// Screens is the multi-screen map keyed by name. Mutually exclusive
@@ -29,233 +56,10 @@ type Config struct {
 	Initial string `yaml:"initial,omitempty"`
 }
 
-// Pipeline composes / transforms one or more sources into a single
-// named, addressable data stream. Pipelines are first-class: both the
-// TUI (via Component.Pipeline binding) and the wrangl CLI (`wrangl
-// config.yaml <pipeline-name>`) consume them through the same
-// interface.
-//
-// Each pipeline is *exactly one* operator. The operator shape is a
-// tagged union — set one of From / Filter / (future Project / Sort /
-// Derive / Union / Compose / Join). The validator rejects configs
-// with zero or multiple operators set.
-//
-// Operators in this file:
-//   - From (string)        — passthrough. Wraps a source / pipeline,
-//                            delegates Fetch / Subscribe unchanged.
-//   - Filter (*FilterOp)   — drops items not matching a predicate.
-//                            Streaming-safe (per-event check).
-//   - Project (*ProjectOp) — replaces each item with a slimmer object
-//                            built from declared output keys, each
-//                            sourced from an input expression. Rename
-//                            + flatten in one operator.
-//   - Derive (*DeriveOp)   — copies each item and adds extra fields
-//                            computed from expressions.
-//
-// Future operators (sort, union, compose, join) plug in here as
-// additional union arms.
-type Pipeline struct {
-	// Parameters declares typed inputs the pipeline accepts. Each
-	// operator's expressions (filter.where, project.keep values,
-	// derive.compute values, sort.by) can reference bound values as
-	// `params.<name>`.
-	//
-	// Wrangl: `--param key=value` on a pipeline target binds to the
-	// pipeline when it declares parameters. (When the pipeline has
-	// no parameters, --param falls through to the underlying source —
-	// backwards compatible with the v1 wrangl behavior.)
-	//
-	// Pipeline parameters DON'T auto-forward to upstream source
-	// parameters today — that's an explicit forwarding feature to
-	// be designed once a real use case lands. Pipeline params are
-	// for the pipeline's own operator expressions; upstream source
-	// params are still bound by targeting the source directly.
-	Parameters map[string]*Parameter `yaml:"parameters,omitempty"`
 
-	// From names an upstream source or pipeline for a passthrough.
-	// Mutually exclusive with operator blocks below.
-	// Cycles in the pipeline reference graph are rejected at load time.
-	From string `yaml:"from,omitempty"`
 
-	// Filter drops items not matching the predicate. See FilterOp.
-	Filter *FilterOp `yaml:"filter,omitempty"`
-	// Project replaces each item with a slimmer object. See ProjectOp.
-	Project *ProjectOp `yaml:"project,omitempty"`
-	// Derive copies each item and adds computed fields. See DeriveOp.
-	Derive *DeriveOp `yaml:"derive,omitempty"`
-	// Sort reorders an iterable by a per-item key. See SortOp.
-	Sort *SortOp `yaml:"sort,omitempty"`
-	// Union composes N upstream iterables into one. See UnionOp. Same
-	// semantics as the merge SOURCE but lives in the pipeline layer
-	// so children can be other pipelines, not just leaf sources.
-	Union *UnionOp `yaml:"union,omitempty"`
-	// Compose bundles N heterogeneous upstreams into a single object
-	// whose keys are caller-chosen output names. See ComposeOp.
-	Compose *ComposeOp `yaml:"compose,omitempty"`
-	// Join enriches each driver row with results from per-row lookup
-	// fetches. The driver+lookup pattern (kubectl describe on row
-	// highlight, expressed as a data-layer concept). See JoinOp.
-	Join *JoinOp `yaml:"join,omitempty"`
-	// Cache memoises the upstream's Fetch result for a TTL. See
-	// CacheOp.
-	Cache *CacheOp `yaml:"cache,omitempty"`
-}
 
-// FilterOp drops items from its upstream that don't pass the
-// expression in Where. The expression is evaluated against each item
-// as an env (top-level field access: `status.phase == 'Running'`
-// rather than `item.status.phase == 'Running'`).
-//
-// Streaming: events whose payload doesn't pass are silently dropped.
-// One-shot / polled: the returned iterable is the subset that passes.
-// Non-iterable upstream (single object, string, etc.): the predicate
-// runs against the value itself.
-type FilterOp struct {
-	// From names the upstream source or pipeline whose items get
-	// filtered. Required.
-	From string `yaml:"from"`
-	// Where is the predicate expression. Required, non-empty. See
-	// internal/expr for the language reference; common forms:
-	//
-	//   status.phase == 'Running'
-	//   metadata.namespace == 'default'
-	//   hasPrefix(metadata.name, 'kube-')
-	//   status.containerStatuses.0.restartCount > 5
-	//   lower(metadata.namespace) contains 'prod'
-	Where string `yaml:"where"`
-}
 
-// ProjectOp replaces each upstream item with a new object whose keys
-// come from Keep. Each value in Keep is an expression evaluated
-// against the input item — bare dot-path expressions (`metadata.name`)
-// are the common case but anything the expression language can
-// produce is valid (`lower(metadata.namespace)`, `len(items)`).
-//
-// The result is a NEW object — fields not listed in Keep are dropped.
-// Useful for slimming down deep API responses to just what a downstream
-// component / wrangl consumer needs, and for renaming awkward source
-// paths to cleaner names.
-//
-// Non-object items pass through as nil (you can't project fields out
-// of a scalar).
-type ProjectOp struct {
-	// From names the upstream source or pipeline. Required.
-	From string `yaml:"from"`
-	// Keep maps output keys to input expressions. Required, non-empty.
-	//
-	//   project:
-	//     from: pods
-	//     keep:
-	//       name:      metadata.name
-	//       namespace: metadata.namespace
-	//       phase:     status.phase
-	//
-	// Output items have the shape {name: ..., namespace: ..., phase: ...}.
-	Keep map[string]string `yaml:"keep"`
-}
-
-// UnionOp composes N upstream iterables into a single flat union.
-// Same semantics as the merge SOURCE — including per-child tags
-// nested under MetaKey — but lives as a pipeline operator so children
-// can be ANY ds.Source (a leaf source OR another pipeline).
-//
-// Two configuration shapes — pick one:
-//
-//   - Sources + TagField: shorthand where each child gets one
-//     synthetic tag whose value is the child source name. Legacy.
-//   - Children: each entry names a child source + its own tags map.
-//     Long form; required when you want richer per-child metadata
-//     (cluster name + URL + region, etc.).
-//
-// The validator rejects both shapes being set, and `tag_field:`
-// paired with `children:` (each child carries its own tags map in
-// that form, so a global tag field name is meaningless).
-type UnionOp struct {
-	// Shorthand: list child sources/pipelines by name.
-	Sources []string `yaml:"sources,omitempty"`
-	// TagField is the key written under MetaKey for every row from
-	// every child in the shorthand path. Value is the child source name.
-	TagField string `yaml:"tag_field,omitempty"`
-	// Long form: each entry explicitly names a child + its own tags.
-	Children []MergeChild `yaml:"children,omitempty"`
-	// OnError chooses what happens when a child fails:
-	//   "" / "fail" (default) — any child error aborts the union
-	//   "skip"                — drop the failed child, return the rest
-	OnError string `yaml:"on_error,omitempty"`
-	// MetaKey controls where injected tags land — defaults to "_meta"
-	// (segregated from upstream child data). "" opts out and writes
-	// flat at the top level (legacy v1 shape).
-	MetaKey *string `yaml:"meta_key,omitempty"`
-}
-
-// CacheOp memoises the upstream's Fetch result for a configured TTL.
-// Reads within the TTL return the cached snapshot without hitting
-// the upstream; the first read after the TTL elapses re-fetches.
-//
-// Useful for:
-//   - Expensive upstreams shared by multiple operators (`union of
-//     [filter from pods, sort from pods]` where pods would otherwise
-//     fetch twice per top-level Fetch).
-//   - Slow remote APIs that downstream consumers hit repeatedly.
-//
-// Errors are NOT cached — a failing upstream will be retried on the
-// next Fetch rather than returning a stale error for the rest of the
-// TTL.
-//
-// Streaming: Subscribe passes through unchanged. Caching event
-// streams isn't meaningful (events are incremental, not snapshots);
-// callers needing dedup on streaming events should design that
-// upstream.
-type CacheOp struct {
-	// From names the upstream source or pipeline to memoise.
-	From string `yaml:"from"`
-	// TTL is the cache lifetime as a duration string ("30s", "5m").
-	// Required.
-	TTL string `yaml:"ttl"`
-}
-
-// JoinOp enriches each row from a driver iterable with results
-// fetched per-row from one or more lookups. The classic pattern is
-// "list pods → for each pod, fetch its detail / logs" — the kubectl
-// describe-on-highlight flow expressed as a data-layer concept.
-//
-// Driver yields N rows; for each row, every lookup is invoked with
-// params computed from that row, and the result is attached to the
-// row. Emit controls whether lookup results sit alongside the row
-// (`separate`, default) or get merged into the row's fields
-// (`merged`).
-//
-// v1 constraints:
-//   - Snapshot only — Subscribe returns ErrNotStreaming. Joining
-//     over a driver stream needs windowing semantics (cache the
-//     latest snapshot; fetch lookups lazily on access) not yet
-//     designed.
-//   - Each `lookup.from` must be a source with `parameters:` declared,
-//     not a pipeline. Lookups need to be re-invoked per row with new
-//     params; sources support that via BindParams. Pipeline-as-lookup
-//     is a follow-up.
-//   - No caching yet — every driver row triggers a fresh per-lookup
-//     fetch. Add an LRU keyed on params when N gets large enough to
-//     hurt.
-type JoinOp struct {
-	// Driver names the iterable whose rows seed the join. Can be any
-	// source or pipeline that returns []any.
-	Driver JoinDriver `yaml:"driver"`
-	// Lookups is the map of per-row fetches. Each entry's key is the
-	// output bucket name (`detail`, `logs`); each value names the
-	// lookup source + how to derive its params from the driver row.
-	Lookups map[string]JoinLookup `yaml:"lookups"`
-	// Emit controls the output shape per row:
-	//   "" / "separate" (default) → {row: <driver row>, <lookup_name>: <result>, ...}
-	//   "merged"                  → {<driver row fields>, <lookup result fields>}
-	//                                Merged requires lookup results to be
-	//                                map-shaped; non-map results error.
-	Emit string `yaml:"emit,omitempty"`
-	// OnError controls what happens when a single per-row lookup fails:
-	//   "" / "fail" (default) — surface as a fetch error
-	//   "skip"                — drop the row from the output and continue
-	OnError string `yaml:"on_error,omitempty"`
-}
 
 // JoinDriver names the iterable whose rows seed the join.
 type JoinDriver struct {
@@ -280,212 +84,8 @@ type JoinLookup struct {
 	On map[string]string `yaml:"on"`
 }
 
-// ComposeOp bundles N heterogeneous upstreams into a single object
-// whose top-level keys are caller-chosen output names and whose
-// values are the corresponding upstream results.
-//
-// Unlike `union` (which flattens N HOMOGENEOUS iterables into one
-// big list), compose preserves the separation of each upstream so a
-// single addressable target can carry unrelated data shapes — pods +
-// deployments + services for a "fleet" pipeline, for instance.
-//
-// Children are fetched concurrently; ordering of the parallel fan-out
-// doesn't affect the output (the result is a map keyed by output name).
-type ComposeOp struct {
-	// Parts maps output key → upstream source / pipeline name.
-	// Required, non-empty.
-	//
-	//   compose:
-	//     parts:
-	//       pods:        pods_all
-	//       deployments: deployments_all
-	//       services:    services_all
-	//
-	// Output is {pods: <pods_all result>, deployments: …, services: …}.
-	Parts map[string]string `yaml:"parts"`
-	// OnError chooses what happens when a child fails:
-	//   "" / "fail" (default) — any child error aborts compose
-	//   "skip"                — drop the failed child from the output;
-	//                            only error if every child fails
-	OnError string `yaml:"on_error,omitempty"`
-}
 
-// SortOp reorders the upstream iterable by a per-item key expression.
-// The key is computed once per item; sort.SliceStable orders items
-// so ties keep their relative input order.
-//
-// Snapshot-only: streaming subscribes return ErrNotStreaming so
-// consumers fall back to polling. Sorting a true event stream needs
-// windowing (which we'll add when a use-case demands it); for now
-// the operator is honest about its constraint.
-//
-// Comparison handles bool, number (int / int64 / float64), string,
-// and time.Time. Mixed-type keys (rare in practice) fall back to
-// string-representation comparison.
-type SortOp struct {
-	// From names the upstream source or pipeline. Required.
-	From string `yaml:"from"`
-	// By is the expression that produces the sort key per item.
-	// Required, non-empty. Common forms:
-	//
-	//   metadata.name
-	//   status.containerStatuses.0.restartCount
-	//   lower(metadata.name)
-	//   parseTime(status.startTime)
-	By string `yaml:"by"`
-	// Order is "asc" (default) or "desc". Anything else is rejected
-	// at validate time so typos surface immediately.
-	Order string `yaml:"order,omitempty"`
-}
 
-// DeriveOp copies each upstream item unchanged and adds new fields
-// computed from expressions. Useful for synthesising derived values
-// (age from a start timestamp, a label from a status combination)
-// without losing access to the original fields.
-//
-// Compute keys that collide with existing item fields override them —
-// derive wins so a user can re-shape an awkward field in-place.
-//
-// Non-object items pass through unchanged (nowhere to add fields).
-type DeriveOp struct {
-	// From names the upstream source or pipeline. Required.
-	From string `yaml:"from"`
-	// Compute maps output keys to expressions. Required, non-empty.
-	//
-	//   derive:
-	//     from: pods
-	//     compute:
-	//       age_seconds: "now() - parseTime(status.startTime)"
-	//       is_kube:     "hasPrefix(metadata.namespace, 'kube-')"
-	Compute map[string]string `yaml:"compute"`
-}
-
-// DataSource fetches data that one or more components bind to. Supported
-// `type:` values: http, exec, file, merge. ${selection.*} and ${env.*}
-// tokens substitute at push time across most string fields.
-//
-// Per-type field reference:
-//
-//	http   url, method, headers, body, format, root, refresh, timeout
-//	exec   command, env, format, root, refresh, timeout
-//	file   path, format, root, refresh
-//	merge  sources, tag_field, on_error, refresh
-type DataSource struct {
-	// Type selects the fetch mechanism.
-	Type string `yaml:"type"`
-
-	// Parameters declares typed inputs the source needs to run. Any
-	// caller (wrangl --param, TUI push site, programmatic) must supply
-	// values for the required params; the source references them via
-	// ${params.<name>} in URL / Body / Headers / Command / Env / Path /
-	// InitialMessages templates.
-	//
-	// Lifecycle inference: a source with at least one required param
-	// that has no default is on-demand (won't run without explicit
-	// caller binding). Polled / streamed sources can also have params
-	// but all required ones must be bindable at startup (defaults,
-	// env, etc.) for the source to schedule itself.
-	Parameters map[string]*Parameter `yaml:"parameters,omitempty"`
-
-	// Shared by http / exec / file / merge.
-	// Root is a dot-path into the response selecting the iterable root
-	// for list/table bindings. Empty = response itself.
-	Root string `yaml:"root,omitempty"`
-	// Refresh is the polling interval (e.g. "30s", "1m"). Empty = fetch
-	// once on screen activate. Driven by tea.Tick.
-	Refresh string `yaml:"refresh,omitempty"`
-	// Timeout caps per-fetch latency. Default 10s for http/exec, n/a
-	// for file (synchronous read) and merge (defers to children).
-	Timeout string `yaml:"timeout,omitempty"`
-	// Format selects how the response body is parsed:
-	//   "" / "json"   parse as JSON, hand the typed value to bindings (default)
-	//   "text"        keep the body as a raw string — required for logview
-	//                 bindings against plain-text endpoints (e.g. kube pod logs)
-	Format string `yaml:"format,omitempty"`
-
-	// http fields.
-	URL     string            `yaml:"url,omitempty"`
-	Method  string            `yaml:"method,omitempty"`
-	Headers map[string]string `yaml:"headers,omitempty"`
-	Body    string            `yaml:"body,omitempty"`
-
-	// websocket fields.
-	// InitialMessages are text frames sent immediately after the
-	// connection upgrades — useful for protocols (bitstamp, Kraken,
-	// Coinbase, many custom buses) that require a subscribe handshake
-	// before the server starts emitting. ${selection.*} / ${env.*}
-	// substitute per entry. Sent in order, fire-and-forget; failures
-	// don't terminate the stream but do appear as one error event.
-	InitialMessages []string `yaml:"initial_messages,omitempty"`
-
-	// exec fields.
-	// Command is the argv ([cmd, arg, arg, ...]). The first element is
-	// looked up in $PATH; subsequent elements are passed as-is.
-	// ${selection.*} and ${env.*} substitute per element.
-	Command []string `yaml:"command,omitempty"`
-	// Env adds (or overrides) environment variables on top of the
-	// process's own environment. ${env.*} can reference outer env;
-	// ${selection.*} substitutes in values.
-	Env map[string]string `yaml:"env,omitempty"`
-	// Follow turns a source into a streaming source.
-	//
-	// On `exec`: the subprocess is started (not waited on), its stdout
-	// is read line-by-line, and each line is delivered as an Event.
-	// Use for `kubectl logs -f`, `tail -f`, `journalctl -f`, etc.
-	//
-	// On `http`: the request stays open and the response body is read
-	// line-by-line. Use for kube `?follow=true` log endpoints, SSE
-	// streams, NDJSON change-feeds, anything chunked.
-	//
-	// Refresh is ignored when Follow is true (the open stream is the
-	// continuous data path). format: text is the typical companion —
-	// each line goes through as-is. format: json parses each line
-	// at the consumer (logview / wrangl --raw bypasses parsing).
-	Follow bool `yaml:"follow,omitempty"`
-
-	// file fields.
-	// Path is the file to read. ${selection.*} / ${env.*} substitute.
-	Path string `yaml:"path,omitempty"`
-
-	// merge fields. Two shapes — pick one:
-	//
-	// Shorthand: Sources + TagField. Lists child source names; the
-	// composer injects a single field per row whose value is the source
-	// name. Right for cross-cluster / cross-account fan-outs where the
-	// only thing you need is "which source did this row come from."
-	//
-	// Long form: Children. Each entry names a source AND a map of
-	// arbitrary tags to inject into every row from that child. Use when
-	// rows need more than a single literal source-name — e.g. a drilldown
-	// detail source needs the cluster's proxy URL or region code that
-	// isn't in the pod JSON itself.
-	Sources  []string     `yaml:"sources,omitempty"`
-	TagField string       `yaml:"tag_field,omitempty"`
-	Children []MergeChild `yaml:"children,omitempty"`
-	// MetaKey is the JSON key that merge-injected tags get nested under,
-	// segregating framework metadata from the original child data so
-	// they don't collide and so consumers can tell at a glance "this
-	// came from the merge composer, not from the upstream source."
-	//
-	// Default: `_meta`. Set to "" (explicit empty) to opt out and
-	// write tags flat at the top level (the legacy v1 shape).
-	//
-	// Concrete example with default:
-	//   {"metadata": {...}, "status": {...}, "_meta": {"cluster": "prod"}}
-	// With MetaKey set to "":
-	//   {"metadata": {...}, "status": {...}, "cluster": "prod"}
-	//
-	// Column / inspector field paths reach the metadata via dot-path
-	// (`value: _meta.cluster`) when nested; via the bare key
-	// (`value: cluster`) when flat.
-	MetaKey *string `yaml:"meta_key,omitempty"`
-	// OnError chooses what happens when a child source errors during a
-	// merge fetch:
-	//   "" / "fail" (default) — any child error aborts the merge
-	//   "skip"                — drop the failed child, return the rest
-	//                            (only errors if EVERY child fails)
-	OnError string `yaml:"on_error,omitempty"`
-}
 
 // App configures the surrounding tuilib app shell.
 type App struct {
@@ -630,10 +230,10 @@ type Parameter struct {
 type Prompt struct {
 	Key         string   `yaml:"key"`
 	Label       string   `yaml:"label,omitempty"`
-	Type        string   `yaml:"type,omitempty"`        // text | select | confirm
-	Placeholder string   `yaml:"placeholder,omitempty"` // text only
-	Initial     string   `yaml:"initial,omitempty"`     // text default value
-	Options     []string `yaml:"options,omitempty"`     // select choices
+	Type        string   `yaml:"type,omitempty"`          // text | select | confirm
+	Placeholder string   `yaml:"placeholder,omitempty"`   // text only
+	Initial     string   `yaml:"initial,omitempty"`       // text default value
+	Options     []string `yaml:"options,omitempty"`       // select choices
 	InitialIdx  int      `yaml:"initial_index,omitempty"` // select default
 	InitialBool bool     `yaml:"initial_bool,omitempty"`  // confirm default
 }
@@ -717,19 +317,16 @@ type Component struct {
 	// InitialCursor places the cursor at a specific row index on startup.
 	InitialCursor int `yaml:"initial_cursor,omitempty"`
 
-	// Source names a data source this component is bound to. When set,
-	// the static Items/Rows/Fields are ignored and the component is
-	// populated by the source's response after each fetch. Use Item
-	// (list), per-column Value (table), or per-field Path (inspector) to
-	// map from response shape to component shape.
-	//
-	// Pipeline is the alias: binding to a pipeline name works exactly
-	// like binding to a source name. Pipelines implement the same
-	// fetch contract; the component layer doesn't care which one it's
-	// reading from. Either Source OR Pipeline can be set; setting both
-	// is a config error.
-	Source   string `yaml:"source,omitempty"`
-	Pipeline string `yaml:"pipeline,omitempty"`
+	// Source names the data entry this component is bound to. The
+	// entry can be any kind (leaf source or pipeline operator) —
+	// after the sources/pipelines unification, components don't
+	// distinguish between them at the schema level. When Source is
+	// set, the static Items/Rows/Fields are ignored and the
+	// component is populated by the entry's response after each
+	// fetch. Use Item (list), per-column Value (table), or per-field
+	// Path (inspector) to map from response shape to component
+	// shape.
+	Source string `yaml:"source,omitempty"`
 	// Item is the dot-path used by a list bound to a data source to pluck
 	// the display string for each element of the iterable root.
 	Item string `yaml:"item,omitempty"`

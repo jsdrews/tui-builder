@@ -16,24 +16,12 @@ import (
 // leaf sources.
 //
 // The implementation delegates to internal/datasource.NewMerge so
-// there's exactly one composer codepath. We translate the UnionOp
-// into a synthetic cfg.DataSource{Type: "merge", ...} for the
-// existing merge constructor; the resulting Source becomes this
-// Pipeline's upstream and the Pipeline acts as a thin passthrough
-// over it.
-func newUnion(name string, children map[string]ds.Source, def *cfg.UnionOp) (*Pipeline, error) {
-	// Translate the operator config into the wire shape NewMerge
-	// expects. Identical field semantics — see cfg.UnionOp and the
-	// merge source documentation.
-	fake := &cfg.DataSource{
-		Type:     "merge",
-		Sources:  append([]string(nil), def.Sources...),
-		TagField: def.TagField,
-		Children: append([]cfg.MergeChild(nil), def.Children...),
-		OnError:  def.OnError,
-		MetaKey:  def.MetaKey,
-	}
-	merged, err := ds.NewMerge(fake, children)
+// there's exactly one composer codepath. Union and Merge share the
+// same field shape on cfg.Source (Sources / Children / TagField /
+// MetaKey / OnError) so we pass the source directly — the merge
+// builder doesn't care that the Type field says "union".
+func newUnion(name string, children map[string]ds.Source, def *cfg.Source) (*Pipeline, error) {
+	merged, err := ds.NewMerge(def, children)
 	if err != nil {
 		return nil, fmt.Errorf("union: %w", err)
 	}

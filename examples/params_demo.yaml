@@ -21,46 +21,42 @@
 # Public API: jsonplaceholder.typicode.com — no auth, stable, 10 users.
 app:
   title: Params Demo
-
-data_sources:
-  posts_by_user:
-    type: http
-    # parameters declares the source's required and optional inputs.
-    # Each entry is a typed slot; callers bind values, sources reference
-    # them via ${params.<name>}.
-    parameters:
-      user_id:
-        type: int
-        required: true
-        description: jsonplaceholder user id (1-10)
-      limit:
-        type: int
-        default: 5
-        description: maximum posts to return
-    url: https://jsonplaceholder.typicode.com/users/${params.user_id}/posts?_limit=${params.limit}
-    timeout: 10s
-
-# Passthrough pipeline so the source is also addressable under a stable
-# public name. Mirrors the convention from http_countries.yaml.
-pipelines:
-  user_posts:
-    from: posts_by_user
-
-# Minimal table so the YAML validates as a complete tui-builder config.
-# wrangl ignores components / screen entirely; this only matters if you
-# point tui-builder at the file. For TUI use, params would need to be
-# bound from env (`from_env:`) or from a boot prompt — not part of this
-# POC. wrangl is the focal point.
-components:
-  posts:
-    type: table
-    title: Posts
-    pipeline: user_posts
-    columns:
-      - {title: ID,    width: 6,  sortable: true, value: id}
-      - {title: User,  width: 6,  sortable: true, value: userId}
-      - {title: Title, flex: 2,   value: title}
-
-screen:
-  layout:
-    component: posts
+data:
+  sources:
+    posts_by_user:
+      type: http
+      # parameters declares the source's required and optional inputs.
+      # Each entry is a typed slot; callers bind values, sources reference
+      # them via ${params.<name>}.
+      parameters:
+        user_id:
+          type: int
+          required: true
+          description: jsonplaceholder user id (1-10)
+        limit:
+          type: int
+          default: 5
+          description: maximum posts to return
+      url: https://jsonplaceholder.typicode.com/users/${params.user_id}/posts?_limit=${params.limit}
+      timeout: 10s
+    user_posts:
+      type: passthrough
+      from: posts_by_user
+tui:
+  # Minimal table so the YAML validates as a complete tui-builder config.
+  # wrangl ignores components / screen entirely; this only matters if you
+  # point tui-builder at the file. For TUI use, params would need to be
+  # bound from env (`from_env:`) or from a boot prompt — not part of this
+  # POC. wrangl is the focal point.
+  components:
+    posts:
+      type: table
+      title: Posts
+      columns:
+        - {title: ID, width: 6, sortable: true, value: id}
+        - {title: User, width: 6, sortable: true, value: userId}
+        - {title: Title, flex: 2, value: title}
+      source: user_posts
+  screen:
+    layout:
+      component: posts

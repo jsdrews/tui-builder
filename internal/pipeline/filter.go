@@ -25,7 +25,7 @@ import (
 //     access works); a non-JSON line is evaluated against the raw
 //     string with `item` as the binding. Events that fail the
 //     predicate drop silently; events with errors surface as Event{Err}.
-func newFilter(name string, upstream ds.Source, def *cfg.FilterOp, params map[string]string) (*Pipeline, error) {
+func newFilter(name string, upstream ds.Source, def *cfg.Source, params map[string]string) (*Pipeline, error) {
 	prog, err := expr.Compile(def.Where)
 	if err != nil {
 		return nil, fmt.Errorf("filter: %w", err)

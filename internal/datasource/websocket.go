@@ -26,7 +26,7 @@ type websocketSource struct {
 	timeout         time.Duration // connect timeout
 }
 
-func newWebsocket(d *cfg.DataSource) (Source, error) {
+func newWebsocket(d *cfg.Source) (Source, error) {
 	timeout := 10 * time.Second
 	if d.Timeout != "" {
 		t, err := time.ParseDuration(d.Timeout)

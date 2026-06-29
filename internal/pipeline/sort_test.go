@@ -17,11 +17,11 @@ func TestSortAscending(t *testing.T) {
 	}}
 	reg, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
-			"sorted": {Sort: &cfg.SortOp{From: "src", By: "name"}},
+
+		map[string]*cfg.Source{
+			"sorted": cfg.NewEntry(&cfg.Source{Type: "sort", From: "src", By: "name"}),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -48,11 +48,11 @@ func TestSortDescending(t *testing.T) {
 	}}
 	reg, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
-			"top_first": {Sort: &cfg.SortOp{From: "src", By: "score", Order: "desc"}},
+
+		map[string]*cfg.Source{
+			"top_first": cfg.NewEntry(&cfg.Source{Type: "sort", From: "src", By: "score", Order: "desc"}),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -87,11 +87,11 @@ func TestSortStableOnTies(t *testing.T) {
 	}}
 	reg, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
-			"by_group": {Sort: &cfg.SortOp{From: "src", By: "group"}},
+
+		map[string]*cfg.Source{
+			"by_group": cfg.NewEntry(&cfg.Source{Type: "sort", From: "src", By: "group"}),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -116,11 +116,11 @@ func TestSortNilKeyClustersFirst(t *testing.T) {
 	}}
 	reg, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
-			"sorted": {Sort: &cfg.SortOp{From: "src", By: "name"}},
+
+		map[string]*cfg.Source{
+			"sorted": cfg.NewEntry(&cfg.Source{Type: "sort", From: "src", By: "name"}),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -145,11 +145,11 @@ func TestSortNonIterablePassesThrough(t *testing.T) {
 	up := &fakeSource{data: map[string]any{"name": "x"}}
 	reg, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
-			"sorted": {Sort: &cfg.SortOp{From: "src", By: "name"}},
+
+		map[string]*cfg.Source{
+			"sorted": cfg.NewEntry(&cfg.Source{Type: "sort", From: "src", By: "name"}),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -168,11 +168,11 @@ func TestSortSubscribeReturnsNotStreaming(t *testing.T) {
 	streamer := &fakeStreamer{}
 	reg, err := Build(
 		map[string]ds.Source{"src": streamer},
-		nil,
-		map[string]*cfg.Pipeline{
-			"sorted": {Sort: &cfg.SortOp{From: "src", By: "x"}},
+
+		map[string]*cfg.Source{
+			"sorted": cfg.NewEntry(&cfg.Source{Type: "sort", From: "src", By: "x"}),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -184,17 +184,12 @@ func TestSortSubscribeReturnsNotStreaming(t *testing.T) {
 }
 
 func TestSortInvalidOrderRejected(t *testing.T) {
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"src": {Type: "exec", Command: []string{"true"}},
-		},
-		Pipelines: map[string]*cfg.Pipeline{
-			"bad": {Sort: &cfg.SortOp{From: "src", By: "x", Order: "random"}},
-		},
-		Components: map[string]*cfg.Component{
-			"c": {Type: "list", Items: []string{"x"}},
-		},
-		Screen: cfg.Screen{Layout: cfg.Node{Component: "c"}},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"src": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"true"}}),
+
+		"bad": cfg.NewEntry(&cfg.Source{Type: "sort", From: "src", By: "x", Order: "random"})}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"c": {Type: "list", Items: []string{"x"}},
+	},
+		Screen: cfg.Screen{Layout: cfg.Node{Component: "c"}}},
 	}
 	if err := c.Validate(); err == nil {
 		t.Errorf("expected validator to reject order=random")

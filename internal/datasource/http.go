@@ -40,7 +40,7 @@ type httpSource struct {
 	refresh time.Duration
 }
 
-func newHTTP(d *cfg.DataSource) (Source, error) {
+func newHTTP(d *cfg.Source) (Source, error) {
 	method := strings.ToUpper(d.Method)
 	if method == "" {
 		method = http.MethodGet

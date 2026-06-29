@@ -19,9 +19,13 @@ not a TUI implementation detail:
   through tuilib components. The TUI is one sink, not the product.
 
 A `pipelines:` block in the YAML declares named, addressable pipelines
-over your sources. Today they're passthroughs (a stable name you can
-bind components to and ask `wrangl` to dump). Operators (`filter`,
-`project`, `union`, `join`) layer on top in later phases.
+over your sources. Pipelines support a full operator catalog:
+`filter`, `project`, `derive`, `sort`, `union`, `compose`, `join`,
+and `cache` (plus pure passthrough via `from:`). Operator expressions
+use an embedded expression language (`expr-lang`). Pipelines have
+their own typed `parameters:` blocks, bindable via wrangl `--param`.
+
+See [`docs/data-layer.md`](docs/data-layer.md) for the full reference.
 
 ```
 ┌ All pods (3 clusters merged) ────────────────────────────────────┐
@@ -91,6 +95,13 @@ bin/wrangl --list examples/http_countries.yaml
 # Or pipe one pipeline's output downstream:
 bin/wrangl examples/http_countries.yaml all_countries | jq '.[0]'
 bin/wrangl --limit 50 examples/stream_l1.yaml l1 | jq '.data.s'
+
+# Or run a parameterized pipeline (operator expressions get
+# `params.X` access alongside item fields):
+bin/wrangl examples/filter_demo.yaml long_usernames --param min=12
+
+# Or describe a pipeline's schema (operator kind, lifecycle, params):
+bin/wrangl examples/filter_demo.yaml users_with_posts --describe
 ```
 
 `wrangl` is the same data layer the TUI uses — the architecture
@@ -379,7 +390,8 @@ cmd/
 internal/
   config/             # YAML schema (one Go struct per shape) + validator + DAG check
   datasource/         # Source interface + http / exec / file / websocket / merge
-  pipeline/           # named pipelines over sources (passthrough today; operators TBD)
+  pipeline/           # named pipelines: filter / project / derive / sort / union / compose / join / cache
+  expr/               # embedded expression language adapter (expr-lang/expr); used by every operator
   output/             # JSON / NDJSON stdout sink used by wrangl
   build/              # cfg → live tuilib components + binding layer       [TUI side]
   screen/             # screen.Screen impl: focus, push/pop, modals, lifecycle [TUI side]

@@ -28,7 +28,7 @@ import (
 // composed event would need fan-in semantics (full snapshot per
 // child event, or per-child delta) we haven't designed yet. For
 // streaming consumers, subscribe to individual children directly.
-func newCompose(name string, children map[string]ds.Source, def *cfg.ComposeOp) (*Pipeline, error) {
+func newCompose(name string, children map[string]ds.Source, def *cfg.Source) (*Pipeline, error) {
 	parts := make([]composedChild, 0, len(def.Parts))
 	for outKey, inputName := range def.Parts {
 		src, ok := children[inputName]

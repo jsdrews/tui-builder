@@ -15,10 +15,14 @@ reference, see [`docs/components.md`](docs/components.md).
 tui-builder has two halves, split by what they do with the same config:
 
 ```
-                          ┌───────────────────────────── data layer ─────────────────────────────┐
+                          ┌──────────────────────────────────── data layer ────────────────────────────────────┐
    YAML config  ──►  internal/config  ──►  internal/datasource  ──►  internal/pipeline  ──┬──►  internal/output  ──►  stdout (cmd/wrangl)
-                    (structs + valid.)    (Source impls)            (named pipelines)     │
-                                                                                          ▼
+                    (structs + valid.)    (Source impls)            (operator catalog)    │       (JSON / NDJSON / raw)
+                                                                          │               │
+                                                              internal/expr             ▼
+                                                          (expression language)         │
+                                                                                        │
+                                                                                        ▼
                                                                               ┌───── TUI layer ──────────────────────────────┐
                                                                               internal/build  ──►  internal/screen  ──►  tuilib pkg/app
                                                                               (cfg → live comps)    (screen.Screen)
@@ -28,18 +32,28 @@ tui-builder has two halves, split by what they do with the same config:
 
 - **`internal/config`** owns the schema. One Go struct per YAML shape.
   Yaml tags drive Unmarshal; `Validate()` walks the tree (including
-  cycle detection for `pipelines:` references).
+  cycle detection across the unified `data.sources:` graph).
 - **`internal/datasource`** owns the `Source` interface and the
-  concrete kinds (http, exec, file, websocket, merge). Self-contained;
-  no awareness of components, screens, or rendering.
+  concrete kinds (http, exec, file, websocket, static, merge).
+  Self-contained; no awareness of components, screens, or rendering.
 - **`internal/pipeline`** is the named, addressable composition layer
-  over sources. Today every `Pipeline` is a passthrough (one declared
-  upstream, no operator). Future operator types (filter, project,
-  union, join) satisfy the same `ds.Source` interface — neither the
-  TUI binding nor `wrangl` will need to special-case them.
+  over sources. Operator catalog (all shipped): passthrough (`from:`),
+  `filter`, `project`, `derive`, `sort`, `union`, `compose`, `join`,
+  `cache`. Every operator satisfies the same `ds.Source` interface,
+  so neither the TUI binding nor `wrangl` special-cases them.
+  Pipelines also have their own typed `parameters:` blocks (visible
+  in operator expressions as `params.X`); wrangl `--param` routes to
+  pipeline params when declared, otherwise falls through to source
+  params.
+- **`internal/expr`** is the embedded expression language adapter —
+  wraps `expr-lang/expr` behind a `Compile` / `Eval` / `EvalBool`
+  (+ `EvalWithParams` / `EvalBoolWithParams`) surface. Operators use
+  it for `where:`, `keep:`, `compute:`, `by:`, and join `on:`. A
+  small set of built-ins (`now`, `parseTime`, `lower`, `upper`)
+  layers on top of the library's natives.
 - **`internal/output`** is the JSON / NDJSON stdout sink used by
   `wrangl`. One-shot sources emit one JSON value; streams emit
-  NDJSON.
+  NDJSON. `--raw` mode skips JSON encoding for plain-text values.
 
 **TUI layer** (one of two consumers of the data layer):
 
@@ -106,35 +120,49 @@ poll-via-`tea.Tick` path.
 
 ## Pipelines: named, addressable data over sources
 
-The `pipelines:` block in YAML declares named pipelines over sources
-(or over other pipelines). A pipeline is what the TUI's `pipeline:`
-binding and `wrangl <name>` both consume. Today the only "operator"
-is passthrough — `from: <source-or-pipeline>` and that's it.
+Pipelines live alongside leaf sources in the unified `data.sources:`
+map — every entry carries a `type:` that picks its kind from the
+registry (`internal/config/source.go`). Leaf kinds (http, exec,
+file, websocket, static, merge) fetch externally; operator kinds
+(passthrough, filter, project, derive, sort, union, compose, join,
+cache) transform an upstream named via `from:` (or fan out over
+`sources:` / `parts:` / `lookups:`).
 
 ```yaml
-data_sources:
-  countries: { type: http, url: …, refresh: 5m }
+data:
+  sources:
+    countries: { type: http, url: …, refresh: 5m }
 
-pipelines:
-  all_countries:           # named, addressable; bound by components OR wrangl
-    from: countries
+    all_countries:           # passthrough — stable addressable name
+      type: passthrough
+      from: countries
+
+    large_countries:         # filter — operators chain through from:
+      type: filter
+      from: countries
+      where: "population > 100000000"
+
+    with_age:                # derive — adds computed fields
+      type: derive
+      from: countries
+      compute:
+        is_huge: "population > 100000000"
 ```
 
-Components bind to either a source or a pipeline (mutually
-exclusive; validated at load):
+Components bind to any entry by name via `source:` — leaf or
+operator, the schema doesn't distinguish:
 
 ```yaml
-components:
-  countries:
-    type: table
-    pipeline: all_countries   # preferred — operators land here in the future
-    # source: countries       # also still works for un-pipelined sources
+tui:
+  components:
+    countries:
+      type: table
+      source: all_countries
 ```
 
-Future operators (filter, project, sort, union, join) layer on top of
-this without changing the binding contract — the component and
-`wrangl` both keep asking for a name; the pipeline does whatever
-shaping it does internally.
+The full operator catalog layers on top of leaves without changing
+the binding contract — the component and `wrangl` both keep asking
+for a name; the entry does whatever shaping it does internally.
 
 When asked to add a new operator type, the shape is parallel to
 adding a new source kind ("Adding a new pipeline operator" below).
@@ -232,8 +260,8 @@ value / sort / filter state across the rebuild.
 
 `scripts/check-data-layer-boundary.sh` fails the build if anything in
 `internal/config`, `internal/datasource`, `internal/pipeline`,
-`internal/output`, or `cmd/wrangl` transitively imports
-`internal/screen`, `internal/build`, or any `tuilib` package.
+`internal/expr`, `internal/output`, or `cmd/wrangl` transitively
+imports `internal/screen`, `internal/build`, or any `tuilib` package.
 
 If you're tempted to import a TUI helper from the data layer:
 
@@ -350,32 +378,50 @@ followed this checklist.
 
 ## Adding a new pipeline operator
 
-The current pipeline is passthrough — `from: X` and nothing else.
-When operator types (filter, project, union, join, …) land, they
-follow this shape:
+The pipeline operator catalog is mature (passthrough, filter,
+project, derive, sort, union, compose, join, cache). New operators
+plug in by following the same shape:
 
-1. **Schema.** Add fields to `cfg.Pipeline` for the operator's
-   parameters (e.g. `Filter string`, `Where Expr`, `Sources []string`).
-   Update `validatePipelines` to require the right fields per operator
-   kind and reject combinations that don't make sense.
+1. **Schema.** Add fields to `cfg.Pipeline` (the tagged-union arm)
+   plus an `*XxxOp` struct for operator-specific config. Update the
+   operator-count check in `validatePipelines` AND extend
+   `upstreamsOf` so cycle detection + Build resolution walk the
+   right edges (single-input: one element; multi-input: all
+   children).
 2. **Implementation.** Add an operator file in `internal/pipeline/`
-   (e.g. `filter.go`). It implements `ds.Source` — `Fetch` runs the
-   operator over its upstream's `Fetch` result, `Refresh` delegates
-   to the upstream's cadence (or computes a sensible one for
-   composers). `Subscribe` either threads the operator inline over
-   the upstream events (cheap operators) or returns `ds.ErrNotStreaming`
-   to fall back to polling (expensive ones — joins).
-3. **Wire it into Build.** Extend the resolver in `Build()` to
-   construct the right operator from the config kind.
-4. **Tests.** Unit tests using the in-package `fakeSource` /
+   (e.g. `filter.go`, `compose.go`). The `Pipeline` wrapper
+   delegates Fetch / Subscribe to its `upstream ds.Source` with
+   optional `transformSnapshot` / `transformEvent` hooks; snapshot-
+   only operators (sort, compose, cache, join) set
+   `disableStreaming: true` so Subscribe returns ErrNotStreaming.
+   Operators that need custom execution semantics (compose, join)
+   define a private `<op>Source` implementing `ds.Source` and wrap
+   it as the Pipeline's upstream.
+3. **Wire it into Build.** Add the case to the operator switch in
+   `pipeline.Build`; if your operator needs raw `cfg.DataSource`
+   defs (like join, for per-row cloning), they're already threaded
+   in via the `sourceDefs` arg.
+4. **Expressions.** Use `internal/expr.EvalWithParams` /
+   `EvalBoolWithParams` so the pipeline's bound `parameters:`
+   surface as `params.X` alongside item fields. Compile once at
+   newXxx; pass the compiled program + params closure into the
+   per-item evaluation.
+5. **Tests.** Unit tests using the in-package `fakeSource` /
    `fakeStreamer` patterns from `pipeline_test.go`. Don't pull in
    real http/exec/file for operator tests — they're transformations,
    so feed them fake data.
-5. **Docs.** New operator section in `docs/components.md`, plus an
-   example YAML demonstrating the smallest compelling use.
-6. **wrangl.** Nothing to do — `wrangl <name>` already works
-   uniformly across passthrough and any future operator, because
-   they all satisfy `ds.Source`.
+6. **Docs.** New operator section in `docs/data-layer.md`, plus an
+   example pipeline in `examples/filter_demo.yaml` (the canonical
+   "operator showroom"). Update `plans/pipeline-operators.md` —
+   mark the operator as shipped, prune the forward-looking notes.
+7. **wrangl.** Nothing to do — `wrangl <name>` already works
+   uniformly across every operator, because they all satisfy
+   `ds.Source`. `--list` shows the operator kind via
+   `operatorKind()`; add a case if you introduce a new arm.
+
+Look at `internal/pipeline/filter.go` and `internal/pipeline/cache.go`
+as templates — they cover the transform-hook and custom-source
+patterns respectively.
 
 The architectural promise to keep: operators NEVER reach into the
 TUI. They're pure data layer. If an operator depends on a screen

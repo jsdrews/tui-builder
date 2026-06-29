@@ -1,0 +1,109 @@
+# inline_pipe_demo.yaml — inline `pipe:` chains.
+#
+# A pipeline can declare a chain of single-input operators inline via
+# `pipe:`, instead of breaking each step out as a separately-named
+# pipeline. The output of each stage feeds the next; the top-level
+# pipeline's value is the output of the last stage.
+#
+# When to use which:
+#   - inline `pipe:` — the intermediate steps aren't interesting on
+#     their own and you just want the final shape.
+#   - separate named pipelines — the intermediate steps are
+#     independently useful, or you want to share them across multiple
+#     downstream consumers.
+#
+# Under the hood the loader desugars `pipe:` into a chain of anonymous
+# pipelines named `_<owner>_step<N>`. They're hidden from `wrangl
+# --list` by the leading-underscore convention (use `--list --all` to
+# see them).
+#
+# Try it:
+#
+#   task wrangl -- examples/inline_pipe_demo.yaml short_summary | jq '.[0]'
+#   task wrangl -- examples/inline_pipe_demo.yaml --list
+#   task wrangl -- examples/inline_pipe_demo.yaml --list --all
+#
+# Restrictions:
+#   - Stages are single-input operators only: filter, project, derive,
+#     sort, cache. Multi-input ops (union, compose, join) take
+#     additional upstreams that don't fit the implicit-previous-step
+#     model — declare those as named pipelines and feed them with
+#     `from:`.
+#   - `from:` on the stage operator is forbidden — input is implicit.
+
+app:
+  title: Inline pipe demo
+data:
+  sources:
+    users:
+      type: http
+      url: https://jsonplaceholder.typicode.com/users
+      timeout: 10s
+    # Source-level `pipe:` — the same sugar applied directly on a
+    # source. Renames the leaf to `_biz_only_raw` (hidden) and
+    # creates a pipeline `biz_only` with `from: _biz_only_raw,
+    # pipe: [...]`.
+    #
+    #   task wrangl -- examples/inline_pipe_demo.yaml biz_only | jq '.[].website'
+    #
+    # Use this when the source you care about consuming downstream is
+    # ALWAYS this transformed shape and the raw response isn't
+    # interesting on its own. Not valid for `type: merge`.
+    biz_only:
+      type: http
+      url: https://jsonplaceholder.typicode.com/users
+      timeout: 10s
+      pipe:
+        - type: filter
+          where: "hasSuffix(website, '.biz')"
+    # Single-stage `pipe:` is sugar for the operator itself — no
+    # intermediates are created, just slightly different YAML.
+    biz_users:
+      type: passthrough
+      from: users
+      pipe:
+        - type: filter
+          where: "hasSuffix(website, '.biz')"
+    # N-stage chain: filter → project → sort, all in one declaration.
+    # Reads top-to-bottom in execution order.
+    short_summary:
+      type: passthrough
+      from: users
+      pipe:
+        - type: filter
+          where: "len(username) >= 8"
+        - type: project
+          keep:
+            username: username
+            name: name
+            domain: "lower(website)"
+        - type: sort
+          by: username
+    # Mix derive in the middle of a chain. Each stage sees the previous
+    # stage's output shape — `username_len` exists from stage 1 onward.
+    labelled_long:
+      type: passthrough
+      from: users
+      pipe:
+        - type: derive
+          compute:
+            username_len: "len(username)"
+            domain: "lower(website)"
+        - type: filter
+          where: "username_len >= 10"
+        - type: sort
+          by: username_len
+          order: desc
+tui:
+  components:
+    table:
+      type: table
+      title: Users
+      columns:
+        - {title: Username, width: 16, sortable: true, value: username}
+        - {title: Name, width: 26, sortable: true, value: name}
+        - {title: Domain, width: 24, value: domain}
+      source: short_summary
+  screen:
+    layout:
+      component: table

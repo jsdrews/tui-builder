@@ -34,13 +34,13 @@ import (
 // LRU keyed on the params tuple is a natural follow-up when N gets
 // large enough to hurt; v1 favours simplicity.
 //
-// Lookups must be sources (not pipelines) with declared `parameters:`.
-// The validator enforces. The reason: joins re-invoke lookups per
-// row with new params, which the source-level BindParams supports
-// but pipelines don't yet expose.
-func newJoin(name string, driver ds.Source, def *cfg.JoinOp, sources map[string]*cfg.DataSource) (*Pipeline, error) {
+// Lookups must be leaf-kind entries (not operator pipelines) with
+// declared `parameters:`. The validator enforces. The reason: joins
+// re-invoke lookups per row with new params, which leaf-source
+// BindParams supports but operator pipelines don't yet expose.
+func newJoin(name string, driver ds.Source, def *cfg.Source, lookupSources map[string]*cfg.Source) (*Pipeline, error) {
 	// Pre-compile every lookup's `on:` expressions and snapshot its
-	// cfg.DataSource so per-row fetches don't re-parse or hit the
+	// *cfg.Source so per-row fetches don't re-parse or hit the
 	// shared cfg.
 	lookups := make([]preparedLookup, 0, len(def.Lookups))
 	names := make([]string, 0, len(def.Lookups))
@@ -50,7 +50,7 @@ func newJoin(name string, driver ds.Source, def *cfg.JoinOp, sources map[string]
 	sort.Strings(names) // deterministic per-row fan-out + output ordering
 	for _, lname := range names {
 		look := def.Lookups[lname]
-		srcDef, ok := sources[look.From]
+		src, ok := lookupSources[look.From]
 		if !ok {
 			return nil, fmt.Errorf("join.lookups.%s: source %q not defined", lname, look.From)
 		}
@@ -64,7 +64,7 @@ func newJoin(name string, driver ds.Source, def *cfg.JoinOp, sources map[string]
 		}
 		lookups = append(lookups, preparedLookup{
 			name:    lname,
-			srcDef:  srcDef,
+			source:  src,
 			onProgs: progs,
 		})
 	}
@@ -83,11 +83,11 @@ func newJoin(name string, driver ds.Source, def *cfg.JoinOp, sources map[string]
 }
 
 // preparedLookup pre-bakes everything reusable across rows: the
-// lookup's name, the cfg.DataSource template (we clone per row before
+// lookup's name, the cfg.Source template (we clone per row before
 // BindParams mutates it), and the compiled `on:` expressions.
 type preparedLookup struct {
 	name    string
-	srcDef  *cfg.DataSource
+	source  *cfg.Source
 	onProgs map[string]*expr.Program
 }
 
@@ -194,11 +194,11 @@ func (j *joinSource) runLookup(ctx context.Context, look preparedLookup, row any
 		}
 		params[paramName] = fmt.Sprint(v)
 	}
-	cloned := look.srcDef.Clone()
+	cloned := look.source.Clone()
 	if err := cloned.BindParams(params); err != nil {
 		return nil, fmt.Errorf("bind: %w", err)
 	}
-	src, err := ds.New(cloned)
+	src, err := ds.BuildLeaf(cloned, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build: %w", err)
 	}

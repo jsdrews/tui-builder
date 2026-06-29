@@ -30,9 +30,9 @@ func TestCacheHitsWithinTTL(t *testing.T) {
 	up := &countingSource{data: "snapshot"}
 	reg, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
-			"cached": {Cache: &cfg.CacheOp{From: "src", TTL: "1m"}},
+
+		map[string]*cfg.Source{
+			"cached": cfg.NewEntry(&cfg.Source{Type: "cache", From: "src", TTL: "1m"}),
 		},
 		nil,
 	)
@@ -58,11 +58,11 @@ func TestCacheMissesAfterTTL(t *testing.T) {
 	up := &countingSource{data: "v"}
 	reg, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
+
+		map[string]*cfg.Source{
 			// Tight TTL so the test can observe the boundary without
 			// waiting long.
-			"cached": {Cache: &cfg.CacheOp{From: "src", TTL: "50ms"}},
+			"cached": cfg.NewEntry(&cfg.Source{Type: "cache", From: "src", TTL: "50ms"}),
 		},
 		nil,
 	)
@@ -93,9 +93,9 @@ func TestCacheDoesNotCacheErrors(t *testing.T) {
 	up := &countingSource{err: errors.New("boom")}
 	reg, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
-			"cached": {Cache: &cfg.CacheOp{From: "src", TTL: "1m"}},
+
+		map[string]*cfg.Source{
+			"cached": cfg.NewEntry(&cfg.Source{Type: "cache", From: "src", TTL: "1m"}),
 		},
 		nil,
 	)
@@ -123,17 +123,12 @@ func TestCacheDoesNotCacheErrors(t *testing.T) {
 }
 
 func TestCacheValidatorRejectsMissingTTL(t *testing.T) {
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"src": {Type: "exec", Command: []string{"true"}},
-		},
-		Pipelines: map[string]*cfg.Pipeline{
-			"bad": {Cache: &cfg.CacheOp{From: "src"}},
-		},
-		Components: map[string]*cfg.Component{
-			"x": {Type: "list", Items: []string{"x"}},
-		},
-		Screen: cfg.Screen{Layout: cfg.Node{Component: "x"}},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"src": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"true"}}),
+
+		"bad": cfg.NewEntry(&cfg.Source{Type: "cache", From: "src"})}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"x": {Type: "list", Items: []string{"x"}},
+	},
+		Screen: cfg.Screen{Layout: cfg.Node{Component: "x"}}},
 	}
 	if err := c.Validate(); err == nil {
 		t.Errorf("expected validator to reject missing ttl")
@@ -141,17 +136,12 @@ func TestCacheValidatorRejectsMissingTTL(t *testing.T) {
 }
 
 func TestCacheValidatorRejectsBadTTL(t *testing.T) {
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"src": {Type: "exec", Command: []string{"true"}},
-		},
-		Pipelines: map[string]*cfg.Pipeline{
-			"bad": {Cache: &cfg.CacheOp{From: "src", TTL: "forever"}},
-		},
-		Components: map[string]*cfg.Component{
-			"x": {Type: "list", Items: []string{"x"}},
-		},
-		Screen: cfg.Screen{Layout: cfg.Node{Component: "x"}},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"src": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"true"}}),
+
+		"bad": cfg.NewEntry(&cfg.Source{Type: "cache", From: "src", TTL: "forever"})}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"x": {Type: "list", Items: []string{"x"}},
+	},
+		Screen: cfg.Screen{Layout: cfg.Node{Component: "x"}}},
 	}
 	if err := c.Validate(); err == nil {
 		t.Errorf("expected validator to reject malformed ttl")
@@ -167,12 +157,12 @@ func TestCacheUnionDedup(t *testing.T) {
 	}}
 	reg, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
-			"cached_src": {Cache: &cfg.CacheOp{From: "src", TTL: "1m"}},
-			"a":          {From: "cached_src"},
-			"b":          {From: "cached_src"},
-			"both":       {Union: &cfg.UnionOp{Sources: []string{"a", "b"}, TagField: "via"}},
+
+		map[string]*cfg.Source{
+			"cached_src": cfg.NewEntry(&cfg.Source{Type: "cache", From: "src", TTL: "1m"}),
+			"a":          cfg.NewEntry(&cfg.Source{Type: "passthrough", From: "cached_src"}),
+			"b":          cfg.NewEntry(&cfg.Source{Type: "passthrough", From: "cached_src"}),
+			"both":       cfg.NewEntry(&cfg.Source{Type: "union", Sources: []string{"a", "b"}, TagField: "via"}),
 		},
 		nil,
 	)

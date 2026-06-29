@@ -23,7 +23,7 @@ import (
 //   - Streaming JSON-frame event: parsed, projected, re-encoded as JSON.
 //   - Streaming text-line event: dropped (no fields to project from
 //     a raw string).
-func newProject(name string, upstream ds.Source, def *cfg.ProjectOp, params map[string]string) (*Pipeline, error) {
+func newProject(name string, upstream ds.Source, def *cfg.Source, params map[string]string) (*Pipeline, error) {
 	progs, err := compileMap(def.Keep, "project.keep")
 	if err != nil {
 		return nil, err

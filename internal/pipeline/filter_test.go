@@ -21,9 +21,9 @@ func TestFilterSnapshotKeepsMatchingItems(t *testing.T) {
 	}
 	reg, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
-			"running": {Filter: &cfg.FilterOp{From: "src", Where: "status.phase == 'Running'"}},
+
+		map[string]*cfg.Source{
+			"running": cfg.NewEntry(&cfg.Source{Type: "filter", From: "src", Where: "status.phase == 'Running'"}),
 		},
 		nil,
 	)
@@ -56,9 +56,9 @@ func TestFilterSnapshotEmptyResult(t *testing.T) {
 	}}
 	reg, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
-			"running": {Filter: &cfg.FilterOp{From: "src", Where: "phase == 'Running'"}},
+
+		map[string]*cfg.Source{
+			"running": cfg.NewEntry(&cfg.Source{Type: "filter", From: "src", Where: "phase == 'Running'"}),
 		},
 		nil,
 	)
@@ -90,9 +90,9 @@ func TestFilterStreamingDropsFailing(t *testing.T) {
 	}
 	reg, err := Build(
 		map[string]ds.Source{"src": streamer},
-		nil,
-		map[string]*cfg.Pipeline{
-			"running": {Filter: &cfg.FilterOp{From: "src", Where: "phase == 'Running'"}},
+
+		map[string]*cfg.Source{
+			"running": cfg.NewEntry(&cfg.Source{Type: "filter", From: "src", Where: "phase == 'Running'"}),
 		},
 		nil,
 	)
@@ -140,9 +140,9 @@ func TestFilterStreamingTextPayload(t *testing.T) {
 	}
 	reg, err := Build(
 		map[string]ds.Source{"src": streamer},
-		nil,
-		map[string]*cfg.Pipeline{
-			"errors_only": {Filter: &cfg.FilterOp{From: "src", Where: "item contains 'ERROR'"}},
+
+		map[string]*cfg.Source{
+			"errors_only": cfg.NewEntry(&cfg.Source{Type: "filter", From: "src", Where: "item contains 'ERROR'"}),
 		},
 		nil,
 	)
@@ -178,9 +178,9 @@ func TestFilterCompileErrorAtBuild(t *testing.T) {
 	up := &fakeSource{data: []any{}}
 	_, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
-			"bad": {Filter: &cfg.FilterOp{From: "src", Where: "=== syntax junk"}},
+
+		map[string]*cfg.Source{
+			"bad": cfg.NewEntry(&cfg.Source{Type: "filter", From: "src", Where: "=== syntax junk"}),
 		},
 		nil,
 	)
@@ -198,17 +198,15 @@ func TestFilterWithPipelineParams(t *testing.T) {
 		map[string]any{"name": "b", "score": 12},
 		map[string]any{"name": "c", "score": 20},
 	}}
-	defs := map[string]*cfg.Pipeline{
-		"hot": {
-			Parameters: map[string]*cfg.Parameter{
-				"min": {Type: "int", Default: "10"},
-			},
-			Filter: &cfg.FilterOp{From: "src", Where: "score >= int(params.min)"},
-		},
+	defs := map[string]*cfg.Source{
+		"hot": cfg.NewEntry(&cfg.Source{Type: "filter", Parameters: map[string]*cfg.Parameter{
+			"min": {Type: "int", Default: "10"},
+		}, From: "src", Where: "score >= int(params.min)"},
+		),
 	}
 
 	// Default (min=10): keeps b (12) and c (20).
-	reg, err := Build(map[string]ds.Source{"src": up}, nil, defs, nil)
+	reg, err := Build(map[string]ds.Source{"src": up}, defs, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +216,7 @@ func TestFilterWithPipelineParams(t *testing.T) {
 	}
 
 	// Bound (min=15): keeps c (20) only.
-	reg, err = Build(map[string]ds.Source{"src": up}, nil, defs, map[string]map[string]string{
+	reg, err = Build(map[string]ds.Source{"src": up}, defs, map[string]map[string]string{
 		"hot": {"min": "15"},
 	})
 	if err != nil {
@@ -232,17 +230,15 @@ func TestFilterWithPipelineParams(t *testing.T) {
 
 func TestPipelineParamsRequiredEnforced(t *testing.T) {
 	up := &fakeSource{data: []any{}}
-	defs := map[string]*cfg.Pipeline{
-		"needs": {
-			Parameters: map[string]*cfg.Parameter{
-				"threshold": {Type: "int", Required: true},
-			},
-			Filter: &cfg.FilterOp{From: "src", Where: "x > int(params.threshold)"},
-		},
+	defs := map[string]*cfg.Source{
+		"needs": cfg.NewEntry(&cfg.Source{Type: "filter", Parameters: map[string]*cfg.Parameter{
+			"threshold": {Type: "int", Required: true},
+		}, From: "src", Where: "x > int(params.threshold)"},
+		),
 	}
 	// No params provided — Build should error because `threshold` is
 	// required and has no default.
-	if _, err := Build(map[string]ds.Source{"src": up}, nil, defs, nil); err == nil {
+	if _, err := Build(map[string]ds.Source{"src": up}, defs, nil); err == nil {
 		t.Errorf("expected Build to fail when required pipeline param is unbound")
 	}
 }

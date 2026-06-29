@@ -80,61 +80,40 @@ type Event struct {
 // for this fetch and take the polling path instead.
 var ErrNotStreaming = errors.New("source does not support streaming")
 
-// Build constructs every defined data source. Leaves (http / exec /
-// file) are built first; merge sources are built last with their
-// resolved children attached. Cycles among merges must already have
-// been rejected by config.Validate.
-//
-// Returns a map keyed by source name. screen.Model holds onto this and
-// looks up sources by name when wiring component bindings.
-func Build(defs map[string]*cfg.DataSource) (map[string]Source, error) {
-	out := make(map[string]Source, len(defs))
-
-	// Recursive builder. Since config.Validate rejects cycles we don't
-	// need a re-entry guard, but the memoized out[name] check also
-	// serves as one.
+// Build constructs every leaf-kind source in the given map,
+// resolving merge sources by recursively building children first.
+// Used by this package's own tests; production code goes through
+// pipeline.Build, which handles operator entries too.
+func Build(sources map[string]*cfg.Source) (map[string]Source, error) {
+	out := make(map[string]Source, len(sources))
 	var build func(name string) (Source, error)
 	build = func(name string) (Source, error) {
 		if s, ok := out[name]; ok {
 			return s, nil
 		}
-		def, ok := defs[name]
+		s, ok := sources[name]
 		if !ok {
 			return nil, fmt.Errorf("source %q not defined", name)
 		}
-		var (
-			s   Source
-			err error
-		)
-		switch def.Type {
-		case "merge":
-			// Resolve children from BOTH legal shapes — the shorthand
-			// (Sources + TagField) and the explicit per-child form
-			// (Children with tags). The validator already ensures
-			// exactly one is set.
-			childRefs := def.Sources
-			for _, ch := range def.Children {
-				childRefs = append(childRefs, ch.Source)
+		var children map[string]Source
+		for _, u := range s.Upstreams() {
+			cs, err := build(u)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", name, err)
 			}
-			children := make(map[string]Source, len(childRefs))
-			for _, child := range childRefs {
-				cs, cerr := build(child)
-				if cerr != nil {
-					return nil, fmt.Errorf("%s: %w", name, cerr)
-				}
-				children[child] = cs
+			if children == nil {
+				children = map[string]Source{}
 			}
-			s, err = newMerge(def, children)
-		default:
-			s, err = newLeaf(def)
+			children[u] = cs
 		}
+		built, err := BuildLeaf(s, children)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
-		out[name] = s
-		return s, nil
+		out[name] = built
+		return built, nil
 	}
-	for name := range defs {
+	for name := range sources {
 		if _, err := build(name); err != nil {
 			return nil, err
 		}
@@ -142,27 +121,30 @@ func Build(defs map[string]*cfg.DataSource) (map[string]Source, error) {
 	return out, nil
 }
 
-// newLeaf dispatches a single non-merge source.
-func newLeaf(d *cfg.DataSource) (Source, error) {
-	switch d.Type {
+// BuildLeaf constructs a single leaf-kind data source from a
+// *cfg.Source. For merge sources, the caller pre-resolves children
+// (via the unified Build in internal/pipeline that walks the entire
+// graph) and passes the resolved map in.
+//
+// Returns an error for operator-kind sources; the caller dispatches
+// those to internal/pipeline constructors instead.
+func BuildLeaf(s *cfg.Source, children map[string]Source) (Source, error) {
+	if s == nil {
+		return nil, fmt.Errorf("BuildLeaf: nil source")
+	}
+	switch s.Type {
 	case "http":
-		return newHTTP(d)
+		return newHTTP(s)
 	case "exec":
-		return newExec(d)
+		return newExec(s)
 	case "file":
-		return newFile(d)
+		return newFile(s)
 	case "websocket":
-		return newWebsocket(d)
+		return newWebsocket(s)
+	case "static":
+		return newStatic(s)
+	case "merge":
+		return newMerge(s, children)
 	}
-	return nil, fmt.Errorf("unknown data source type %q", d.Type)
-}
-
-// New is the legacy single-source constructor — kept for tests / callers
-// that don't have a full Config. Production code should use Build so
-// merge sources can resolve their children.
-func New(d *cfg.DataSource) (Source, error) {
-	if d.Type == "merge" {
-		return nil, fmt.Errorf("merge sources require Build (need to resolve children)")
-	}
-	return newLeaf(d)
+	return nil, fmt.Errorf("BuildLeaf: %q is not a leaf kind", s.Type)
 }

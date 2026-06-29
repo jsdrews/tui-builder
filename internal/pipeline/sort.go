@@ -24,7 +24,7 @@ func sortStrings(s []string) { sort.Strings(s) }
 // Subscribe returns ErrNotStreaming — sorting a true event stream
 // needs windowing semantics we don't have yet, and silently
 // degrading to "sort the first N events" would surprise users.
-func newSort(name string, upstream ds.Source, def *cfg.SortOp, params map[string]string) (*Pipeline, error) {
+func newSort(name string, upstream ds.Source, def *cfg.Source, params map[string]string) (*Pipeline, error) {
 	prog, err := expr.Compile(def.By)
 	if err != nil {
 		return nil, fmt.Errorf("sort: %w", err)

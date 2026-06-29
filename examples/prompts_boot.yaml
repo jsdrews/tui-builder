@@ -35,36 +35,38 @@ app:
       type:  confirm
       initial_bool: false
 
-data_sources:
-  repos:
-    type: http
-    # All three boot prompts feed into the URL. The header below could
-    # use ${env.GITHUB_TOKEN} too if you want authenticated higher rate
-    # limits (uncomment + export the token).
-    url: https://api.github.com/users/${env.USER}/repos?sort=${env.SORT}&per_page=50
-    refresh: 5m
-    timeout: 15s
-    headers:
-      Accept: application/vnd.github+json
-      # Authorization: "Bearer ${env.GITHUB_TOKEN}"
+data:
+  sources:
+    repos:
+      type: http
+      # All three boot prompts feed into the URL. The header below could
+      # use ${env.GITHUB_TOKEN} too if you want authenticated higher rate
+      # limits (uncomment + export the token).
+      url: https://api.github.com/users/${env.USER}/repos?sort=${env.SORT}&per_page=50
+      refresh: 5m
+      timeout: 15s
+      headers:
+        Accept: application/vnd.github+json
 
-components:
-  repos_table:
-    type: table
-    title: ${env.USER}'s repos — sort=${env.SORT}, archived=${env.ARCHIVED}
-    filterable: true
-    source: repos
-    initial_sort: {column: Stars, desc: true}
-    columns:
-      - {title: Repo,        width: 32, sortable: true, value: full_name}
-      - {title: Language,    width: 14, sortable: true, value: language}
-      - {title: Stars,       width: 8,  sortable: true, sort: number, align: right, value: stargazers_count}
-      - {title: Forks,       width: 8,  sortable: true, sort: number, align: right, value: forks_count}
-      - {title: Updated,     width: 22, sortable: true, value: updated_at}
-      - {title: Archived,    width: 9,  align: center,                value: archived}
-      - {title: Description, width: 60,                               value: description}
+tui:
+        # Authorization: "Bearer ${env.GITHUB_TOKEN}"
 
-screen:
-  title: ${env.USER}
-  layout:
-    component: repos_table
+  components:
+    repos_table:
+      type: table
+      title: ${env.USER}'s repos — sort=${env.SORT}, archived=${env.ARCHIVED}
+      filterable: true
+      source: repos
+      initial_sort: {column: Stars, desc: true}
+      columns:
+        - {title: Repo,        width: 32, sortable: true, value: full_name}
+        - {title: Language,    width: 14, sortable: true, value: language}
+        - {title: Stars,       width: 8,  sortable: true, sort: number, align: right, value: stargazers_count}
+        - {title: Forks,       width: 8,  sortable: true, sort: number, align: right, value: forks_count}
+        - {title: Updated,     width: 22, sortable: true, value: updated_at}
+        - {title: Archived,    width: 9,  align: center,                value: archived}
+        - {title: Description, width: 60,                               value: description}
+  screen:
+    title: ${env.USER}
+    layout:
+      component: repos_table

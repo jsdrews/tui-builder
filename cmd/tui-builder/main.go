@@ -63,16 +63,15 @@ func run() error {
 	themes = reorderThemes(themes, initial.Name)
 
 	var root tscreen.Screen
-	if len(c.Screens) > 0 {
+	if len(c.TUI.Screens) > 0 {
 		multi := &tqscreen.Multi{
-			Screens:     c.Screens,
-			Components:  c.Components,
-			DataSources: c.DataSources,
-			Pipelines:   c.Pipelines,
+			Screens:    c.TUI.Screens,
+			Components: c.TUI.Components,
+			Sources:    c.Data.Sources,
 		}
-		root, err = tqscreen.NewMulti(c.Initial, multi, build.Selection{}, nil, initial)
+		root, err = tqscreen.NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, initial)
 	} else {
-		root, err = tqscreen.New(&c.Screen, c.Components, c.DataSources, c.Pipelines, initial)
+		root, err = tqscreen.New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, initial)
 	}
 	if err != nil {
 		return err

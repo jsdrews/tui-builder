@@ -20,51 +20,51 @@ app:
   title: Tree Demo
   theme: nord
 
-components:
-  project:
-    type: tree
-    title: Project
-    searchable: true
-    initial_depth: 2
-    root:
-      label: tui-builder
-      children:
-        - label: cmd
-          children:
-            - label: tui-builder
-              children:
-                - {label: main.go}
-        - label: internal
-          children:
-            - label: build
-              children:
-                - {label: component.go}
-                - {label: layout.go}
-            - label: config
-              children:
-                - {label: config.go}
-                - {label: load.go}
-            - label: screen
-              children:
-                - {label: screen.go}
-        - label: examples
-          children:
-            - {label: demo.yaml}
-            - {label: list.yaml}
-            - {label: table.yaml}
-            - {label: table_columns.yaml}
-            - {label: table_styled.yaml}
-            - {label: logview.yaml}
-            - {label: tree.yaml}
-            - {label: layout.yaml}
-            - {label: themes.yaml}
-        - label: docs
-          children:
-            - {label: components.md}
-        - {label: go.mod}
-        - {label: go.sum}
-
-screen:
-  title: Project tree
-  layout:
-    component: project
+tui:
+  components:
+    project:
+      type: tree
+      title: Project
+      searchable: true
+      initial_depth: 2
+      root:
+        label: tui-builder
+        children:
+          - label: cmd
+            children:
+              - label: tui-builder
+                children:
+                  - {label: main.go}
+          - label: internal
+            children:
+              - label: build
+                children:
+                  - {label: component.go}
+                  - {label: layout.go}
+              - label: config
+                children:
+                  - {label: config.go}
+                  - {label: load.go}
+              - label: screen
+                children:
+                  - {label: screen.go}
+          - label: examples
+            children:
+              - {label: demo.yaml}
+              - {label: list.yaml}
+              - {label: table.yaml}
+              - {label: table_columns.yaml}
+              - {label: table_styled.yaml}
+              - {label: logview.yaml}
+              - {label: tree.yaml}
+              - {label: layout.yaml}
+              - {label: themes.yaml}
+          - label: docs
+            children:
+              - {label: components.md}
+          - {label: go.mod}
+          - {label: go.sum}
+  screen:
+    title: Project tree
+    layout:
+      component: project

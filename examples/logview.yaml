@@ -17,38 +17,38 @@ app:
   title: Logview Demo
   theme: nord
 
-components:
-  app_log:
-    type: logview
-    title: app.log
-    searchable: true
-    max_lines: 5000
-    filter_placeholder: "search…"
-    initial_query: ERROR
-    filter_mode: false
-    lines:
-      - "2026-05-16T08:00:01Z INFO  app starting up (pid=4242)"
-      - "2026-05-16T08:00:01Z INFO  loaded config from /etc/app/config.yaml"
-      - "2026-05-16T08:00:02Z INFO  connected to postgres@db.local:5432"
-      - "2026-05-16T08:00:03Z INFO  http server listening on :8080"
-      - "2026-05-16T08:01:14Z DEBUG request id=abc-001 method=GET path=/api/users"
-      - "2026-05-16T08:01:14Z DEBUG request id=abc-001 status=200 duration=12ms"
-      - "2026-05-16T08:02:31Z WARN  request id=abc-002 slow query 312ms"
-      - "2026-05-16T08:03:00Z ERROR request id=abc-003 panic: nil pointer dereference"
-      - "2026-05-16T08:03:00Z ERROR request id=abc-003 stack trace truncated"
-      - "2026-05-16T08:03:01Z INFO  request id=abc-004 method=POST path=/api/login"
-      - "2026-05-16T08:03:01Z WARN  request id=abc-004 auth failed user=root"
-      - "2026-05-16T08:03:02Z INFO  request id=abc-005 method=GET path=/api/users/42"
-      - "2026-05-16T08:03:02Z DEBUG request id=abc-005 cache hit"
-      - "2026-05-16T08:04:00Z ERROR background-worker connection refused to redis:6379"
-      - "2026-05-16T08:04:00Z INFO  retrying redis in 5s"
-      - "2026-05-16T08:04:05Z INFO  redis reconnected"
-      - "2026-05-16T08:05:30Z DEBUG metrics flush 142 series"
-      - "2026-05-16T08:06:12Z INFO  graceful shutdown signal received"
-      - "2026-05-16T08:06:12Z INFO  draining 3 in-flight requests"
-      - "2026-05-16T08:06:13Z INFO  shutdown complete"
-
-screen:
-  title: Logs
-  layout:
-    component: app_log
+tui:
+  components:
+    app_log:
+      type: logview
+      title: app.log
+      searchable: true
+      max_lines: 5000
+      filter_placeholder: "search…"
+      initial_query: ERROR
+      filter_mode: false
+      lines:
+        - "2026-05-16T08:00:01Z INFO  app starting up (pid=4242)"
+        - "2026-05-16T08:00:01Z INFO  loaded config from /etc/app/config.yaml"
+        - "2026-05-16T08:00:02Z INFO  connected to postgres@db.local:5432"
+        - "2026-05-16T08:00:03Z INFO  http server listening on :8080"
+        - "2026-05-16T08:01:14Z DEBUG request id=abc-001 method=GET path=/api/users"
+        - "2026-05-16T08:01:14Z DEBUG request id=abc-001 status=200 duration=12ms"
+        - "2026-05-16T08:02:31Z WARN  request id=abc-002 slow query 312ms"
+        - "2026-05-16T08:03:00Z ERROR request id=abc-003 panic: nil pointer dereference"
+        - "2026-05-16T08:03:00Z ERROR request id=abc-003 stack trace truncated"
+        - "2026-05-16T08:03:01Z INFO  request id=abc-004 method=POST path=/api/login"
+        - "2026-05-16T08:03:01Z WARN  request id=abc-004 auth failed user=root"
+        - "2026-05-16T08:03:02Z INFO  request id=abc-005 method=GET path=/api/users/42"
+        - "2026-05-16T08:03:02Z DEBUG request id=abc-005 cache hit"
+        - "2026-05-16T08:04:00Z ERROR background-worker connection refused to redis:6379"
+        - "2026-05-16T08:04:00Z INFO  retrying redis in 5s"
+        - "2026-05-16T08:04:05Z INFO  redis reconnected"
+        - "2026-05-16T08:05:30Z DEBUG metrics flush 142 series"
+        - "2026-05-16T08:06:12Z INFO  graceful shutdown signal received"
+        - "2026-05-16T08:06:12Z INFO  draining 3 in-flight requests"
+        - "2026-05-16T08:06:13Z INFO  shutdown complete"
+  screen:
+    title: Logs
+    layout:
+      component: app_log

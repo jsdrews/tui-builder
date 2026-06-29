@@ -28,32 +28,28 @@ func TestDataSourceFetchApply(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"places": {Type: "http", URL: ts.URL},
-		},
-		Components: map[string]*cfg.Component{
-			"places_table": {
-				Type:   "table",
-				Title:  "Places",
-				Source: "places",
-				Columns: []cfg.Column{
-					{Title: "Name",       Width: 14, Value: cfg.Path{"name.common"}},
-					{Title: "Region",     Width: 12, Value: cfg.Path{"region"}},
-					{Title: "Population", Width: 12, Value: cfg.Path{"population"}, Sort: "number", Align: "right", Sortable: true},
-				},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"places": cfg.NewEntry(&cfg.Source{Type: "http", URL: ts.URL})}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"places_table": {
+			Type:   "table",
+			Title:  "Places",
+			Source: "places",
+			Columns: []cfg.Column{
+				{Title: "Name", Width: 14, Value: cfg.Path{"name.common"}},
+				{Title: "Region", Width: 12, Value: cfg.Path{"region"}},
+				{Title: "Population", Width: 12, Value: cfg.Path{"population"}, Sort: "number", Align: "right", Sortable: true},
 			},
 		},
+	},
 		Screen: cfg.Screen{
 			Title:  "Places",
 			Layout: cfg.Node{Component: "places_table"},
-		},
+		}},
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
 
-	root, err := New(&c.Screen, c.Components, c.DataSources, c.Pipelines, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}

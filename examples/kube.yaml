@@ -26,325 +26,325 @@ app:
   title: Kubernetes
   theme: nord
 
-data_sources:
-  # namespaces is self-contained — no caller input needed. Lifecycle
-  # stays polled (refresh: 30s); the TUI and wrangl both run it the
-  # same way.
-  namespaces:
-    type: http
-    url: http://localhost:8001/api/v1/namespaces
-    root: items
-    refresh: 30s
-    timeout: 10s
+data:
+  sources:
+    # namespaces is self-contained — no caller input needed. Lifecycle
+    # stays polled (refresh: 30s); the TUI and wrangl both run it the
+    # same way.
+    namespaces:
+      type: http
+      url: http://localhost:8001/api/v1/namespaces
+      root: items
+      refresh: 30s
+      timeout: 10s
 
-  # pods takes one required parameter (namespace). At push time, the
-  # parent screen's `bind:` block (see screens.namespaces.on_enter)
-  # resolves ${selection} → the picked namespace name and feeds it
-  # into ${params.namespace}. From wrangl: `--param namespace=default`.
-  pods:
-    type: http
-    parameters:
-      namespace:
-        type: string
-        required: true
-        description: Kubernetes namespace to list pods in
-    url: http://localhost:8001/api/v1/namespaces/${params.namespace}/pods
-    root: items
-    refresh: 5s
-    timeout: 10s
+    # pods takes one required parameter (namespace). At push time, the
+    # parent screen's `bind:` block (see screens.namespaces.on_enter)
+    # resolves ${selection} → the picked namespace name and feeds it
+    # into ${params.namespace}. From wrangl: `--param namespace=default`.
+    pods:
+      type: http
+      parameters:
+        namespace:
+          type: string
+          required: true
+          description: Kubernetes namespace to list pods in
+      url: http://localhost:8001/api/v1/namespaces/${params.namespace}/pods
+      root: items
+      refresh: 5s
+      timeout: 10s
 
-  # pod_detail and pod_logs are both two-param (namespace + pod name).
-  # In the TUI they're bound at the pods→detail push site; from wrangl
-  # you pass both: `--param namespace=default --param name=nginx-xyz`.
-  pod_detail:
-    type: http
-    parameters:
-      namespace: { type: string, required: true, description: pod namespace }
-      name:      { type: string, required: true, description: pod name }
-    url: http://localhost:8001/api/v1/namespaces/${params.namespace}/pods/${params.name}
-    refresh: 5s
-    timeout: 10s
+    # pod_detail and pod_logs are both two-param (namespace + pod name).
+    # In the TUI they're bound at the pods→detail push site; from wrangl
+    # you pass both: `--param namespace=default --param name=nginx-xyz`.
+    pod_detail:
+      type: http
+      parameters:
+        namespace: { type: string, required: true, description: pod namespace }
+        name:      { type: string, required: true, description: pod name }
+      url: http://localhost:8001/api/v1/namespaces/${params.namespace}/pods/${params.name}
+      refresh: 5s
+      timeout: 10s
 
-  pod_logs:
-    type: http
-    parameters:
-      namespace: { type: string, required: true, description: pod namespace }
-      name:      { type: string, required: true, description: pod name }
-    # follow: true holds the request open and reads the response body
-    # line-by-line — each log line becomes a streaming Event. This is
-    # the kube API's `?follow=true` mode: server sends new lines as
-    # they're written, no polling required.
-    #
-    # From wrangl, pair with --raw to see plain `kubectl logs`-style
-    # output instead of JSON-quoted lines:
-    #
-    #   task wrangl -- examples/kube.yaml pod_logs \
-    #     --param namespace=demo --param name=hello-... --raw
-    #
-    # tailLines=200 seeds the stream with recent history; new lines
-    # follow as the pod emits them.
-    url: http://localhost:8001/api/v1/namespaces/${params.namespace}/pods/${params.name}/log?follow=true&tailLines=200
-    follow: true
-    format: text
+    pod_logs:
+      type: http
+      parameters:
+        namespace: { type: string, required: true, description: pod namespace }
+        name:      { type: string, required: true, description: pod name }
+      # follow: true holds the request open and reads the response body
+      # line-by-line — each log line becomes a streaming Event. This is
+      # the kube API's `?follow=true` mode: server sends new lines as
+      # they're written, no polling required.
+      #
+      # From wrangl, pair with --raw to see plain `kubectl logs`-style
+      # output instead of JSON-quoted lines:
+      #
+      #   task wrangl -- examples/kube.yaml pod_logs \
+      #     --param namespace=demo --param name=hello-... --raw
+      #
+      # tailLines=200 seeds the stream with recent history; new lines
+      # follow as the pod emits them.
+      url: http://localhost:8001/api/v1/namespaces/${params.namespace}/pods/${params.name}/log?follow=true&tailLines=200
+      follow: true
+      format: text
 
-components:
-  namespaces_list:
-    type: list
-    title: Namespaces
-    filterable: true
-    source: namespaces
-    item: "metadata.name"
-    colors:
-      border_active: theme:accent
-      selected:      theme:accent
-    # color_rules on a list apply per item. Regex (~) is the natural
-    # match for "names that start with kube-"; later exact matches
-    # promote our demo namespaces in the palette accent so they stand
-    # out against the system noise.
-    color_rules:
-      - {when: "~^kube-", color: gray}
-      - {when: default,   color: theme:accent}
-      - {when: demo,      color: green}
+tui:
+  components:
+    namespaces_list:
+      type: list
+      title: Namespaces
+      filterable: true
+      source: namespaces
+      item: "metadata.name"
+      colors:
+        border_active: theme:accent
+        selected:      theme:accent
+      # color_rules on a list apply per item. Regex (~) is the natural
+      # match for "names that start with kube-"; later exact matches
+      # promote our demo namespaces in the palette accent so they stand
+      # out against the system noise.
+      color_rules:
+        - {when: "~^kube-", color: gray}
+        - {when: default,   color: theme:accent}
+        - {when: demo,      color: green}
 
-  pods_table:
-    type: table
-    title: ${selection}
-    filterable: true
-    source: pods
-    initial_sort: {column: Name, desc: false}
-    columns:
-      - {title: Name,      width: 36, sortable: true, value: "metadata.name"}
-      - {title: Namespace, width: 18, sortable: true, value: "metadata.namespace"}
-      # Data-driven cell colors: `color_rules` evaluate in order, first
-      # match wraps the cell with ansi.CellColor (selected-row bg
-      # passes through). `when:` accepts exact strings, "~regex",
-      # ">N" / ">=N" / "<N" / "<=N" / "==N" / "!=N" comparisons, or
-      # empty for a terminal default. `color:` takes the same forms as
-      # the per-component colors: block (named / 0-255 / hex / theme:*).
-      # `value:` accepts a single dot-path OR a fallback chain (list of
-      # paths, first non-empty wins). This is how kubectl computes its
-      # STATUS column: container waiting reason (CrashLoopBackOff,
-      # ImagePullBackOff, …) wins over terminated reason (Error,
-      # Completed) which wins over pod phase (Running, Pending, …).
-      # status.phase alone shows "Running" for crash-looping pods.
-      - title: Status
-        width: 18
-        sortable: true
-        value:
-          - "status.containerStatuses.0.state.waiting.reason"
-          - "status.containerStatuses.0.state.terminated.reason"
-          - "status.phase"
-        color_rules:
-          - {when: Running,           color: green}
-          - {when: Pending,           color: yellow}
-          - {when: Succeeded,         color: theme:accent}
-          - {when: Completed,         color: theme:accent}
-          - {when: Failed,            color: red}
-          - {when: Error,             color: red}
-          - {when: CrashLoopBackOff,  color: red}
-          - {when: ImagePullBackOff,  color: red}
-          - {when: ErrImagePull,      color: red}
-          - {when: ContainerCreating, color: yellow}
-          - {when: Unknown,           color: gray}
-      - title: Ready
-        width: 6
-        align: right
-        value: "status.containerStatuses.0.ready"
-        color_rules:
-          - {when: "true",  color: green}
-          - {when: "false", color: red}
-      - title: Restarts
-        width: 8
-        sortable: true
-        sort: number
-        align: right
-        value: "status.containerStatuses.0.restartCount"
-        color_rules:
-          - {when: "0",   color: gray}
-          - {when: ">5",  color: red}
-          - {when: ">0",  color: yellow}
-      - {title: Node,    width: 24, value: "spec.nodeName"}
-      - {title: Pod IP,  width: 16, value: "status.podIP"}
-      - {title: Started, width: 22, sortable: true, value: "status.startTime"}
+    pods_table:
+      type: table
+      title: ${selection}
+      filterable: true
+      source: pods
+      initial_sort: {column: Name, desc: false}
+      columns:
+        - {title: Name,      width: 36, sortable: true, value: "metadata.name"}
+        - {title: Namespace, width: 18, sortable: true, value: "metadata.namespace"}
+        # Data-driven cell colors: `color_rules` evaluate in order, first
+        # match wraps the cell with ansi.CellColor (selected-row bg
+        # passes through). `when:` accepts exact strings, "~regex",
+        # ">N" / ">=N" / "<N" / "<=N" / "==N" / "!=N" comparisons, or
+        # empty for a terminal default. `color:` takes the same forms as
+        # the per-component colors: block (named / 0-255 / hex / theme:*).
+        # `value:` accepts a single dot-path OR a fallback chain (list of
+        # paths, first non-empty wins). This is how kubectl computes its
+        # STATUS column: container waiting reason (CrashLoopBackOff,
+        # ImagePullBackOff, …) wins over terminated reason (Error,
+        # Completed) which wins over pod phase (Running, Pending, …).
+        # status.phase alone shows "Running" for crash-looping pods.
+        - title: Status
+          width: 18
+          sortable: true
+          value:
+            - "status.containerStatuses.0.state.waiting.reason"
+            - "status.containerStatuses.0.state.terminated.reason"
+            - "status.phase"
+          color_rules:
+            - {when: Running,           color: green}
+            - {when: Pending,           color: yellow}
+            - {when: Succeeded,         color: theme:accent}
+            - {when: Completed,         color: theme:accent}
+            - {when: Failed,            color: red}
+            - {when: Error,             color: red}
+            - {when: CrashLoopBackOff,  color: red}
+            - {when: ImagePullBackOff,  color: red}
+            - {when: ErrImagePull,      color: red}
+            - {when: ContainerCreating, color: yellow}
+            - {when: Unknown,           color: gray}
+        - title: Ready
+          width: 6
+          align: right
+          value: "status.containerStatuses.0.ready"
+          color_rules:
+            - {when: "true",  color: green}
+            - {when: "false", color: red}
+        - title: Restarts
+          width: 8
+          sortable: true
+          sort: number
+          align: right
+          value: "status.containerStatuses.0.restartCount"
+          color_rules:
+            - {when: "0",   color: gray}
+            - {when: ">5",  color: red}
+            - {when: ">0",  color: yellow}
+        - {title: Node,    width: 24, value: "spec.nodeName"}
+        - {title: Pod IP,  width: 16, value: "status.podIP"}
+        - {title: Started, width: 22, sortable: true, value: "status.startTime"}
 
-  pod_inspector:
-    type: inspector
-    title: ${selection.Name}
-    filterable: true
-    initial_depth: 0
-    source: pod_detail
-    colors:
-      border_active:   theme:accent
-      label:           theme:muted
-      value:           theme:bar-fg
-      current_line_bg: theme:subtle
-    fields:
-      - {label: name,       path: "metadata.name"}
-      - {label: namespace,  path: "metadata.namespace"}
-      - {label: nodeName,   path: "spec.nodeName"}
-      # ColorRules also apply per inspector field — value text wrapped
-      # with ansi.CellColor on match (same syntax as table color_rules).
-      - label: phase
-        path: "status.phase"
-        color_rules:
-          - {when: Running,   color: green}
-          - {when: Pending,   color: yellow}
-          - {when: Succeeded, color: theme:accent}
-          - {when: Failed,    color: red}
-      - label: podIP
-        path: "status.podIP"
-        # Empty-value detection: if the IP wasn't assigned yet, highlight
-        # in yellow so a starting-up pod stands out from a healthy one.
-        color_rules:
-          - {when: "",       color: yellow}
-          - {when: "~^",     color: theme:bar-fg}
-      - {label: hostIP,     path: "status.hostIP"}
-      - label: metadata
-        children:
-          - {label: uid,               path: "metadata.uid"}
-          - {label: creationTimestamp, path: "metadata.creationTimestamp"}
-          - {label: resourceVersion,   path: "metadata.resourceVersion"}
-      - label: spec
-        children:
-          - {label: serviceAccountName, path: "spec.serviceAccountName"}
-          - label: restartPolicy
-            path: "spec.restartPolicy"
-            color_rules:
-              - {when: Always, color: green}
-              - {when: Never,  color: gray}
-              - {when: OnFailure, color: yellow}
-          - label: container[0]
-            children:
-              - {label: name,            path: "spec.containers.0.name"}
-              - {label: image,           path: "spec.containers.0.image"}
-              - {label: imagePullPolicy, path: "spec.containers.0.imagePullPolicy"}
-      - label: status
-        children:
-          - label: phase
-            path: "status.phase"
-            color_rules:
-              - {when: Running,   color: green}
-              - {when: Pending,   color: yellow}
-              - {when: Succeeded, color: theme:accent}
-              - {when: Failed,    color: red}
-          - {label: startTime, path: "status.startTime"}
-          - label: containerStatus[0]
-            children:
-              - label: ready
-                path: "status.containerStatuses.0.ready"
-                color_rules:
-                  - {when: "true",  color: green}
-                  - {when: "false", color: red}
-              - label: restartCount
-                path: "status.containerStatuses.0.restartCount"
-                color_rules:
-                  - {when: "0",  color: gray}
-                  - {when: ">5", color: red}
-                  - {when: ">0", color: yellow}
-              - {label: image,   path: "status.containerStatuses.0.image"}
-              - {label: imageID, path: "status.containerStatuses.0.imageID"}
+    pod_inspector:
+      type: inspector
+      title: ${selection.Name}
+      filterable: true
+      initial_depth: 0
+      source: pod_detail
+      colors:
+        border_active:   theme:accent
+        label:           theme:muted
+        value:           theme:bar-fg
+        current_line_bg: theme:subtle
+      fields:
+        - {label: name,       path: "metadata.name"}
+        - {label: namespace,  path: "metadata.namespace"}
+        - {label: nodeName,   path: "spec.nodeName"}
+        # ColorRules also apply per inspector field — value text wrapped
+        # with ansi.CellColor on match (same syntax as table color_rules).
+        - label: phase
+          path: "status.phase"
+          color_rules:
+            - {when: Running,   color: green}
+            - {when: Pending,   color: yellow}
+            - {when: Succeeded, color: theme:accent}
+            - {when: Failed,    color: red}
+        - label: podIP
+          path: "status.podIP"
+          # Empty-value detection: if the IP wasn't assigned yet, highlight
+          # in yellow so a starting-up pod stands out from a healthy one.
+          color_rules:
+            - {when: "",       color: yellow}
+            - {when: "~^",     color: theme:bar-fg}
+        - {label: hostIP,     path: "status.hostIP"}
+        - label: metadata
+          children:
+            - {label: uid,               path: "metadata.uid"}
+            - {label: creationTimestamp, path: "metadata.creationTimestamp"}
+            - {label: resourceVersion,   path: "metadata.resourceVersion"}
+        - label: spec
+          children:
+            - {label: serviceAccountName, path: "spec.serviceAccountName"}
+            - label: restartPolicy
+              path: "spec.restartPolicy"
+              color_rules:
+                - {when: Always, color: green}
+                - {when: Never,  color: gray}
+                - {when: OnFailure, color: yellow}
+            - label: container[0]
+              children:
+                - {label: name,            path: "spec.containers.0.name"}
+                - {label: image,           path: "spec.containers.0.image"}
+                - {label: imagePullPolicy, path: "spec.containers.0.imagePullPolicy"}
+        - label: status
+          children:
+            - label: phase
+              path: "status.phase"
+              color_rules:
+                - {when: Running,   color: green}
+                - {when: Pending,   color: yellow}
+                - {when: Succeeded, color: theme:accent}
+                - {when: Failed,    color: red}
+            - {label: startTime, path: "status.startTime"}
+            - label: containerStatus[0]
+              children:
+                - label: ready
+                  path: "status.containerStatuses.0.ready"
+                  color_rules:
+                    - {when: "true",  color: green}
+                    - {when: "false", color: red}
+                - label: restartCount
+                  path: "status.containerStatuses.0.restartCount"
+                  color_rules:
+                    - {when: "0",  color: gray}
+                    - {when: ">5", color: red}
+                    - {when: ">0", color: yellow}
+                - {label: image,   path: "status.containerStatuses.0.image"}
+                - {label: imageID, path: "status.containerStatuses.0.imageID"}
 
-  pod_logs_view:
-    type: logview
-    title: ${selection.Name} — logs (tail 200, refresh 2s)
-    searchable: true
-    source: pod_logs
-    # color_rules on a logview match per line (whole-line wrap). Regex
-    # via the `~` prefix is the natural choice — log levels typically
-    # appear as a token somewhere in the line. First-match wins, so
-    # tighter patterns go first.
-    color_rules:
-      - {when: "~\\b(ERROR|FATAL|PANIC)\\b", color: red}
-      - {when: "~\\bWARN(ING)?\\b",          color: yellow}
-      - {when: "~\\bINFO\\b",                color: theme:accent}
-      - {when: "~\\b(DEBUG|TRACE)\\b",       color: gray}
-      - {when: server,                       color: green}
-    colors:
-      border_active:   theme:accent
-      match:           theme:accent
-      current_line_bg: theme:subtle
+    pod_logs_view:
+      type: logview
+      title: ${selection.Name} — logs (tail 200, refresh 2s)
+      searchable: true
+      source: pod_logs
+      # color_rules on a logview match per line (whole-line wrap). Regex
+      # via the `~` prefix is the natural choice — log levels typically
+      # appear as a token somewhere in the line. First-match wins, so
+      # tighter patterns go first.
+      color_rules:
+        - {when: "~\\b(ERROR|FATAL|PANIC)\\b", color: red}
+        - {when: "~\\bWARN(ING)?\\b",          color: yellow}
+        - {when: "~\\bINFO\\b",                color: theme:accent}
+        - {when: "~\\b(DEBUG|TRACE)\\b",       color: gray}
+        - {when: server,                       color: green}
+      colors:
+        border_active:   theme:accent
+        match:           theme:accent
+        current_line_bg: theme:subtle
+  screens:
+    namespaces:
+      title: Namespaces
+      layout: {component: namespaces_list}
+      # Push site: when the user hits enter on a namespace row, push the
+      # `pods` screen with the selected namespace name fed into the
+      # destination's `pods` source via its declared `namespace` param.
+      on_enter:
+        - source: namespaces_list
+          push: pods
+          bind:
+            namespace: ${selection}
 
-screens:
-  namespaces:
-    title: Namespaces
-    layout: {component: namespaces_list}
-    # Push site: when the user hits enter on a namespace row, push the
-    # `pods` screen with the selected namespace name fed into the
-    # destination's `pods` source via its declared `namespace` param.
-    on_enter:
-      - source: namespaces_list
-        push: pods
-        bind:
-          namespace: ${selection}
+    pods:
+      title: ${selection}
+      layout: {component: pods_table}
+      # The pods table is bound to a parameterized source — both columns
+      # (Namespace, Name) of the selected row feed into the destination
+      # screen's `pod_detail` AND `pod_logs` params. Same map, both
+      # destinations see the same values.
+      on_enter:
+        - source: pods_table
+          push: detail
+          bind:
+            namespace: ${selection.Namespace}
+            name:      ${selection.Name}
+      # Actions: while focused on the pods table, these keys dispatch a
+      # subprocess via tuilib's pkg/runner. The TUI suspends, the
+      # subprocess gets the TTY, and we resume on exit. ${selection.Col}
+      # resolves to the focused row's cell.
+      actions:
+        - key: x
+          label: exec
+          source: pods_table
+          # `confirm:` prompts a yes/no modal before dispatch. ${selection.*}
+          # substitutes here too, so the message names the pod you're about
+          # to drop into.
+          confirm: "Open an interactive shell in ${selection.Name} (${selection.Namespace})?"
+          notice: "connecting…"
+          run:
+            - kubectl
+            - --context
+            - kind-tui-builder
+            - exec
+            - -it
+            - -n
+            - ${selection.Namespace}
+            - ${selection.Name}
+            - --
+            - sh
+        - key: d
+          label: describe
+          source: pods_table
+          run:
+            - sh
+            - -c
+            - "kubectl --context kind-tui-builder describe -n ${selection.Namespace} pod ${selection.Name} | ${PAGER:-less} -R"
+        - key: D
+          label: delete
+          source: pods_table
+          # `interactive: false` runs kubectl in a goroutine, captures
+          # stdout/stderr, and never suspends the alt-screen — no flicker.
+          # On error the captured stderr is shown in the modal alert; on
+          # success the statusbar reports "action complete."
+          interactive: false
+          confirm: "Delete pod ${selection.Name} in ${selection.Namespace}? This cannot be undone."
+          run:
+            - kubectl
+            - --context
+            - kind-tui-builder
+            - delete
+            - -n
+            - ${selection.Namespace}
+            - pod
+            - ${selection.Name}
 
-  pods:
-    title: ${selection}
-    layout: {component: pods_table}
-    # The pods table is bound to a parameterized source — both columns
-    # (Namespace, Name) of the selected row feed into the destination
-    # screen's `pod_detail` AND `pod_logs` params. Same map, both
-    # destinations see the same values.
-    on_enter:
-      - source: pods_table
-        push: detail
-        bind:
-          namespace: ${selection.Namespace}
-          name:      ${selection.Name}
-    # Actions: while focused on the pods table, these keys dispatch a
-    # subprocess via tuilib's pkg/runner. The TUI suspends, the
-    # subprocess gets the TTY, and we resume on exit. ${selection.Col}
-    # resolves to the focused row's cell.
-    actions:
-      - key: x
-        label: exec
-        source: pods_table
-        # `confirm:` prompts a yes/no modal before dispatch. ${selection.*}
-        # substitutes here too, so the message names the pod you're about
-        # to drop into.
-        confirm: "Open an interactive shell in ${selection.Name} (${selection.Namespace})?"
-        notice: "connecting…"
-        run:
-          - kubectl
-          - --context
-          - kind-tui-builder
-          - exec
-          - -it
-          - -n
-          - ${selection.Namespace}
-          - ${selection.Name}
-          - --
-          - sh
-      - key: d
-        label: describe
-        source: pods_table
-        run:
-          - sh
-          - -c
-          - "kubectl --context kind-tui-builder describe -n ${selection.Namespace} pod ${selection.Name} | ${PAGER:-less} -R"
-      - key: D
-        label: delete
-        source: pods_table
-        # `interactive: false` runs kubectl in a goroutine, captures
-        # stdout/stderr, and never suspends the alt-screen — no flicker.
-        # On error the captured stderr is shown in the modal alert; on
-        # success the statusbar reports "action complete."
-        interactive: false
-        confirm: "Delete pod ${selection.Name} in ${selection.Namespace}? This cannot be undone."
-        run:
-          - kubectl
-          - --context
-          - kind-tui-builder
-          - delete
-          - -n
-          - ${selection.Namespace}
-          - pod
-          - ${selection.Name}
-
-  detail:
-    title: ${selection.Name}
-    layout:
-      vstack:
-        - {flex: 2, component: pod_inspector}
-        - {flex: 3, component: pod_logs_view}
-
-initial: namespaces
+    detail:
+      title: ${selection.Name}
+      layout:
+        vstack:
+          - {flex: 2, component: pod_inspector}
+          - {flex: 3, component: pod_logs_view}
+  initial: namespaces

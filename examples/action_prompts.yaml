@@ -23,43 +23,43 @@ app:
   title: Action prompts demo
   theme: nord
 
-components:
-  fruits:
-    type: list
-    title: Pick a fruit, then press a key for an action
-    filterable: true
-    items:
-      - Apple
-      - Banana
-      - Cherry
-      - Date
+tui:
+  components:
+    fruits:
+      type: list
+      title: Pick a fruit, then press a key for an action
+      filterable: true
+      items:
+        - Apple
+        - Banana
+        - Cherry
+        - Date
+  screen:
+    title: Prompts
+    layout:
+      component: fruits
+    actions:
+      # Single text prompt — ask for a quantity then echo it.
+      - key: q
+        label: quantity
+        source: fruits
+        interactive: false
+        prompts:
+          - {key: amount, label: "How many?", placeholder: "1", initial: "1"}
+        run: [echo, "${prompt.amount} ${selection}(s) requested"]
 
-screen:
-  title: Prompts
-  layout:
-    component: fruits
-  actions:
-    # Single text prompt — ask for a quantity then echo it.
-    - key: q
-      label: quantity
-      source: fruits
-      interactive: false
-      prompts:
-        - {key: amount, label: "How many?", placeholder: "1", initial: "1"}
-      run: [echo, "${prompt.amount} ${selection}(s) requested"]
-
-    # Multiple fields — text + select. The submit button confirms
-    # everything atomically; cancel aborts without running.
-    - key: o
-      label: order
-      source: fruits
-      interactive: false
-      confirm: "Order ${prompt.amount} ${selection}(s) as ${prompt.priority} priority?"
-      prompts:
-        - {key: amount,   label: "Quantity",        placeholder: "1", initial: "1"}
-        - {key: priority, label: "Priority",        type: select, options: [low, normal, high], initial_index: 1}
-        - {key: gift,     label: "Gift wrap?",      type: confirm, initial_bool: false}
-      run:
-        - sh
-        - -c
-        - 'echo "ordered: ${prompt.amount} × ${selection}, priority=${prompt.priority}, gift=${prompt.gift}"'
+      # Multiple fields — text + select. The submit button confirms
+      # everything atomically; cancel aborts without running.
+      - key: enter
+        label: order
+        source: fruits
+        interactive: false
+        confirm: "Order ${prompt.amount} ${selection}(s) as ${prompt.priority} priority?"
+        prompts:
+          - {key: amount,   label: "Quantity",        placeholder: "1", initial: "1"}
+          - {key: priority, label: "Priority",        type: select, options: [low, normal, high], initial_index: 1}
+          - {key: gift,     label: "Gift wrap?",      type: confirm, initial_bool: false}
+        run:
+          - sh
+          - -c
+          - 'echo "ordered: ${prompt.amount} × ${selection}, priority=${prompt.priority}, gift=${prompt.gift}"'

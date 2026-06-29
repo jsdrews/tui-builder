@@ -35,16 +35,15 @@ import (
 	"github.com/jsdrews/tui-builder/internal/pipeline"
 )
 
-// Multi is the shared context for a multi-screen app: every named screen,
-// the top-level components map, the top-level data sources map, and the
-// top-level pipelines map. Passed once to every Model so any screen can
-// build + push its on_enter targets, and so pushed screens get the same
+// Multi is the shared context for a multi-screen app: every named
+// screen, the top-level components map, and the unified data
+// sources map. Passed once to every Model so any screen can build +
+// push its on_enter targets, and so pushed screens get the same
 // data layer.
 type Multi struct {
-	Screens     map[string]*cfg.Screen
-	Components  map[string]*cfg.Component
-	DataSources map[string]*cfg.DataSource
-	Pipelines   map[string]*cfg.Pipeline
+	Screens    map[string]*cfg.Screen
+	Components map[string]*cfg.Component
+	Sources    map[string]*cfg.Source
 }
 
 // sourceEntry tracks a live data source bound to one or more components.
@@ -58,7 +57,7 @@ type Multi struct {
 type sourceEntry struct {
 	src    ds.Source
 	loaded bool
-	stream <-chan ds.Event   // non-nil for streaming sources after Subscribe
+	stream <-chan ds.Event    // non-nil for streaming sources after Subscribe
 	cancel context.CancelFunc // cancels the stream's context
 }
 
@@ -152,12 +151,12 @@ type Model struct {
 // mode. Parameterized sources will be constructed with unresolved
 // ${params.*} templates and will surface errors at fetch time. Use
 // wrangl --param for now, or have your source declare defaults.
-func New(s *cfg.Screen, components map[string]*cfg.Component, dataSources map[string]*cfg.DataSource, pipelines map[string]*cfg.Pipeline, th theme.Theme) (*Model, error) {
-	subS, subC, subD, err := build.SubstituteScreen(s, components, dataSources, build.Selection{}, nil)
+func New(s *cfg.Screen, components map[string]*cfg.Component, entries map[string]*cfg.Source, th theme.Theme) (*Model, error) {
+	subS, subC, subE, err := build.SubstituteScreen(s, components, entries, build.Selection{}, nil)
 	if err != nil {
 		return nil, err
 	}
-	return build_(subS, subC, subD, pipelines, th, nil)
+	return build_(subS, subC, subE, th, nil)
 }
 
 // NewMulti builds a Model from one screen in a multi-screen Config. The
@@ -177,14 +176,14 @@ func NewMulti(screenName string, multi *Multi, sel build.Selection, params map[s
 	if !ok {
 		return nil, fmt.Errorf("screen %q not defined", screenName)
 	}
-	subScreen, subComponents, subSources, err := build.SubstituteScreen(src, multi.Components, multi.DataSources, sel, params)
+	subScreen, subComponents, subEntries, err := build.SubstituteScreen(src, multi.Components, multi.Sources, sel, params)
 	if err != nil {
 		return nil, err
 	}
-	return build_(subScreen, subComponents, subSources, multi.Pipelines, th, multi)
+	return build_(subScreen, subComponents, subEntries, th, multi)
 }
 
-func build_(s *cfg.Screen, components map[string]*cfg.Component, dataSources map[string]*cfg.DataSource, pipelines map[string]*cfg.Pipeline, th theme.Theme, multi *Multi) (*Model, error) {
+func build_(s *cfg.Screen, components map[string]*cfg.Component, entries map[string]*cfg.Source, th theme.Theme, multi *Multi) (*Model, error) {
 	tree, err := build.Build(&s.Layout, components, th)
 	if err != nil {
 		return nil, err
@@ -202,18 +201,9 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, dataSources map
 	}
 	m.actions = append([]cfg.Action(nil), s.Actions...)
 
-	// Build every defined data source up front so merge sources can
-	// resolve their children. Leaves (http/exec/file) and merges all
-	// satisfy ds.Source; the screen-side wiring below is type-agnostic.
-	live, err := ds.Build(dataSources)
-	if err != nil {
-		return nil, err
-	}
-	// Then build pipelines on top of the source registry. The pipeline
-	// layer treats sources and pipelines uniformly — both are addressable
-	// by name and both satisfy ds.Source — so the binding loop below
-	// doesn't need to know the difference.
-	reg, err := pipeline.Build(live, dataSources, pipelines, nil)
+	// One unified registry over the entries map. Sources and operator
+	// pipelines share the namespace — reg.Get resolves both.
+	reg, err := pipeline.Build(nil, entries, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -221,19 +211,15 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, dataSources map
 	m.sourceUsers = map[string][]string{}
 	for _, name := range tree.Order {
 		c := tree.Components[name]
-		// Component.Source and Component.Pipeline are mutually exclusive
-		// (config validator enforces). Pipeline takes precedence if both
-		// fields are set somehow.
-		boundName := c.Cfg.Pipeline
-		if boundName == "" {
-			boundName = c.Cfg.Source
-		}
+		// Source references any entry in the unified registry (leaf
+		// source or operator pipeline). reg.Get resolves both kinds.
+		boundName := c.Cfg.Source
 		if boundName == "" {
 			continue
 		}
 		bound := reg.Get(boundName)
 		if bound == nil {
-			return nil, fmt.Errorf("component %q: pipeline/source %q not defined", name, boundName)
+			return nil, fmt.Errorf("component %q: source %q not defined", name, boundName)
 		}
 		if _, ok := m.sources[boundName]; !ok {
 			m.sources[boundName] = &sourceEntry{src: bound}

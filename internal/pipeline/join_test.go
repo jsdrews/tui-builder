@@ -27,22 +27,17 @@ func TestJoinSeparateEmit(t *testing.T) {
 		map[string]any{"id": 1, "name": "Ada"},
 		map[string]any{"id": 2, "name": "Grace"},
 	}}
-	sourceDefs := map[string]*cfg.DataSource{
-		"posts": {
-			Type:       "http",
-			URL:        srv.URL + "/users/${params.user_id}/posts",
-			Parameters: map[string]*cfg.Parameter{"user_id": {Type: "int", Required: true}},
-		},
+	sourceDefs := map[string]*cfg.Source{
+		"posts": cfg.NewEntry(&cfg.Source{Type: "http", Parameters: map[string]*cfg.Parameter{"user_id": {Type: "int", Required: true}}, URL: srv.URL + "/users/${params.user_id}/posts"}),
 	}
-	defs := map[string]*cfg.Pipeline{
-		"users_with_posts": {Join: &cfg.JoinOp{
-			Driver: cfg.JoinDriver{From: "drv"},
+	defs := map[string]*cfg.Source{
+		"users_with_posts": cfg.NewEntry(&cfg.Source{Type: "join", Driver: cfg.JoinDriver{From: "drv"},
 			Lookups: map[string]cfg.JoinLookup{
 				"posts": {From: "posts", On: map[string]string{"user_id": "id"}},
-			},
-		}},
+			}},
+		),
 	}
-	reg, err := Build(map[string]ds.Source{"drv": driver}, sourceDefs, defs, nil)
+	reg, err := Build(map[string]ds.Source{"drv": driver}, mergeEntries(sourceDefs, defs), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,23 +81,18 @@ func TestJoinMergedEmit(t *testing.T) {
 	driver := &fakeSource{data: []any{
 		map[string]any{"id": 1, "name": "Ada"},
 	}}
-	sourceDefs := map[string]*cfg.DataSource{
-		"profile": {
-			Type:       "http",
-			URL:        srv.URL + "/users/${params.user_id}",
-			Parameters: map[string]*cfg.Parameter{"user_id": {Type: "int", Required: true}},
-		},
+	sourceDefs := map[string]*cfg.Source{
+		"profile": cfg.NewEntry(&cfg.Source{Type: "http", Parameters: map[string]*cfg.Parameter{"user_id": {Type: "int", Required: true}}, URL: srv.URL + "/users/${params.user_id}"}),
 	}
-	defs := map[string]*cfg.Pipeline{
-		"merged": {Join: &cfg.JoinOp{
-			Driver: cfg.JoinDriver{From: "drv"},
+	defs := map[string]*cfg.Source{
+		"merged": cfg.NewEntry(&cfg.Source{Type: "join", Driver: cfg.JoinDriver{From: "drv"},
 			Lookups: map[string]cfg.JoinLookup{
 				"profile": {From: "profile", On: map[string]string{"user_id": "id"}},
 			},
-			Emit: "merged",
-		}},
+			Emit: "merged"},
+		),
 	}
-	reg, err := Build(map[string]ds.Source{"drv": driver}, sourceDefs, defs, nil)
+	reg, err := Build(map[string]ds.Source{"drv": driver}, mergeEntries(sourceDefs, defs), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,22 +121,17 @@ func TestJoinFailsOnLookupErrorByDefault(t *testing.T) {
 	defer srv.Close()
 
 	driver := &fakeSource{data: []any{map[string]any{"id": 1}}}
-	sourceDefs := map[string]*cfg.DataSource{
-		"flaky": {
-			Type:       "http",
-			URL:        srv.URL + "/${params.id}",
-			Parameters: map[string]*cfg.Parameter{"id": {Type: "int", Required: true}},
-		},
+	sourceDefs := map[string]*cfg.Source{
+		"flaky": cfg.NewEntry(&cfg.Source{Type: "http", Parameters: map[string]*cfg.Parameter{"id": {Type: "int", Required: true}}, URL: srv.URL + "/${params.id}"}),
 	}
-	defs := map[string]*cfg.Pipeline{
-		"j": {Join: &cfg.JoinOp{
-			Driver: cfg.JoinDriver{From: "drv"},
+	defs := map[string]*cfg.Source{
+		"j": cfg.NewEntry(&cfg.Source{Type: "join", Driver: cfg.JoinDriver{From: "drv"},
 			Lookups: map[string]cfg.JoinLookup{
 				"data": {From: "flaky", On: map[string]string{"id": "id"}},
-			},
-		}},
+			}},
+		),
 	}
-	reg, err := Build(map[string]ds.Source{"drv": driver}, sourceDefs, defs, nil)
+	reg, err := Build(map[string]ds.Source{"drv": driver}, mergeEntries(sourceDefs, defs), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,21 +161,16 @@ func TestJoinSkipDropsFailedRows(t *testing.T) {
 		map[string]any{"id": 1, "name": "fails"},
 		map[string]any{"id": 2, "name": "works"},
 	}}
-	sourceDefs := map[string]*cfg.DataSource{
-		"d": {
-			Type:       "http",
-			URL:        srv.URL + "/${params.id}",
-			Parameters: map[string]*cfg.Parameter{"id": {Type: "int", Required: true}},
-		},
+	sourceDefs := map[string]*cfg.Source{
+		"d": cfg.NewEntry(&cfg.Source{Type: "http", Parameters: map[string]*cfg.Parameter{"id": {Type: "int", Required: true}}, URL: srv.URL + "/${params.id}"}),
 	}
-	defs := map[string]*cfg.Pipeline{
-		"j": {Join: &cfg.JoinOp{
-			Driver:  cfg.JoinDriver{From: "drv"},
+	defs := map[string]*cfg.Source{
+		"j": cfg.NewEntry(&cfg.Source{Type: "join", Driver: cfg.JoinDriver{From: "drv"},
 			Lookups: map[string]cfg.JoinLookup{"data": {From: "d", On: map[string]string{"id": "id"}}},
-			OnError: "skip",
-		}},
+			OnError: "skip"},
+		),
 	}
-	reg, err := Build(map[string]ds.Source{"drv": driver}, sourceDefs, defs, nil)
+	reg, err := Build(map[string]ds.Source{"drv": driver}, mergeEntries(sourceDefs, defs), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,19 +187,15 @@ func TestJoinSkipDropsFailedRows(t *testing.T) {
 // TestJoinSubscribeReturnsNotStreaming — joins are snapshot-only in v1.
 func TestJoinSubscribeReturnsNotStreaming(t *testing.T) {
 	driver := &fakeSource{data: []any{}}
-	sourceDefs := map[string]*cfg.DataSource{
-		"d": {
-			Type: "http", URL: "http://x/${params.id}",
-			Parameters: map[string]*cfg.Parameter{"id": {Type: "int", Required: true}},
-		},
+	sourceDefs := map[string]*cfg.Source{
+		"d": cfg.NewEntry(&cfg.Source{Type: "http", Parameters: map[string]*cfg.Parameter{"id": {Type: "int", Required: true}}, URL: "http://x/${params.id}"}),
 	}
-	defs := map[string]*cfg.Pipeline{
-		"j": {Join: &cfg.JoinOp{
-			Driver:  cfg.JoinDriver{From: "drv"},
-			Lookups: map[string]cfg.JoinLookup{"x": {From: "d", On: map[string]string{"id": "id"}}},
-		}},
+	defs := map[string]*cfg.Source{
+		"j": cfg.NewEntry(&cfg.Source{Type: "join", Driver: cfg.JoinDriver{From: "drv"},
+			Lookups: map[string]cfg.JoinLookup{"x": {From: "d", On: map[string]string{"id": "id"}}}},
+		),
 	}
-	reg, err := Build(map[string]ds.Source{"drv": driver}, sourceDefs, defs, nil)
+	reg, err := Build(map[string]ds.Source{"drv": driver}, mergeEntries(sourceDefs, defs), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,21 +208,15 @@ func TestJoinSubscribeReturnsNotStreaming(t *testing.T) {
 // TestJoinValidatorRejectsPipelineLookup — v1 only accepts SOURCE
 // lookups; pipelines as lookups are deferred.
 func TestJoinValidatorRejectsPipelineLookup(t *testing.T) {
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"d": {Type: "exec", Command: []string{"true"}},
-		},
-		Pipelines: map[string]*cfg.Pipeline{
-			"some_passthrough": {From: "d"},
-			"bad_join": {Join: &cfg.JoinOp{
-				Driver:  cfg.JoinDriver{From: "d"},
-				Lookups: map[string]cfg.JoinLookup{"x": {From: "some_passthrough", On: map[string]string{"k": "id"}}},
-			}},
-		},
-		Components: map[string]*cfg.Component{
-			"c": {Type: "list", Items: []string{"x"}},
-		},
-		Screen: cfg.Screen{Layout: cfg.Node{Component: "c"}},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"d": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"true"}}),
+
+		"some_passthrough": cfg.NewEntry(&cfg.Source{Type: "passthrough", From: "d"}),
+		"bad_join": cfg.NewEntry(&cfg.Source{Type: "join", Driver: cfg.JoinDriver{From: "d"},
+			Lookups: map[string]cfg.JoinLookup{"x": {From: "some_passthrough", On: map[string]string{"k": "id"}}}},
+		)}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"c": {Type: "list", Items: []string{"x"}},
+	},
+		Screen: cfg.Screen{Layout: cfg.Node{Component: "c"}}},
 	}
 	if err := c.Validate(); err == nil {
 		t.Errorf("expected validator to reject pipeline-as-lookup")
@@ -256,27 +226,18 @@ func TestJoinValidatorRejectsPipelineLookup(t *testing.T) {
 // TestJoinValidatorRejectsUndeclaredOnParam — every key in on: must
 // match a parameter declared on the lookup source.
 func TestJoinValidatorRejectsUndeclaredOnParam(t *testing.T) {
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"d": {Type: "exec", Command: []string{"true"}},
-			"l": {
-				Type: "http", URL: "x",
-				Parameters: map[string]*cfg.Parameter{"namespace": {Required: true}},
-			},
-		},
-		Pipelines: map[string]*cfg.Pipeline{
-			"j": {Join: &cfg.JoinOp{
-				Driver: cfg.JoinDriver{From: "d"},
-				Lookups: map[string]cfg.JoinLookup{
-					// `name` isn't declared on `l` — should be rejected.
-					"data": {From: "l", On: map[string]string{"name": "metadata.name"}},
-				},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"d": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"true"}}),
+		"l": cfg.NewEntry(&cfg.Source{Type: "http", Parameters: map[string]*cfg.Parameter{"namespace": {Required: true}}, URL: "x"}),
+
+		"j": cfg.NewEntry(&cfg.Source{Type: "join", Driver: cfg.JoinDriver{From: "d"},
+			Lookups: map[string]cfg.JoinLookup{
+				// `name` isn't declared on `l` — should be rejected.
+				"data": {From: "l", On: map[string]string{"name": "metadata.name"}},
 			}},
-		},
-		Components: map[string]*cfg.Component{
-			"c": {Type: "list", Items: []string{"x"}},
-		},
-		Screen: cfg.Screen{Layout: cfg.Node{Component: "c"}},
+		)}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"c": {Type: "list", Items: []string{"x"}},
+	},
+		Screen: cfg.Screen{Layout: cfg.Node{Component: "c"}}},
 	}
 	if err := c.Validate(); err == nil {
 		t.Errorf("expected validator to reject undeclared on: param")

@@ -17,18 +17,17 @@ func TestProjectSnapshotSlimsObjects(t *testing.T) {
 	}}
 	reg, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
-			"slim": {Project: &cfg.ProjectOp{
-				From: "src",
+
+		map[string]*cfg.Source{
+			"slim": cfg.NewEntry(&cfg.Source{Type: "project", From: "src",
 				Keep: map[string]string{
 					"name":      "metadata.name",
 					"namespace": "metadata.namespace",
 					"phase":     "status.phase",
-				},
-			}},
+				}},
+			),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -61,15 +60,14 @@ func TestProjectSnapshotComputedExpressions(t *testing.T) {
 	}}
 	reg, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
-			"shaped": {Project: &cfg.ProjectOp{
-				From: "src",
+
+		map[string]*cfg.Source{
+			"shaped": cfg.NewEntry(&cfg.Source{Type: "project", From: "src",
 				Keep: map[string]string{
-					"name_lower": "lower(name)",
+					"name_lower":  "lower(name)",
 					"score_count": "len(scores)",
-				},
-			}},
+				}},
+			),
 		},
 		nil,
 	)
@@ -95,17 +93,16 @@ func TestProjectStreamingReshapesJSONEvents(t *testing.T) {
 	}
 	reg, err := Build(
 		map[string]ds.Source{"src": streamer},
-		nil,
-		map[string]*cfg.Pipeline{
-			"slim": {Project: &cfg.ProjectOp{
-				From: "src",
+
+		map[string]*cfg.Source{
+			"slim": cfg.NewEntry(&cfg.Source{Type: "project", From: "src",
 				Keep: map[string]string{
 					"name": "name",
 					"v":    "nested.v",
-				},
-			}},
+				}},
+			),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -141,17 +138,12 @@ done:
 }
 
 func TestProjectValidationRejectsEmptyKeep(t *testing.T) {
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"src": {Type: "exec", Command: []string{"true"}},
-		},
-		Pipelines: map[string]*cfg.Pipeline{
-			"bad": {Project: &cfg.ProjectOp{From: "src"}},
-		},
-		Components: map[string]*cfg.Component{
-			"x": {Type: "list", Items: []string{"x"}},
-		},
-		Screen: cfg.Screen{Layout: cfg.Node{Component: "x"}},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"src": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"true"}}),
+
+		"bad": cfg.NewEntry(&cfg.Source{Type: "project", From: "src"})}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"x": {Type: "list", Items: []string{"x"}},
+	},
+		Screen: cfg.Screen{Layout: cfg.Node{Component: "x"}}},
 	}
 	if err := c.Validate(); err == nil {
 		t.Errorf("expected validation error for empty keep:")

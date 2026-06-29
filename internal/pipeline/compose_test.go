@@ -21,16 +21,15 @@ func TestComposeBundlesHeterogeneousChildren(t *testing.T) {
 	}}
 	reg, err := Build(
 		map[string]ds.Source{"pods": pods, "deployments": deployments},
-		nil,
-		map[string]*cfg.Pipeline{
-			"fleet": {Compose: &cfg.ComposeOp{
-				Parts: map[string]string{
-					"p": "pods",
-					"d": "deployments",
-				},
+
+		map[string]*cfg.Source{
+			"fleet": cfg.NewEntry(&cfg.Source{Type: "compose", Parts: map[string]string{
+				"p": "pods",
+				"d": "deployments",
 			}},
+			),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -70,17 +69,16 @@ func TestComposeAcceptsPipelineAsChild(t *testing.T) {
 	}}
 	reg, err := Build(
 		map[string]ds.Source{"pods": pods},
-		nil,
-		map[string]*cfg.Pipeline{
-			"running_pods": {Filter: &cfg.FilterOp{From: "pods", Where: "phase == 'Running'"}},
-			"fleet": {Compose: &cfg.ComposeOp{
-				Parts: map[string]string{
-					"all":     "pods",
-					"running": "running_pods",
-				},
+
+		map[string]*cfg.Source{
+			"running_pods": cfg.NewEntry(&cfg.Source{Type: "filter", From: "pods", Where: "phase == 'Running'"}),
+			"fleet": cfg.NewEntry(&cfg.Source{Type: "compose", Parts: map[string]string{
+				"all":     "pods",
+				"running": "running_pods",
 			}},
+			),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -103,13 +101,11 @@ func TestComposeFailOnChildError(t *testing.T) {
 	bad := &fakeSource{err: errors.New("boom")}
 	reg, err := Build(
 		map[string]ds.Source{"good": good, "bad": bad},
-		nil,
-		map[string]*cfg.Pipeline{
-			"both": {Compose: &cfg.ComposeOp{
-				Parts: map[string]string{"g": "good", "b": "bad"},
-			}},
+
+		map[string]*cfg.Source{
+			"both": cfg.NewEntry(&cfg.Source{Type: "compose", Parts: map[string]string{"g": "good", "b": "bad"}}),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -128,14 +124,13 @@ func TestComposeSkipDropsFailedChild(t *testing.T) {
 	bad := &fakeSource{err: errors.New("boom")}
 	reg, err := Build(
 		map[string]ds.Source{"good": good, "bad": bad},
-		nil,
-		map[string]*cfg.Pipeline{
-			"both": {Compose: &cfg.ComposeOp{
-				Parts:   map[string]string{"g": "good", "b": "bad"},
-				OnError: "skip",
-			}},
+
+		map[string]*cfg.Source{
+			"both": cfg.NewEntry(&cfg.Source{Type: "compose", Parts: map[string]string{"g": "good", "b": "bad"},
+				OnError: "skip"},
+			),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -159,14 +154,13 @@ func TestComposeSkipAllFailedSurfaces(t *testing.T) {
 	b := &fakeSource{err: errors.New("b-boom")}
 	reg, err := Build(
 		map[string]ds.Source{"a": a, "b": b},
-		nil,
-		map[string]*cfg.Pipeline{
-			"both": {Compose: &cfg.ComposeOp{
-				Parts:   map[string]string{"x": "a", "y": "b"},
-				OnError: "skip",
-			}},
+
+		map[string]*cfg.Source{
+			"both": cfg.NewEntry(&cfg.Source{Type: "compose", Parts: map[string]string{"x": "a", "y": "b"},
+				OnError: "skip"},
+			),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -184,13 +178,11 @@ func TestComposeSubscribeReturnsNotStreaming(t *testing.T) {
 	a := &fakeSource{data: []any{1}}
 	reg, err := Build(
 		map[string]ds.Source{"a": a},
-		nil,
-		map[string]*cfg.Pipeline{
-			"comp": {Compose: &cfg.ComposeOp{
-				Parts: map[string]string{"x": "a"},
-			}},
+
+		map[string]*cfg.Source{
+			"comp": cfg.NewEntry(&cfg.Source{Type: "compose", Parts: map[string]string{"x": "a"}}),
 		},
-	nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -202,17 +194,12 @@ func TestComposeSubscribeReturnsNotStreaming(t *testing.T) {
 }
 
 func TestComposeValidatorRejectsEmptyParts(t *testing.T) {
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"a": {Type: "exec", Command: []string{"true"}},
-		},
-		Pipelines: map[string]*cfg.Pipeline{
-			"bad": {Compose: &cfg.ComposeOp{}},
-		},
-		Components: map[string]*cfg.Component{
-			"x": {Type: "list", Items: []string{"x"}},
-		},
-		Screen: cfg.Screen{Layout: cfg.Node{Component: "x"}},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"a": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"true"}}),
+
+		"bad": cfg.NewEntry(&cfg.Source{Type: "compose"})}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"x": {Type: "list", Items: []string{"x"}},
+	},
+		Screen: cfg.Screen{Layout: cfg.Node{Component: "x"}}},
 	}
 	if err := c.Validate(); err == nil {
 		t.Errorf("expected validator to reject empty parts")
@@ -220,20 +207,14 @@ func TestComposeValidatorRejectsEmptyParts(t *testing.T) {
 }
 
 func TestComposeValidatorRejectsBadOnError(t *testing.T) {
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"a": {Type: "exec", Command: []string{"true"}},
-		},
-		Pipelines: map[string]*cfg.Pipeline{
-			"bad": {Compose: &cfg.ComposeOp{
-				Parts:   map[string]string{"x": "a"},
-				OnError: "random",
-			}},
-		},
-		Components: map[string]*cfg.Component{
-			"y": {Type: "list", Items: []string{"y"}},
-		},
-		Screen: cfg.Screen{Layout: cfg.Node{Component: "y"}},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"a": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"true"}}),
+
+		"bad": cfg.NewEntry(&cfg.Source{Type: "compose", Parts: map[string]string{"x": "a"},
+			OnError: "random"},
+		)}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"y": {Type: "list", Items: []string{"y"}},
+	},
+		Screen: cfg.Screen{Layout: cfg.Node{Component: "y"}}},
 	}
 	if err := c.Validate(); err == nil {
 		t.Errorf("expected validator to reject on_error=random")

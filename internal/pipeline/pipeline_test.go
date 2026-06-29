@@ -10,6 +10,22 @@ import (
 	ds "github.com/jsdrews/tui-builder/internal/datasource"
 )
 
+// mergeEntries unions two entry maps into one. Used by tests that
+// historically passed source defs and pipeline defs as separate
+// arguments to the legacy Build (Build(prebuilt, sourceDefs, defs,
+// params)); the unified Build takes one map, so the migration left
+// `mergeEntries(sourceDefs, defs)` at those call sites.
+func mergeEntries(a, b map[string]*cfg.Source) map[string]*cfg.Source {
+	out := make(map[string]*cfg.Source, len(a)+len(b))
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
+}
+
 // fakeSource is a minimal in-memory ds.Source used by these tests.
 // We need our own (rather than reusing http/exec/file) so the tests are
 // hermetic — no network, no /tmp, no subprocesses.
@@ -104,11 +120,11 @@ func TestBuildResolvesPipelineChain(t *testing.T) {
 	// Fetch through b through src and return "leaf".
 	src := &fakeSource{data: "leaf"}
 	sources := map[string]ds.Source{"src": src}
-	defs := map[string]*cfg.Pipeline{
-		"a": {From: "b"},
-		"b": {From: "src"},
+	defs := map[string]*cfg.Source{
+		"a": cfg.NewEntry(&cfg.Source{Type: "passthrough", From: "b"}),
+		"b": cfg.NewEntry(&cfg.Source{Type: "passthrough", From: "src"}),
 	}
-	reg, err := Build(sources, nil, defs, nil)
+	reg, err := Build(sources, defs, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,8 +141,8 @@ func TestBuildErrorsOnUnknownRef(t *testing.T) {
 	// `from: nope` doesn't match any source or pipeline. Cycle detection
 	// is enforced earlier by cfg.Config.Validate; Build only sees
 	// unknown-name errors at this layer.
-	defs := map[string]*cfg.Pipeline{"a": {From: "nope"}}
-	if _, err := Build(map[string]ds.Source{}, nil, defs, nil); err == nil {
+	defs := map[string]*cfg.Source{"a": cfg.NewEntry(&cfg.Source{Type: "passthrough", From: "nope"})}
+	if _, err := Build(map[string]ds.Source{}, defs, nil); err == nil {
 		t.Errorf("expected error for unknown ref, got nil")
 	}
 }
@@ -134,8 +150,8 @@ func TestBuildErrorsOnUnknownRef(t *testing.T) {
 func TestRegistryGetAndKind(t *testing.T) {
 	src := &fakeSource{}
 	sources := map[string]ds.Source{"src": src}
-	defs := map[string]*cfg.Pipeline{"p": {From: "src"}}
-	reg, err := Build(sources, nil, defs, nil)
+	defs := map[string]*cfg.Source{"p": cfg.NewEntry(&cfg.Source{Type: "passthrough", From: "src"})}
+	reg, err := Build(sources, defs, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,15 +17,14 @@ func TestDeriveSnapshotAddsFields(t *testing.T) {
 	}}
 	reg, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
-			"enriched": {Derive: &cfg.DeriveOp{
-				From: "src",
+
+		map[string]*cfg.Source{
+			"enriched": cfg.NewEntry(&cfg.Source{Type: "derive", From: "src",
 				Compute: map[string]string{
 					"name_upper": "upper(name)",
 					"is_large":   "size > 10",
-				},
-			}},
+				}},
+			),
 		},
 		nil,
 	)
@@ -57,9 +56,9 @@ func TestDeriveCopyOnWrite(t *testing.T) {
 	up := &fakeSource{data: []any{original}}
 	reg, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
-			"e": {Derive: &cfg.DeriveOp{From: "src", Compute: map[string]string{"added": "upper(name)"}}},
+
+		map[string]*cfg.Source{
+			"e": cfg.NewEntry(&cfg.Source{Type: "derive", From: "src", Compute: map[string]string{"added": "upper(name)"}}),
 		},
 		nil,
 	)
@@ -80,12 +79,11 @@ func TestDeriveOverwritesExistingKey(t *testing.T) {
 	up := &fakeSource{data: []any{map[string]any{"name": "lowercase"}}}
 	reg, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
-			"upper_name": {Derive: &cfg.DeriveOp{
-				From:    "src",
-				Compute: map[string]string{"name": "upper(name)"},
-			}},
+
+		map[string]*cfg.Source{
+			"upper_name": cfg.NewEntry(&cfg.Source{Type: "derive", From: "src",
+				Compute: map[string]string{"name": "upper(name)"}},
+			),
 		},
 		nil,
 	)
@@ -108,12 +106,11 @@ func TestDeriveStreamingAddsFields(t *testing.T) {
 	}
 	reg, err := Build(
 		map[string]ds.Source{"src": streamer},
-		nil,
-		map[string]*cfg.Pipeline{
-			"e": {Derive: &cfg.DeriveOp{
-				From:    "src",
-				Compute: map[string]string{"upper": "upper(name)"},
-			}},
+
+		map[string]*cfg.Source{
+			"e": cfg.NewEntry(&cfg.Source{Type: "derive", From: "src",
+				Compute: map[string]string{"upper": "upper(name)"}},
+			),
 		},
 		nil,
 	)
@@ -151,11 +148,9 @@ func TestDeriveCompileErrorAtBuild(t *testing.T) {
 	up := &fakeSource{data: []any{}}
 	_, err := Build(
 		map[string]ds.Source{"src": up},
-		nil,
-		map[string]*cfg.Pipeline{
-			"bad": {Derive: &cfg.DeriveOp{
-				From: "src", Compute: map[string]string{"x": "=== broken"},
-			}},
+
+		map[string]*cfg.Source{
+			"bad": cfg.NewEntry(&cfg.Source{Type: "derive", From: "src", Compute: map[string]string{"x": "=== broken"}}),
 		},
 		nil,
 	)

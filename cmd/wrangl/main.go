@@ -44,7 +44,6 @@ import (
 	"github.com/spf13/cobra"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
-	ds "github.com/jsdrews/tui-builder/internal/datasource"
 	"github.com/jsdrews/tui-builder/internal/output"
 	"github.com/jsdrews/tui-builder/internal/pipeline"
 )
@@ -63,6 +62,7 @@ func newRoot() *cobra.Command {
 		describe    bool
 		pretty      bool
 		raw         bool
+		all         bool
 		limit       int
 		maxDuration time.Duration
 		paramArgs   []string
@@ -114,7 +114,7 @@ wrangl never compiles, links, or drags in any terminal-UI code.`,
 				}
 				return runDescribe(args[0], args[1])
 			}
-			return runDump(args, listOnly, pretty, raw, limit, maxDuration, params)
+			return runDump(args, listOnly, pretty, raw, all, limit, maxDuration, params)
 		},
 	}
 	// pflag long flags. The names match the previous std-flag surface so
@@ -124,6 +124,7 @@ wrangl never compiles, links, or drags in any terminal-UI code.`,
 	cmd.Flags().BoolVar(&describe, "describe", false, "print the schema (kind, lifecycle, parameters) for the given target and exit")
 	cmd.Flags().BoolVar(&pretty, "pretty", false, "indent one-shot JSON output (streams remain NDJSON)")
 	cmd.Flags().BoolVar(&raw, "raw", false, "emit string / log-line values as plain text instead of JSON (useful for `format: text` and streaming logs)")
+	cmd.Flags().BoolVarP(&all, "all", "a", false, "include hidden sources and pipelines (those whose name starts with `_`) in --list")
 	cmd.Flags().IntVar(&limit, "limit", 0, "cap stream output at N events, then exit (0 = no cap)")
 	cmd.Flags().DurationVar(&maxDuration, "for", 0, "cap stream consumption at this duration, e.g. 5s, 1m (0 = no cap)")
 	cmd.Flags().StringSliceVar(&paramArgs, "param", nil, "bind a source parameter (repeatable): --param key=value")
@@ -149,7 +150,7 @@ func parseParams(args []string) (map[string]string, error) {
 	return out, nil
 }
 
-func runDump(args []string, listOnly, pretty, raw bool, limit int, maxDuration time.Duration, params map[string]string) error {
+func runDump(args []string, listOnly, pretty, raw, all bool, limit int, maxDuration time.Duration, params map[string]string) error {
 	configPath := args[0]
 	c, err := cfg.Load(configPath)
 	if err != nil {
@@ -170,31 +171,30 @@ func runDump(args []string, listOnly, pretty, raw bool, limit int, maxDuration t
 	pipelineParams := map[string]map[string]string{}
 	if !listOnly && len(args) >= 2 {
 		target := args[1]
-		if p, ok := c.Pipelines[target]; ok && len(p.Parameters) > 0 {
+		// If the target is an OPERATOR entry that declares its own
+		// `parameters:`, bind there (its expressions see params.X).
+		// Otherwise walk through to the underlying leaf and bind the
+		// caller's params onto its template fields before Build.
+		s, ok := c.Data.Sources[target]
+		if ok && !s.IsLeaf() && len(s.Parameters) > 0 {
 			pipelineParams[target] = params
-		} else {
-			if err := applyParams(c, target, params); err != nil {
-				return err
-			}
+		} else if err := applyParams(c, target, params); err != nil {
+			return err
 		}
 	} else if len(params) > 0 {
 		return fmt.Errorf("--param is only valid when dumping a specific target (got --list / no target)")
 	}
 
-	live, err := ds.Build(c.DataSources)
+	reg, err := pipeline.Build(nil, c.Data.Sources, pipelineParams)
 	if err != nil {
-		return fmt.Errorf("build sources: %w", err)
-	}
-	reg, err := pipeline.Build(live, c.DataSources, c.Pipelines, pipelineParams)
-	if err != nil {
-		return fmt.Errorf("build pipelines: %w", err)
+		return fmt.Errorf("build: %w", err)
 	}
 
 	// Bare `wrangl config.yaml` and `--list` both print the listing.
 	// Helpful when you don't remember what's defined; matches kubectl's
 	// pattern of "no args = something useful, not an error."
 	if listOnly || len(args) == 1 {
-		printList(os.Stdout, c, reg)
+		printList(os.Stdout, c, reg, all)
 		return nil
 	}
 
@@ -214,9 +214,9 @@ func runDump(args []string, listOnly, pretty, raw bool, limit int, maxDuration t
 	})
 }
 
-// runDescribe prints the schema for a single source or pipeline:
-// kind, inferred lifecycle, the templated request shape (URL / Path /
-// Command), and the full parameter table. Intended for "I want to
+// runDescribe prints the schema for a single entry: kind, inferred
+// lifecycle, the templated request shape (URL / Path / Command for
+// leaves), and the full parameter table. Intended for "I want to
 // know what knobs this target takes" introspection — the wrangl
 // counterpart to a TUI form preview.
 func runDescribe(configPath, target string) error {
@@ -224,61 +224,69 @@ func runDescribe(configPath, target string) error {
 	if err != nil {
 		return err
 	}
-	if src, ok := c.DataSources[target]; ok {
-		describeSource(os.Stdout, target, src)
-		return nil
+	s, ok := c.Data.Sources[target]
+	if !ok {
+		return fmt.Errorf("no entry named %q (run `wrangl --list %s` to see what's defined)", target, configPath)
 	}
-	if p, ok := c.Pipelines[target]; ok {
-		srcName, err := resolveTargetSource(c, target)
-		if err != nil {
-			return err
-		}
-		describePipeline(os.Stdout, target, p, srcName, c.DataSources[srcName])
-		return nil
+	if s.IsLeaf() {
+		describeLeaf(os.Stdout, target, s)
+	} else {
+		describeOperator(os.Stdout, target, s, c)
 	}
-	return fmt.Errorf("no source or pipeline named %q (run `wrangl --list %s` to see what's defined)", target, configPath)
+	return nil
 }
 
-func describeSource(w *os.File, name string, src *cfg.DataSource) {
+func describeLeaf(w *os.File, name string, s *cfg.Source) {
 	fmt.Fprintf(w, "%s\n", name)
-	fmt.Fprintf(w, "  Kind:       source / %s\n", src.Type)
-	fmt.Fprintf(w, "  Lifecycle:  %s\n", inferLifecycle(src))
-	if src.Refresh != "" {
-		fmt.Fprintf(w, "  Refresh:    %s\n", src.Refresh)
+	fmt.Fprintf(w, "  Kind:       source / %s\n", s.Type)
+	fmt.Fprintf(w, "  Lifecycle:  %s\n", inferLifecycle(s))
+	if s.Refresh != "" {
+		fmt.Fprintf(w, "  Refresh:    %s\n", s.Refresh)
 	}
-	if src.URL != "" {
-		fmt.Fprintf(w, "  URL:        %s\n", src.URL)
+	if s.URL != "" {
+		fmt.Fprintf(w, "  URL:        %s\n", s.URL)
 	}
-	if src.Path != "" {
-		fmt.Fprintf(w, "  Path:       %s\n", src.Path)
+	if s.Path != "" {
+		fmt.Fprintf(w, "  Path:       %s\n", s.Path)
 	}
-	if len(src.Command) > 0 {
-		fmt.Fprintf(w, "  Command:    %v\n", src.Command)
+	if len(s.Command) > 0 {
+		fmt.Fprintf(w, "  Command:    %v\n", s.Command)
 	}
-	if len(src.Parameters) == 0 {
+	if len(s.Parameters) == 0 {
 		fmt.Fprintln(w, "  Parameters: (none)")
 		return
 	}
 	fmt.Fprintln(w, "  Parameters:")
-	writeParamTable(w, src.Parameters, "    ")
+	writeParamTable(w, s.Parameters, "    ")
 }
 
-func describePipeline(w *os.File, name string, p *cfg.Pipeline, srcName string, src *cfg.DataSource) {
+func describeOperator(w *os.File, name string, s *cfg.Source, c *cfg.Config) {
 	fmt.Fprintf(w, "%s\n", name)
-	fmt.Fprintln(w, "  Kind:       pipeline / passthrough")
-	fmt.Fprintf(w, "  Upstream:   %s (source / %s)\n", srcName, src.Type)
-	if len(p.Parameters) > 0 {
-		fmt.Fprintln(w, "  Pipeline parameters:")
-		writeParamTable(w, p.Parameters, "    ")
+	fmt.Fprintf(w, "  Kind:       pipeline / %s\n", s.Type)
+	srcName := resolveTargetLeaf(c, name)
+	if srcName != "" {
+		if leaf, ok := c.Data.Sources[srcName]; ok {
+			fmt.Fprintf(w, "  Upstream:   %s (source / %s)\n", srcName, leaf.Type)
+		}
 	}
-	fmt.Fprintf(w, "  Lifecycle:  %s\n", inferLifecycle(src))
-	if len(src.Parameters) == 0 {
+	if len(s.Parameters) > 0 {
+		fmt.Fprintln(w, "  Pipeline parameters:")
+		writeParamTable(w, s.Parameters, "    ")
+	}
+	fmt.Fprintf(w, "  Lifecycle:  %s\n", lifecycleOfRef(c, name))
+	if srcName == "" {
+		return
+	}
+	leaf, ok := c.Data.Sources[srcName]
+	if !ok {
+		return
+	}
+	if len(leaf.Parameters) == 0 {
 		fmt.Fprintln(w, "  Parameters: (none — passes through from upstream)")
 		return
 	}
 	fmt.Fprintln(w, "  Parameters (from upstream):")
-	writeParamTable(w, src.Parameters, "    ")
-	_ = p // reserved — operator pipelines will add their own params here
+	writeParamTable(w, leaf.Parameters, "    ")
 }
 
 // writeParamTable renders the parameter map as an aligned table. We
@@ -341,30 +349,37 @@ func paramMode(p *cfg.Parameter) string {
 //   - Binding: self-contained / needs params — whether required
 //     parameters must be bound by a caller before the source can run.
 //
-// A streaming source can also need params (kube `pod_logs` follow with
-// required namespace/name); a polled source can also need params
+// A streaming source can also need params (kube `pod_logs` follow
+// with required namespace/name); a polled source can also need params
 // (`pods` list refreshed every 5s but parameterized by namespace).
 // We surface both so --list / --describe tell the whole truth.
-func inferLifecycle(src *cfg.DataSource) string {
+//
+// Operator entries don't have an inherent cadence — they delegate to
+// their upstream. Lifecycle for those is computed by lifecycleOfRef.
+func inferLifecycle(s *cfg.Source) string {
 	cadence := "one-shot"
-	switch {
-	case src.Type == "websocket":
+	switch s.Type {
+	case "websocket":
 		cadence = "streamed"
-	case src.Type == "exec" && src.Follow:
-		cadence = "streamed (follow)"
-	case src.Type == "http" && src.Follow:
-		cadence = "streamed (follow)"
-	case src.Refresh != "":
-		cadence = "polled (refresh: " + src.Refresh + ")"
+	case "exec", "http":
+		if s.Follow {
+			cadence = "streamed (follow)"
+		} else if s.Refresh != "" {
+			cadence = "polled (refresh: " + s.Refresh + ")"
+		}
+	case "file", "merge":
+		if s.Refresh != "" {
+			cadence = "polled (refresh: " + s.Refresh + ")"
+		}
 	}
-	if hasUnbindableRequired(src) {
+	if hasUnbindableRequired(s.Parameters) {
 		cadence += " · needs params"
 	}
 	return cadence
 }
 
-func hasUnbindableRequired(src *cfg.DataSource) bool {
-	for _, p := range src.Parameters {
+func hasUnbindableRequired(params map[string]*cfg.Parameter) bool {
+	for _, p := range params {
 		if p != nil && p.Required && p.Default == "" {
 			return true
 		}
@@ -372,81 +387,59 @@ func hasUnbindableRequired(src *cfg.DataSource) bool {
 	return false
 }
 
-// applyParams finds the data source that backs `target` (either a
-// direct source name, or a pipeline whose `from:` chain ends at a
-// source) and binds caller-supplied parameter values onto it. The
-// source's templated string fields (URL, Body, Headers, …) are
-// resolved in place against the bound + default values.
-//
-// We resolve at the cfg level rather than after Build because the
-// data layer's Source interface deliberately doesn't know about
-// parameters — once a source is constructed, its templates are
-// expected to be fully resolved.
+// applyParams binds caller-supplied parameter values onto the leaf
+// source that backs target. Pipelines walk to their underlying leaf
+// via `from:` chains. Templated string fields (URL, Body, Headers,
+// Command, …) are resolved in place on a cloned source stored back
+// into c.Data.Sources so the data-layer builders see fully-resolved
+// templates.
 func applyParams(c *cfg.Config, target string, params map[string]string) error {
-	srcName, err := resolveTargetSource(c, target)
-	if err != nil {
-		// No backing source — likely the target itself doesn't exist
-		// yet. Defer the error until runDump prints its better message.
-		if len(params) == 0 {
-			return nil
-		}
-		return err
+	if len(params) == 0 {
+		// No caller binding requested. Leave the leaf alone — its
+		// templated fields stay as-is so the per-row join lookup
+		// can clone+bind them later, or so the fetch surfaces a
+		// clear unresolved-template error.
+		return nil
 	}
-	src := c.DataSources[srcName]
-	if err := src.BindParams(params); err != nil {
-		return fmt.Errorf("%s: %w", srcName, err)
+	leafName := resolveTargetLeaf(c, target)
+	if leafName == "" {
+		return fmt.Errorf("target %q is not a defined entry", target)
 	}
+	leaf := c.Data.Sources[leafName]
+	cloned := leaf.Clone()
+	if err := cloned.BindParams(params); err != nil {
+		return fmt.Errorf("%s: %w", leafName, err)
+	}
+	c.Data.Sources[leafName] = cloned
 	return nil
 }
 
-// resolveTargetSource maps a target name (source or pipeline) onto the
-// underlying source whose parameters define the schema. Pipelines
-// today are passthrough — `from:` either resolves to a source or to
-// another pipeline; we follow the chain until we land on a source.
-func resolveTargetSource(c *cfg.Config, target string) (string, error) {
-	if _, ok := c.DataSources[target]; ok {
-		return target, nil
-	}
-	p, ok := c.Pipelines[target]
-	if !ok {
-		return "", fmt.Errorf("target %q is not a defined source or pipeline", target)
-	}
-	// Walk the pipeline chain. Cycles are rejected at config load time.
-	for cur := p.From; ; {
-		if _, ok := c.DataSources[cur]; ok {
-			return cur, nil
+// resolveTargetLeaf walks from target through `from:` references
+// until it lands on a leaf entry; returns the leaf's name. Empty
+// string when no leaf is reachable. Cycles are rejected at config
+// load time so the recursion always terminates.
+func resolveTargetLeaf(c *cfg.Config, target string) string {
+	visited := map[string]bool{}
+	for cur := target; cur != ""; {
+		if visited[cur] {
+			return ""
 		}
-		next, ok := c.Pipelines[cur]
+		visited[cur] = true
+		s, ok := c.Data.Sources[cur]
 		if !ok {
-			return "", fmt.Errorf("pipeline %q references undefined upstream %q", target, cur)
+			return ""
 		}
-		cur = next.From
+		if s.IsLeaf() {
+			return cur
+		}
+		// Operator — follow its primary upstream.
+		ups := s.Upstreams()
+		if len(ups) == 0 {
+			return ""
+		}
+		cur = ups[0]
 	}
-}
-
-// operatorKind labels the pipeline by which operator block it uses.
-// Surfaces in the `--list` KIND column so users can see what each
-// pipeline does at a glance.
-func operatorKind(p *cfg.Pipeline) string {
-	switch {
-	case p.Filter != nil:
-		return "filter"
-	case p.Project != nil:
-		return "project"
-	case p.Derive != nil:
-		return "derive"
-	case p.Sort != nil:
-		return "sort"
-	case p.Union != nil:
-		return "union"
-	case p.Compose != nil:
-		return "compose"
-	case p.Join != nil:
-		return "join"
-	case p.Cache != nil:
-		return "cache"
-	}
-	return "passthrough"
+	return ""
 }
 
 // printList emits a flat, scannable inventory of every defined source
@@ -454,35 +447,46 @@ func operatorKind(p *cfg.Pipeline) string {
 //
 //	NAME             KIND            LIFECYCLE        UPSTREAM (pipelines only)
 //
+// By convention, names prefixed with `_` are treated as "hidden" —
+// they're still fully callable (`wrangl <config> _internal` works),
+// but they don't clutter the listing. Pass `showAll` (--all / -a) to
+// reveal them.
+//
 // We deliberately leave emit-type detection for a later phase — it
 // requires actually fetching from each source to inspect the value,
 // which would have side effects on a `--list` call.
-func printList(w *os.File, c *cfg.Config, reg *pipeline.Registry) {
+func printList(w *os.File, c *cfg.Config, reg *pipeline.Registry, showAll bool) {
 	type row struct{ name, kind, lifecycle, upstream string }
 	var rows []row
 
-	for name, src := range c.DataSources {
-		rows = append(rows, row{
-			name:      name,
-			kind:      "source / " + src.Type,
-			lifecycle: lifecycleOf(src),
-		})
+	add := func(r row) {
+		if !showAll && strings.HasPrefix(r.name, "_") {
+			return
+		}
+		rows = append(rows, r)
 	}
-	for name, p := range c.Pipelines {
-		// Walk the operator's upstream(s) to derive lifecycle + a
-		// representative upstream name for the column. Operator
-		// pipelines (filter, project, …) have empty p.From; use
-		// UpstreamsOf which knows every operator family.
-		ups := cfg.UpstreamsOf(p)
+
+	for name, s := range c.Data.Sources {
+		if s.IsLeaf() {
+			add(row{
+				name:      name,
+				kind:      "source / " + s.Type,
+				lifecycle: inferLifecycle(s),
+			})
+			continue
+		}
+		// Operator — pick a representative upstream name for the
+		// column and follow it to find a lifecycle.
+		ups := s.Upstreams()
 		upstream := ""
 		lifecycle := "unknown"
 		if len(ups) > 0 {
 			upstream = ups[0]
 			lifecycle = lifecycleOfRef(c, upstream)
 		}
-		rows = append(rows, row{
+		add(row{
 			name:      name,
-			kind:      "pipeline / " + operatorKind(p),
+			kind:      "pipeline / " + s.Type,
 			lifecycle: lifecycle,
 			upstream:  upstream,
 		})
@@ -509,28 +513,20 @@ func printList(w *os.File, c *cfg.Config, reg *pipeline.Registry) {
 	_ = reg // reserved — future --list will use the Registry for richer info (emitted types after Phase 2 operators land).
 }
 
-// lifecycleOf is the alias --list uses so the column matches --describe.
-// We deliberately read lifecycle from the config and not by introspecting
-// the live source, so --list works without making network calls.
-func lifecycleOf(src *cfg.DataSource) string { return inferLifecycle(src) }
-
-// lifecycleOfRef walks pipeline → upstream edges until it lands on
-// a source, then classifies that source's cadence. Handles every
-// operator family (filter / project / derive / sort / union /
-// compose / join / cache) via cfg.UpstreamsOf — single-input
-// operators return one upstream; multi-input operators (union /
-// compose) return all of them and we use the first (lifecycle is
-// "polled if any child is polled"; an arbitrary representative
-// works for the high-level label).
+// lifecycleOfRef walks operator → upstream edges until it lands on
+// a leaf entry, then classifies that leaf's cadence. Multi-input
+// operators (union / compose) return all their children; we use the
+// first (lifecycle is "polled if any child is polled"; an arbitrary
+// representative works for the high-level label).
 func lifecycleOfRef(c *cfg.Config, ref string) string {
-	if s, ok := c.DataSources[ref]; ok {
-		return lifecycleOf(s)
-	}
-	p, ok := c.Pipelines[ref]
+	s, ok := c.Data.Sources[ref]
 	if !ok {
 		return "unknown"
 	}
-	ups := cfg.UpstreamsOf(p)
+	if s.IsLeaf() {
+		return inferLifecycle(s)
+	}
+	ups := s.Upstreams()
 	if len(ups) == 0 {
 		return "unknown"
 	}

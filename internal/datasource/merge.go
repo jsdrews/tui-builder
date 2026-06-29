@@ -61,20 +61,19 @@ const (
 	skipBroken
 )
 
-// NewMerge constructs a merge composer from a cfg.DataSource (the
-// merge SOURCE) and a map of resolved child sources. Exposed so the
-// pipeline package can reuse this proven implementation for its
-// `union` operator without duplicating the streaming / snapshot /
-// per-child-tag machinery.
+// NewMerge constructs a merge composer from a cfg.MergeSource and a
+// map of resolved child sources. Exposed so the pipeline package can
+// reuse this proven implementation for its `union` operator without
+// duplicating the streaming / snapshot / per-child-tag machinery.
 //
-// The caller is responsible for resolving children from cfg.Sources
-// or cfg.Children (whichever shape the config uses) into the map
-// before calling.
-func NewMerge(d *cfg.DataSource, children map[string]Source) (Source, error) {
+// The caller is responsible for resolving children from
+// cfg.Sources or cfg.Children (whichever shape the config uses)
+// into the map before calling.
+func NewMerge(d *cfg.Source, children map[string]Source) (Source, error) {
 	return newMerge(d, children)
 }
 
-func newMerge(d *cfg.DataSource, children map[string]Source) (Source, error) {
+func newMerge(d *cfg.Source, children map[string]Source) (Source, error) {
 	// Compose the internal child list from whichever schema shape the
 	// user wrote. We collapse both into the same []namedChild so the
 	// downstream Fetch/Subscribe code is shape-agnostic.

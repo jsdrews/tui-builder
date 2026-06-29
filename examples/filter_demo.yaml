@@ -1,9 +1,19 @@
-# filter_demo.yaml — first pipeline operator.
+# filter_demo.yaml — pipeline operator showroom.
 #
-# `filter` drops items from its upstream that don't pass a predicate
-# expression. Expressions use the syntax described in
-# internal/expr (lower/upper/contains/hasPrefix/hasSuffix/matches/len
-# plus the obvious comparison + boolean operators).
+# Exercises every shipped operator against jsonplaceholder so each
+# pattern has a runnable example you can `wrangl` and inspect with jq.
+#
+# Operators on display:
+#   passthrough, filter, project, derive, sort, union, compose, join,
+#   cache — plus pipeline parameters threaded through the operator
+#   expressions.
+#
+# Expression language: internal/expr wraps expr-lang/expr. Available:
+# `==` / `!=` / `<` / `>` / `<=` / `>=`, `&&` / `||` / `!`,
+# `string contains substring` (infix), `matches` (regex infix),
+# `string in []` (membership), arithmetic, plus functions
+# (`lower`, `upper`, `len`, `hasPrefix`, `hasSuffix`, `indexOf`,
+# `now`, `parseTime`). Bind pipeline params surface as `params.X`.
 #
 # Try it:
 #
@@ -19,247 +29,225 @@
 # Public API: jsonplaceholder.typicode.com — no auth, stable, 10 users.
 app:
   title: Filter demo
-
-data_sources:
-  users:
-    type: http
-    url: https://jsonplaceholder.typicode.com/users
-    timeout: 10s
-
-  # Parameterized HTTP source used as a JOIN LOOKUP. Each driver row's
-  # `id` field feeds into `user_id`, which substitutes into the URL.
-  user_posts:
-    type: http
-    parameters:
-      user_id: { type: int, required: true, description: "jsonplaceholder user id" }
-    url: https://jsonplaceholder.typicode.com/users/${params.user_id}/posts
-    timeout: 10s
-
-pipelines:
-  # Passthrough — same upstream, no transform. Lets components or wrangl
-  # target a stable public name regardless of whether a filter sits on
-  # top tomorrow.
-  all_users:
-    from: users
-
-  # filter operator: keep users whose username is at least 8 characters.
-  users_with_long_username:
-    filter:
+data:
+  sources:
+    users:
+      type: http
+      url: https://jsonplaceholder.typicode.com/users
+      timeout: 10s
+    # Parameterized HTTP source used as a JOIN LOOKUP. Each driver row's
+    # `id` field feeds into `user_id`, which substitutes into the URL.
+    user_posts:
+      type: http
+      parameters:
+        user_id: {type: int, required: true, description: "jsonplaceholder user id"}
+      url: https://jsonplaceholder.typicode.com/users/${params.user_id}/posts
+      timeout: 10s
+    # Passthrough — same upstream, no transform. Lets components or wrangl
+    # target a stable public name regardless of whether a filter sits on
+    # top tomorrow.
+    all_users:
+      type: passthrough
+      from: users
+    # filter operator: keep users whose username is at least 8 characters.
+    users_with_long_username:
+      type: filter
       from: users
       where: "len(username) >= 10"
-
-  # filter operator with regex: keep users whose website host ends in .biz.
-  biz_users:
-    filter:
+    # filter operator with regex: keep users whose website host ends in .biz.
+    biz_users:
+      type: filter
       from: users
       where: "hasSuffix(website, '.biz')"
-
-  # project: slim each user down to a handful of named fields. Each
-  # `keep:` value is an expression (bare dot-paths are the simple
-  # case; `lower(name)` etc. work too).
-  #
-  #   task wrangl -- examples/filter_demo.yaml user_summary | jq '.[0]'
-  user_summary:
-    project:
+    # project: slim each user down to a handful of named fields. Each
+    # `keep:` value is an expression (bare dot-paths are the simple
+    # case; `lower(name)` etc. work too).
+    #
+    #   task wrangl -- examples/filter_demo.yaml user_summary | jq '.[0]'
+    user_summary:
+      type: project
       from: users
       keep:
-        id:       id
+        id: id
         username: username
-        domain:   "lower(website)"
-        city:     "address.city"
-
-  # derive: keep every original field AND add new ones computed from
-  # the existing ones. Useful for synthesizing labels / flags without
-  # losing access to the source data.
-  #
-  #   task wrangl -- examples/filter_demo.yaml users_with_labels | jq '.[0] | {name, is_biz, username_len}'
-  users_with_labels:
-    derive:
+        domain: "lower(website)"
+        city: "address.city"
+    # derive: keep every original field AND add new ones computed from
+    # the existing ones. Useful for synthesizing labels / flags without
+    # losing access to the source data.
+    #
+    #   task wrangl -- examples/filter_demo.yaml users_with_labels | jq '.[0] | {name, is_biz, username_len}'
+    users_with_labels:
+      type: derive
       from: users
       compute:
-        is_biz:       "hasSuffix(website, '.biz')"
+        is_biz: "hasSuffix(website, '.biz')"
         username_len: "len(username)"
-        upper_name:   "upper(name)"
-
-  # Chain: filter → project → emit a flat shape per surviving user.
-  # Demonstrates pipeline-on-pipeline composition across operator
-  # families.
-  long_username_summary:
-    project:
+        upper_name: "upper(name)"
+    # Chain: filter → project → emit a flat shape per surviving user.
+    # Demonstrates pipeline-on-pipeline composition across operator
+    # families.
+    long_username_summary:
+      type: project
       from: users_with_long_username
       keep:
         username: username
-        name:     name
-
-  # sort: order users alphabetically by name (asc default).
-  #
-  #   task wrangl -- examples/filter_demo.yaml users_by_name | jq '[.[].name]'
-  users_by_name:
-    sort:
+        name: name
+    # sort: order users alphabetically by name (asc default).
+    #
+    #   task wrangl -- examples/filter_demo.yaml users_by_name | jq '[.[].name]'
+    users_by_name:
+      type: sort
       from: users
       by: name
-
-  # sort + project: alphabetical user_summary. Chains the operators.
-  #
-  #   task wrangl -- examples/filter_demo.yaml summary_by_username
-  summary_by_username:
-    sort:
+    # sort + project: alphabetical user_summary. Chains the operators.
+    #
+    #   task wrangl -- examples/filter_demo.yaml summary_by_username
+    summary_by_username:
+      type: sort
       from: user_summary
       by: username
-
-  # sort desc: largest companies (by catchPhrase length, just to
-  # have a numeric key against this dataset).
-  longest_catchphrases:
-    sort:
+    # sort desc: largest companies (by catchPhrase length, just to
+    # have a numeric key against this dataset).
+    longest_catchphrases:
+      type: sort
       from: users
       by: "len(company.catchPhrase)"
       order: desc
-
-  # ── union examples ─────────────────────────────────────────────
-  # union composes N iterables into one. Same semantics as the merge
-  # SOURCE — including per-child tags nested under _meta — but lives
-  # as a pipeline operator so children can be other PIPELINES, not
-  # just leaf sources.
-  #
-  # Source-name shorthand (jsonplaceholder has only one users
-  # endpoint, so we union the source with itself + a filtered version
-  # of it to show the mechanics):
-  #
-  #   task wrangl -- examples/filter_demo.yaml all_groups | jq '.[]._meta.src'
-  all_groups:
-    union:
+    # ── union examples ─────────────────────────────────────────────
+    # union composes N iterables into one. Same semantics as the merge
+    # SOURCE — including per-child tags nested under _meta — but lives
+    # as a pipeline operator so children can be other PIPELINES, not
+    # just leaf sources.
+    #
+    # Source-name shorthand (jsonplaceholder has only one users
+    # endpoint, so we union the source with itself + a filtered version
+    # of it to show the mechanics):
+    #
+    #   task wrangl -- examples/filter_demo.yaml all_groups | jq '.[]._meta.src'
+    all_groups:
+      type: union
       sources: [users, users_with_long_username]
       tag_field: src
-
-  test_union:
-    union:
+    test_union:
+      type: union
       sources: [users, users_with_long_username, user_summary]
       tag_field: src
-
-
-  # The key new capability: union children can be FILTERS, PROJECTIONS,
-  # DERIVES — anything. Merge as a source can only take other sources.
-  # Here we union (a) all the .biz users with (b) all users named
-  # alphabetically before "M", tagged so consumers can tell them apart.
-  #
-  #   task wrangl -- examples/filter_demo.yaml mixed | jq '[.[] | {name, group: ._meta.group}]'
-  early_alpha_users:
-    filter:
+    # The key new capability: union children can be FILTERS, PROJECTIONS,
+    # DERIVES — anything. Merge as a source can only take other sources.
+    # Here we union (a) all the .biz users with (b) all users named
+    # alphabetically before "M", tagged so consumers can tell them apart.
+    #
+    #   task wrangl -- examples/filter_demo.yaml mixed | jq '[.[] | {name, group: ._meta.group}]'
+    early_alpha_users:
+      type: filter
       from: users
       where: "name < 'M'"
-
-  mixed:
-    union:
+    mixed:
+      type: union
       children:
         - source: biz_users
-          tags: { group: "biz_websites" }
+          tags: {group: "biz_websites"}
         - source: early_alpha_users
-          tags: { group: "early_alpha" }
-
-  # Combine: drop users without a company catchphrase containing 'synergy'.
-  # Composable — this filter operates on the output of users_with_long_username,
-  # not the raw users source.
-  synergy_users:
-    filter:
+          tags: {group: "early_alpha"}
+    # Combine: drop users without a company catchphrase containing 'synergy'.
+    # Composable — this filter operates on the output of users_with_long_username,
+    # not the raw users source.
+    synergy_users:
+      type: filter
       from: users_with_long_username
       where: "lower(company.catchPhrase) contains 'synergy'"
-
-  # ── pipeline params ────────────────────────────────────────────
-  # A pipeline can declare its OWN `parameters:` block. Bound values
-  # are available in every operator expression as `params.<name>`
-  # (separate from item fields, which stay at the top level).
-  #
-  # wrangl --param routing: if the target is a pipeline that declares
-  # parameters, --param binds to the PIPELINE. Otherwise it falls
-  # through to the underlying source (backwards-compatible).
-  #
-  #   # keep users whose username is at least N chars
-  #   task wrangl -- examples/filter_demo.yaml long_usernames --param min=8
-  #   task wrangl -- examples/filter_demo.yaml long_usernames --param min=12
-  long_usernames:
-    parameters:
-      min: { type: int, default: "8", description: minimum username length }
-    filter:
+    # ── pipeline params ────────────────────────────────────────────
+    # A pipeline can declare its OWN `parameters:` block. Bound values
+    # are available in every operator expression as `params.<name>`
+    # (separate from item fields, which stay at the top level).
+    #
+    # wrangl --param routing: if the target is a pipeline that declares
+    # parameters, --param binds to the PIPELINE. Otherwise it falls
+    # through to the underlying source (backwards-compatible).
+    #
+    #   # keep users whose username is at least N chars
+    #   task wrangl -- examples/filter_demo.yaml long_usernames --param min=8
+    #   task wrangl -- examples/filter_demo.yaml long_usernames --param min=12
+    long_usernames:
+      type: filter
+      parameters:
+        min: {type: int, default: "8", description: minimum username length}
       from: users
       where: "len(username) >= int(params.min)"
-
-  # Same pattern, derive: parameterize the threshold for a label.
-  #
-  #   task wrangl -- examples/filter_demo.yaml labeled_by_name_len \
-  #     --param threshold=12 | jq '[.[] | {username, long: .long_username}]'
-  labeled_by_name_len:
-    parameters:
-      threshold: { type: int, default: "10" }
-    derive:
+    # Same pattern, derive: parameterize the threshold for a label.
+    #
+    #   task wrangl -- examples/filter_demo.yaml labeled_by_name_len \
+    #     --param threshold=12 | jq '[.[] | {username, long: .long_username}]'
+    labeled_by_name_len:
+      type: derive
+      parameters:
+        threshold: {type: int, default: "10"}
       from: users
       compute:
         long_username: "len(username) >= int(params.threshold)"
-        username_len:  "len(username)"
-
-  # ── cache example ──────────────────────────────────────────────
-  # cache memoises the upstream's snapshot for a TTL. The first read
-  # hits the upstream; reads within the TTL return the cached value
-  # without re-fetching. Errors aren't cached — failing upstreams
-  # are retried on the next call.
-  #
-  # Useful when multiple downstream operators feed from the same
-  # expensive upstream (e.g. a slow remote API). Below, both
-  # `cached_users` consumers (`from_a`, `from_b`) hit the same
-  # in-memory snapshot for 30 seconds.
-  #
-  #   task wrangl -- examples/filter_demo.yaml cached_users
-  cached_users:
-    cache:
+        username_len: "len(username)"
+    # ── cache example ──────────────────────────────────────────────
+    # cache memoises the upstream's snapshot for a TTL. The first read
+    # hits the upstream; reads within the TTL return the cached value
+    # without re-fetching. Errors aren't cached — failing upstreams
+    # are retried on the next call.
+    #
+    # Useful when multiple downstream operators feed from the same
+    # expensive upstream (e.g. a slow remote API). Below, both
+    # `cached_users` consumers (`from_a`, `from_b`) hit the same
+    # in-memory snapshot for 30 seconds.
+    #
+    #   task wrangl -- examples/filter_demo.yaml cached_users
+    cached_users:
+      type: cache
       from: users
       ttl: 30s
-
-  # ── join example ───────────────────────────────────────────────
-  # join takes a driver iterable and one or more lookups; for each
-  # driver row it fetches the lookup with row-derived params, then
-  # emits the enriched row. This is the "kubectl describe on a
-  # selected row" pattern, expressed as a data-layer concept.
-  #
-  #   task wrangl -- examples/filter_demo.yaml users_with_posts | jq '[.[] | {name: .row.name, post_count: (.posts | length)}]'
-  #
-  # emit: separate (default) gives {row, posts} per driver row.
-  # emit: merged would flatten posts into row, but jsonplaceholder
-  # returns a list of post objects, so separate reads more cleanly.
-  users_with_posts:
-    join:
+    # ── join example ───────────────────────────────────────────────
+    # join takes a driver iterable and one or more lookups; for each
+    # driver row it fetches the lookup with row-derived params, then
+    # emits the enriched row. This is the "kubectl describe on a
+    # selected row" pattern, expressed as a data-layer concept.
+    #
+    #   task wrangl -- examples/filter_demo.yaml users_with_posts | jq '[.[] | {name: .row.name, post_count: (.posts | length)}]'
+    #
+    # emit: separate (default) gives {row, posts} per driver row.
+    # emit: merged would flatten posts into row, but jsonplaceholder
+    # returns a list of post objects, so separate reads more cleanly.
+    users_with_posts:
+      type: join
       driver:
         from: users
       lookups:
         posts:
           from: user_posts
           on:
-            user_id: id    # expression evaluated against driver row
-
-  # ── compose example ────────────────────────────────────────────
-  # compose bundles N HETEROGENEOUS upstreams into a single object,
-  # preserving each child's shape under a caller-chosen key. The output
-  # is `{everyone: [...], biz: [...], top: [...]}` — three different
-  # lists, three top-level keys, one addressable pipeline.
-  #
-  #   task wrangl -- examples/filter_demo.yaml fleet | jq 'keys'
-  #   task wrangl -- examples/filter_demo.yaml fleet | jq '.biz | length'
-  fleet:
-    compose:
+            user_id: id # expression evaluated against driver row
+    # ── compose example ────────────────────────────────────────────
+    # compose bundles N HETEROGENEOUS upstreams into a single object,
+    # preserving each child's shape under a caller-chosen key. The output
+    # is `{everyone: [...], biz: [...], top: [...]}` — three different
+    # lists, three top-level keys, one addressable pipeline.
+    #
+    #   task wrangl -- examples/filter_demo.yaml fleet | jq 'keys'
+    #   task wrangl -- examples/filter_demo.yaml fleet | jq '.biz | length'
+    fleet:
+      type: compose
       parts:
         everyone: users
-        biz:      biz_users
-        top:      longest_catchphrases
-
-components:
-  table:
-    type: table
-    title: Users
-    pipeline: all_users
-    columns:
-      - {title: ID,       width: 6,  sortable: true, value: id}
-      - {title: Username, width: 16, sortable: true, value: username}
-      - {title: Name,     width: 26, sortable: true, value: name}
-      - {title: Website,  width: 22, value: website}
-
-screen:
-  layout:
-    component: table
+        biz: biz_users
+        top: longest_catchphrases
+tui:
+  components:
+    table:
+      type: table
+      title: Users
+      columns:
+        - {title: ID, width: 6, sortable: true, value: id}
+        - {title: Username, width: 16, sortable: true, value: username}
+        - {title: Name, width: 26, sortable: true, value: name}
+        - {title: Website, width: 22, value: website}
+      source: all_users
+  screen:
+    layout:
+      component: table

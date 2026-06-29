@@ -42,7 +42,7 @@ type execSource struct {
 	refresh time.Duration
 }
 
-func newExec(d *cfg.DataSource) (Source, error) {
+func newExec(d *cfg.Source) (Source, error) {
 	timeout := 10 * time.Second
 	if d.Timeout != "" {
 		t, err := time.ParseDuration(d.Timeout)

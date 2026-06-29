@@ -18,71 +18,71 @@ app:
   title: Inspector Demo
   theme: nord
 
-components:
-  pod:
-    type: inspector
-    title: pod/nginx-7c64f5d
-    filterable: true
-    initial_depth: 2
-    fields:
-      - {label: name,       value: nginx-7c64f5d-abc12}
-      - {label: namespace,  value: production}
-      - {label: status,     value: Running}
-      - {label: node,       value: gke-prod-pool-3-9f2c}
-      - label: metadata
-        children:
-          - {label: uid,             value: 7f2a3c1d-9b4e-4f0a-b9b6-2e7c5a3f4b1c}
-          - {label: creationTime,    value: "2026-05-30T08:14:22Z"}
-          - label: labels
-            children:
-              - {label: app,         value: nginx}
-              - {label: tier,        value: frontend}
-              - {label: environment, value: production}
-          - label: annotations
-            children:
-              - {label: deploy.commit, value: 4f8c2a1}
-              - {label: deploy.by,     value: ci-bot@example.com}
-      - label: spec
-        children:
-          - {label: restartPolicy, value: Always}
-          - {label: serviceAccount, value: default}
-          - label: containers
-            children:
-              - label: nginx
-                children:
-                  - {label: image, value: "nginx:1.25-alpine"}
-                  - {label: imagePullPolicy, value: IfNotPresent}
-                  - label: resources
-                    children:
-                      - label: limits
-                        children:
-                          - {label: cpu,    value: "500m"}
-                          - {label: memory, value: "256Mi"}
-                      - label: requests
-                        children:
-                          - {label: cpu,    value: "100m"}
-                          - {label: memory, value: "128Mi"}
-                  - label: ports
-                    children:
-                      - {label: "[0].containerPort", value: "80"}
-                      - {label: "[0].protocol",      value: TCP}
-              - label: log-sidecar
-                children:
-                  - {label: image, value: "fluentbit:2.2"}
-                  - {label: imagePullPolicy, value: IfNotPresent}
-      - label: status.conditions
-        children:
-          - label: "[0]"
-            children:
-              - {label: type,   value: Ready}
-              - {label: status, value: "True"}
-              - {label: lastTransitionTime, value: "2026-05-30T08:14:29Z"}
-          - label: "[1]"
-            children:
-              - {label: type,   value: Initialized}
-              - {label: status, value: "True"}
-
-screen:
-  title: Inspector
-  layout:
-    component: pod
+tui:
+  components:
+    pod:
+      type: inspector
+      title: pod/nginx-7c64f5d
+      filterable: true
+      initial_depth: 2
+      fields:
+        - {label: name,       value: nginx-7c64f5d-abc12}
+        - {label: namespace,  value: production}
+        - {label: status,     value: Running}
+        - {label: node,       value: gke-prod-pool-3-9f2c}
+        - label: metadata
+          children:
+            - {label: uid,             value: 7f2a3c1d-9b4e-4f0a-b9b6-2e7c5a3f4b1c}
+            - {label: creationTime,    value: "2026-05-30T08:14:22Z"}
+            - label: labels
+              children:
+                - {label: app,         value: nginx}
+                - {label: tier,        value: frontend}
+                - {label: environment, value: production}
+            - label: annotations
+              children:
+                - {label: deploy.commit, value: 4f8c2a1}
+                - {label: deploy.by,     value: ci-bot@example.com}
+        - label: spec
+          children:
+            - {label: restartPolicy, value: Always}
+            - {label: serviceAccount, value: default}
+            - label: containers
+              children:
+                - label: nginx
+                  children:
+                    - {label: image, value: "nginx:1.25-alpine"}
+                    - {label: imagePullPolicy, value: IfNotPresent}
+                    - label: resources
+                      children:
+                        - label: limits
+                          children:
+                            - {label: cpu,    value: "500m"}
+                            - {label: memory, value: "256Mi"}
+                        - label: requests
+                          children:
+                            - {label: cpu,    value: "100m"}
+                            - {label: memory, value: "128Mi"}
+                    - label: ports
+                      children:
+                        - {label: "[0].containerPort", value: "80"}
+                        - {label: "[0].protocol",      value: TCP}
+                - label: log-sidecar
+                  children:
+                    - {label: image, value: "fluentbit:2.2"}
+                    - {label: imagePullPolicy, value: IfNotPresent}
+        - label: status.conditions
+          children:
+            - label: "[0]"
+              children:
+                - {label: type,   value: Ready}
+                - {label: status, value: "True"}
+                - {label: lastTransitionTime, value: "2026-05-30T08:14:29Z"}
+            - label: "[1]"
+              children:
+                - {label: type,   value: Initialized}
+                - {label: status, value: "True"}
+  screen:
+    title: Inspector
+    layout:
+      component: pod

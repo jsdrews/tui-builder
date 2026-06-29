@@ -21,7 +21,7 @@ import (
 // Streaming passes through to the upstream unchanged — caching
 // event streams isn't meaningful (events are incremental updates,
 // not snapshots).
-func newCache(name string, upstream ds.Source, def *cfg.CacheOp) (*Pipeline, error) {
+func newCache(name string, upstream ds.Source, def *cfg.Source) (*Pipeline, error) {
 	ttl, err := time.ParseDuration(def.TTL)
 	if err != nil {
 		return nil, fmt.Errorf("cache: invalid ttl %q: %w", def.TTL, err)

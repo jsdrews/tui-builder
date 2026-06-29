@@ -53,38 +53,32 @@ func TestStreamWebsocketIntoTable(t *testing.T) {
 	defer srv.Close()
 	wsURL := "ws://" + strings.TrimPrefix(srv.URL, "http://")
 
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"trades": {
-				Type:            "websocket",
-				URL:             wsURL,
-				InitialMessages: []string{`{"subscribe":"trades"}`},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"trades": cfg.NewEntry(&cfg.Source{Type: "websocket", URL: wsURL,
+		InitialMessages: []string{`{"subscribe":"trades"}`}},
+	)}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"trades_table": {
+			Type:    "table",
+			Title:   "Trades",
+			Source:  "trades",
+			MaxRows: 50,
+			Columns: []cfg.Column{
+				{Title: "ID", Width: 6, Value: cfg.Path{"data.id"}},
+				{Title: "Price", Width: 12, Value: cfg.Path{"data.price"}, Align: "right"},
+				{Title: "Amount", Width: 12, Value: cfg.Path{"data.amount"}, Align: "right"},
+				{Title: "Side", Width: 6, Value: cfg.Path{"data.type"}},
 			},
 		},
-		Components: map[string]*cfg.Component{
-			"trades_table": {
-				Type:    "table",
-				Title:   "Trades",
-				Source:  "trades",
-				MaxRows: 50,
-				Columns: []cfg.Column{
-					{Title: "ID",     Width: 6,  Value: cfg.Path{"data.id"}},
-					{Title: "Price",  Width: 12, Value: cfg.Path{"data.price"}, Align: "right"},
-					{Title: "Amount", Width: 12, Value: cfg.Path{"data.amount"}, Align: "right"},
-					{Title: "Side",   Width: 6,  Value: cfg.Path{"data.type"}},
-				},
-			},
-		},
+	},
 		Screen: cfg.Screen{
 			Title:  "Live trades",
 			Layout: cfg.Node{Component: "trades_table"},
-		},
+		}},
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
 
-	root, err := New(&c.Screen, c.Components, c.DataSources, c.Pipelines, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,40 +178,33 @@ func TestStreamMergeKeyedUpsert(t *testing.T) {
 	}))
 	defer srvB.Close()
 
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"book":   {Type: "websocket", URL: "ws://" + strings.TrimPrefix(srvA.URL, "http://")},
-			"trades": {Type: "websocket", URL: "ws://" + strings.TrimPrefix(srvB.URL, "http://")},
-			"l1": {
-				Type:    "merge",
-				Sources: []string{"book", "trades"},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"book": cfg.NewEntry(&cfg.Source{Type: "websocket", URL: "ws://" + strings.TrimPrefix(srvA.URL, "http://")}),
+		"trades": cfg.NewEntry(&cfg.Source{Type: "websocket", URL: "ws://" + strings.TrimPrefix(srvB.URL, "http://")}),
+		"l1":     cfg.NewEntry(&cfg.Source{Type: "merge", Sources: []string{"book", "trades"}})}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"table": {
+			Type:   "table",
+			Title:  "L1",
+			Source: "l1",
+			RowKey: cfg.Path{"s"},
+			Columns: []cfg.Column{
+				{Title: "Symbol", Width: 8, Value: cfg.Path{"s"}},
+				{Title: "Bid", Width: 10, Value: cfg.Path{"b"}},
+				{Title: "Ask", Width: 10, Value: cfg.Path{"a"}},
+				{Title: "Price", Width: 10, Value: cfg.Path{"p"}},
+				{Title: "Qty", Width: 10, Value: cfg.Path{"q"}},
 			},
 		},
-		Components: map[string]*cfg.Component{
-			"table": {
-				Type:   "table",
-				Title:  "L1",
-				Source: "l1",
-				RowKey: cfg.Path{"s"},
-				Columns: []cfg.Column{
-					{Title: "Symbol", Width: 8,  Value: cfg.Path{"s"}},
-					{Title: "Bid",    Width: 10, Value: cfg.Path{"b"}},
-					{Title: "Ask",    Width: 10, Value: cfg.Path{"a"}},
-					{Title: "Price",  Width: 10, Value: cfg.Path{"p"}},
-					{Title: "Qty",    Width: 10, Value: cfg.Path{"q"}},
-				},
-			},
-		},
+	},
 		Screen: cfg.Screen{
 			Title:  "L1",
 			Layout: cfg.Node{Component: "table"},
-		},
+		}},
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
 
-	root, err := New(&c.Screen, c.Components, c.DataSources, c.Pipelines, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,39 +296,33 @@ func TestStreamWebsocketL1Table(t *testing.T) {
 	defer srv.Close()
 	wsURL := "ws://" + strings.TrimPrefix(srv.URL, "http://")
 
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"book": {
-				Type:            "websocket",
-				URL:             wsURL,
-				InitialMessages: []string{`{"subscribe":"book"}`},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"book": cfg.NewEntry(&cfg.Source{Type: "websocket", URL: wsURL,
+		InitialMessages: []string{`{"subscribe":"book"}`}},
+	)}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"l1": {
+			Type:   "table",
+			Title:  "L1",
+			Source: "book",
+			RowKey: cfg.Path{"data.s"},
+			Columns: []cfg.Column{
+				{Title: "Symbol", Width: 10, Value: cfg.Path{"data.s"}},
+				{Title: "Bid", Width: 10, Value: cfg.Path{"data.b"}},
+				{Title: "Ask", Width: 10, Value: cfg.Path{"data.a"}},
+				{Title: "BidQty", Width: 10, Value: cfg.Path{"data.B"}},
+				{Title: "AskQty", Width: 10, Value: cfg.Path{"data.A"}},
 			},
 		},
-		Components: map[string]*cfg.Component{
-			"l1": {
-				Type:   "table",
-				Title:  "L1",
-				Source: "book",
-				RowKey: cfg.Path{"data.s"},
-				Columns: []cfg.Column{
-					{Title: "Symbol", Width: 10, Value: cfg.Path{"data.s"}},
-					{Title: "Bid",    Width: 10, Value: cfg.Path{"data.b"}},
-					{Title: "Ask",    Width: 10, Value: cfg.Path{"data.a"}},
-					{Title: "BidQty", Width: 10, Value: cfg.Path{"data.B"}},
-					{Title: "AskQty", Width: 10, Value: cfg.Path{"data.A"}},
-				},
-			},
-		},
+	},
 		Screen: cfg.Screen{
 			Title:  "L1",
 			Layout: cfg.Node{Component: "l1"},
-		},
+		}},
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
 
-	root, err := New(&c.Screen, c.Components, c.DataSources, c.Pipelines, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,32 +420,26 @@ func TestStreamWebsocketEndToEnd(t *testing.T) {
 	// httptest URL is http://; flip to ws:// for websocket.Dial.
 	wsURL := "ws://" + strings.TrimPrefix(srv.URL, "http://")
 
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"feed": {
-				Type:            "websocket",
-				URL:             wsURL,
-				InitialMessages: []string{`{"subscribe":"trades"}`},
-			},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"feed": cfg.NewEntry(&cfg.Source{Type: "websocket", URL: wsURL,
+		InitialMessages: []string{`{"subscribe":"trades"}`}},
+	)}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"feed_view": {
+			Type:       "logview",
+			Title:      "Feed",
+			Source:     "feed",
+			Searchable: true,
 		},
-		Components: map[string]*cfg.Component{
-			"feed_view": {
-				Type:       "logview",
-				Title:      "Feed",
-				Source:     "feed",
-				Searchable: true,
-			},
-		},
+	},
 		Screen: cfg.Screen{
 			Title:  "Feed",
 			Layout: cfg.Node{Component: "feed_view"},
-		},
+		}},
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
 
-	root, err := New(&c.Screen, c.Components, c.DataSources, c.Pipelines, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}

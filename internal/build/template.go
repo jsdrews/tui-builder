@@ -47,49 +47,86 @@ func Substitute(s string, sel Selection) string {
 	return substituteAll(s, sel, nil)
 }
 
-// SubstituteScreen returns deep-copied Screen + Components + DataSources
+// SubstituteScreen returns deep-copied Screen + Components + Entries
 // with every ${selection*} token replaced from sel. Original config is
 // left untouched, so each push can re-substitute against a fresh
-// selection. DataSources go through the same substitution so a child's
-// URL / headers / body can reference the parent row.
+// selection. Leaf-kind entries go through the same substitution so a
+// child's URL / headers / body can reference the parent row.
 //
-// When params is non-nil, every cloned data source that declares
-// `parameters:` ALSO has BindParams called against the subset of
+// When params is non-nil, every cloned leaf entry that declares
+// `parameters:` ALSO has BindLeafParams called against the subset of
 // params it actually declares. This is how the explicit push-site
 // bind: block feeds into the destination screen's parameterized
 // sources. Missing required params surface as an error so the caller
 // (tryPush) can pop an alert instead of building a broken screen.
 //
+// Operator entries (filter, sort, …) are cloned without substitution
+// — they don't carry templated string fields and the expression
+// language is bind-time, not screen-time.
+//
 // Pass nil for params to skip parameter binding (single-screen New
 // and initial multi-screen construction — no push site context).
 // Parameterized sources in that path will be left with unresolved
 // ${params.*} templates and will fail at fetch with a clear URL.
-func SubstituteScreen(s *cfg.Screen, components map[string]*cfg.Component, dataSources map[string]*cfg.DataSource, sel Selection, params map[string]string) (*cfg.Screen, map[string]*cfg.Component, map[string]*cfg.DataSource, error) {
+func SubstituteScreen(s *cfg.Screen, components map[string]*cfg.Component, sources map[string]*cfg.Source, sel Selection, params map[string]string) (*cfg.Screen, map[string]*cfg.Component, map[string]*cfg.Source, error) {
 	out := *s
 	out.Title = substitute(s.Title, sel)
 	comps := map[string]*cfg.Component{}
 	for name, c := range components {
 		comps[name] = cloneComponent(c, sel)
 	}
-	// Determine which sources THIS screen actually references via its
-	// layout's components. The Multi config keeps ALL screens' sources
-	// in a single map (so child screens can resolve them after a
+	// Determine which sources THIS screen actually references via
+	// its layout's components. The Multi config keeps ALL screens'
+	// sources in one map (so child screens can resolve them after a
 	// push); applying param-binding indiscriminately would try to
 	// satisfy required params on OTHER screens' sources and fail —
-	// e.g. pushing to "pods" with bind {namespace: ...} would error on
-	// `pod_detail` needing a `name` it can't see.
+	// e.g. pushing to "pods" with bind {namespace: ...} would error
+	// on `pod_detail` needing a `name` it can't see.
 	used := usedSources(&s.Layout, components)
-	sources := map[string]*cfg.DataSource{}
-	for name, d := range dataSources {
-		cloned := cloneDataSource(d, sel)
-		if used[name] {
-			if err := applyBindParams(cloned, params); err != nil {
-				return nil, nil, nil, fmt.Errorf("data_sources.%s: %w", name, err)
+	out2 := map[string]*cfg.Source{}
+	for name, src := range sources {
+		cloned := cloneSource(src, sel)
+		if used[name] && cloned != nil && cloned.IsLeaf() {
+			if err := applyBindSourceParams(cloned, params); err != nil {
+				return nil, nil, nil, fmt.Errorf("data.sources.%s: %w", name, err)
 			}
 		}
-		sources[name] = cloned
+		out2[name] = cloned
 	}
-	return &out, comps, sources, nil
+	return &out, comps, out2, nil
+}
+
+// cloneSource returns a deep copy of src with ${selection*} tokens
+// substituted in the leaf source's templated fields. Operator
+// sources are returned unchanged (they don't carry per-screen
+// templates — the expression language is bind-time).
+func cloneSource(src *cfg.Source, sel Selection) *cfg.Source {
+	if src == nil {
+		return nil
+	}
+	if !src.IsLeaf() {
+		// Operator — alias the original; nothing per-screen to mutate.
+		return src
+	}
+	cloned := src.Clone()
+	cloned.SubstituteStrings(func(s string) string { return substitute(s, sel) })
+	return cloned
+}
+
+// applyBindSourceParams filters the screen-wide params map down to
+// the source's declared params before calling BindParams so unrelated
+// keys don't trigger BindParams' "extra params" rejection.
+func applyBindSourceParams(src *cfg.Source, params map[string]string) error {
+	if src == nil || len(src.Parameters) == 0 || params == nil {
+		return nil
+	}
+	subset := make(map[string]string, len(src.Parameters))
+	for name := range src.Parameters {
+		if v, ok := params[name]; ok {
+			subset[name] = v
+		}
+	}
+	return src.BindParams(subset)
 }
 
 // usedSources walks a screen's layout tree and returns the set of
@@ -115,15 +152,6 @@ func walkUsed(n *cfg.Node, components map[string]*cfg.Component, used map[string
 			if c.Source != "" {
 				used[c.Source] = true
 			}
-			// Pipeline binding: the destination source the pipeline
-			// (eventually) resolves to is what carries the parameter
-			// schema. We don't walk pipeline chains here; callers
-			// that need that resolution can do it elsewhere. For now
-			// just record the pipeline name so its underlying source
-			// can be reached via the pipeline registry at fetch.
-			if c.Pipeline != "" {
-				used[c.Pipeline] = true
-			}
 		}
 	}
 	for _, it := range n.VStack {
@@ -138,43 +166,6 @@ func walkUsed(n *cfg.Node, components map[string]*cfg.Component, used map[string
 	}
 }
 
-// applyBindParams resolves the destination source's parameters from
-// the screen-wide params map. We filter the screen-wide map down to
-// the source's declared params before calling BindParams so unrelated
-// keys don't trigger BindParams's "extra params" rejection.
-func applyBindParams(d *cfg.DataSource, params map[string]string) error {
-	if d == nil || len(d.Parameters) == 0 {
-		return nil
-	}
-	if params == nil {
-		// No push context — leave templates as-is. Fetch will fail
-		// with the unresolved URL visible in the error.
-		return nil
-	}
-	subset := make(map[string]string, len(d.Parameters))
-	for name := range d.Parameters {
-		if v, ok := params[name]; ok {
-			subset[name] = v
-		}
-	}
-	return d.BindParams(subset)
-}
-
-func cloneDataSource(d *cfg.DataSource, sel Selection) *cfg.DataSource {
-	if d == nil {
-		return nil
-	}
-	out := *d
-	out.URL = substitute(d.URL, sel)
-	out.Body = substitute(d.Body, sel)
-	if len(d.Headers) > 0 {
-		out.Headers = make(map[string]string, len(d.Headers))
-		for k, v := range d.Headers {
-			out.Headers[k] = substitute(v, sel)
-		}
-	}
-	return &out
-}
 
 func cloneComponent(c *cfg.Component, sel Selection) *cfg.Component {
 	if c == nil {

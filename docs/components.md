@@ -197,6 +197,13 @@ Unchanged from round 1. `layout.Center` lands when modal components
 
 ## Schema cheat sheet (current)
 
+> **Note**: this cheat sheet is grouped by field category for
+> readability. In the actual config, `data_sources:` (now the
+> unified `sources:` map — every entry carries a `type:`) lives
+> under `data:` and `components:` / `screen[s]:` / `initial:` live
+> under `tui:`. See [data-layer.md](data-layer.md#top-level-config-shape)
+> for the top-level shape.
+
 ```yaml
 app:
   title: <string>             # breadcrumb prefix

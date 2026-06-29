@@ -36,42 +36,36 @@ func TestKubeMultiEndToEnd(t *testing.T) {
 	})
 	defer staging.Close()
 
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"pods_prod":    {Type: "http", URL: prod.URL + "/api/v1/pods", Root: "items"},
-			"pods_staging": {Type: "http", URL: staging.URL + "/api/v1/pods", Root: "items"},
-			"pods_all": {
-				Type:     "merge",
-				Sources:  []string{"pods_prod", "pods_staging"},
-				TagField: "cluster",
-				OnError:  "skip",
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"pods_prod": cfg.NewEntry(&cfg.Source{Type: "http", Root: "items", URL: prod.URL + "/api/v1/pods"}),
+		"pods_staging": cfg.NewEntry(&cfg.Source{Type: "http", Root: "items", URL: staging.URL + "/api/v1/pods"}),
+		"pods_all": cfg.NewEntry(&cfg.Source{Type: "merge", Sources: []string{"pods_prod", "pods_staging"},
+			TagField: "cluster",
+			OnError:  "skip"},
+		)}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"all_pods": {
+			Type:   "table",
+			Title:  "All pods",
+			Source: "pods_all",
+			Columns: []cfg.Column{
+				// merge tags land under `_meta` by default, so the
+				// cluster column reads `_meta.cluster`.
+				{Title: "Cluster", Width: 14, Value: cfg.Path{"_meta.cluster"}},
+				{Title: "Namespace", Width: 18, Value: cfg.Path{"metadata.namespace"}},
+				{Title: "Name", Width: 30, Value: cfg.Path{"metadata.name"}},
+				{Title: "Status", Width: 12, Value: cfg.Path{"status.phase"}},
 			},
 		},
-		Components: map[string]*cfg.Component{
-			"all_pods": {
-				Type:   "table",
-				Title:  "All pods",
-				Source: "pods_all",
-				Columns: []cfg.Column{
-					// merge tags land under `_meta` by default, so the
-					// cluster column reads `_meta.cluster`.
-					{Title: "Cluster",   Width: 14, Value: cfg.Path{"_meta.cluster"}},
-					{Title: "Namespace", Width: 18, Value: cfg.Path{"metadata.namespace"}},
-					{Title: "Name",      Width: 30, Value: cfg.Path{"metadata.name"}},
-					{Title: "Status",    Width: 12, Value: cfg.Path{"status.phase"}},
-				},
-			},
-		},
+	},
 		Screen: cfg.Screen{
 			Title:  "All",
 			Layout: cfg.Node{Component: "all_pods"},
-		},
+		}},
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
 
-	root, err := New(&c.Screen, c.Components, c.DataSources, c.Pipelines, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,38 +120,34 @@ func TestKubeMultiEndToEnd(t *testing.T) {
 // the all-failed error; the screen should pop an alert modal so the
 // empty table isn't silent and confusing.
 func TestKubeMultiAllClustersDown(t *testing.T) {
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			// Three URLs that will refuse connection — a port range we
-			// know nothing's listening on. The merge fails all-3 → modal.
-			"pods_prod":    {Type: "http", URL: "http://127.0.0.1:1/api/v1/pods", Root: "items", Timeout: "1s"},
-			"pods_staging": {Type: "http", URL: "http://127.0.0.1:2/api/v1/pods", Root: "items", Timeout: "1s"},
-			"pods_dev":     {Type: "http", URL: "http://127.0.0.1:3/api/v1/pods", Root: "items", Timeout: "1s"},
-			"pods_all": {
-				Type:    "merge",
-				Sources: []string{"pods_prod", "pods_staging", "pods_dev"},
-				OnError: "skip",
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{
+
+		// Three URLs that will refuse connection — a port range we
+		// know nothing's listening on. The merge fails all-3 → modal.
+		"pods_prod":    cfg.NewEntry(&cfg.Source{Type: "http", Root: "items", Timeout: "1s", URL: "http://127.0.0.1:1/api/v1/pods"}),
+		"pods_staging": cfg.NewEntry(&cfg.Source{Type: "http", Root: "items", Timeout: "1s", URL: "http://127.0.0.1:2/api/v1/pods"}),
+		"pods_dev":     cfg.NewEntry(&cfg.Source{Type: "http", Root: "items", Timeout: "1s", URL: "http://127.0.0.1:3/api/v1/pods"}),
+		"pods_all": cfg.NewEntry(&cfg.Source{Type: "merge", Sources: []string{"pods_prod", "pods_staging", "pods_dev"},
+			OnError: "skip"},
+		)}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"all_pods": {
+			Type:   "table",
+			Title:  "All pods",
+			Source: "pods_all",
+			Columns: []cfg.Column{
+				{Title: "Name", Width: 30, Value: cfg.Path{"metadata.name"}},
 			},
 		},
-		Components: map[string]*cfg.Component{
-			"all_pods": {
-				Type:   "table",
-				Title:  "All pods",
-				Source: "pods_all",
-				Columns: []cfg.Column{
-					{Title: "Name", Width: 30, Value: cfg.Path{"metadata.name"}},
-				},
-			},
-		},
+	},
 		Screen: cfg.Screen{
 			Title:  "All",
 			Layout: cfg.Node{Component: "all_pods"},
-		},
+		}},
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.Screen, c.Components, c.DataSources, c.Pipelines, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,41 +226,31 @@ func TestParamsBindEndToEnd(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"users": {
-				Type: "http",
-				URL:  srv.URL + "/users",
-			},
-			// Parameterized source — refuses to run without `user_id`
-			// bound. The TUI must supply it via the push site below.
-			"posts_by_user": {
-				Type: "http",
-				URL:  srv.URL + "/users/${params.user_id}/posts",
-				Parameters: map[string]*cfg.Parameter{
-					"user_id": {Type: "string", Required: true},
-				},
-			},
-		},
-		Components: map[string]*cfg.Component{
-			"users_table": {
-				Type:   "table",
-				Title:  "Users",
-				Source: "users",
-				Columns: []cfg.Column{
-					{Title: "ID",   Width: 8,  Value: cfg.Path{"ID"}},
-					{Title: "Name", Width: 16, Value: cfg.Path{"Name"}},
-				},
-			},
-			"posts_table": {
-				Type:   "table",
-				Title:  "Posts",
-				Source: "posts_by_user",
-				Columns: []cfg.Column{
-					{Title: "Title", Width: 40, Value: cfg.Path{"title"}},
-				},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"users": cfg.NewEntry(&cfg.Source{Type: "http", URL: srv.URL + "/users"}),
+		// Parameterized source — refuses to run without `user_id`
+		// bound. The TUI must supply it via the push site below.
+		"posts_by_user": cfg.NewEntry(&cfg.Source{Type: "http", Parameters: map[string]*cfg.Parameter{
+			"user_id": {Type: "string", Required: true},
+		}, URL: srv.URL + "/users/${params.user_id}/posts"},
+		)}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"users_table": {
+			Type:   "table",
+			Title:  "Users",
+			Source: "users",
+			Columns: []cfg.Column{
+				{Title: "ID", Width: 8, Value: cfg.Path{"ID"}},
+				{Title: "Name", Width: 16, Value: cfg.Path{"Name"}},
 			},
 		},
+		"posts_table": {
+			Type:   "table",
+			Title:  "Posts",
+			Source: "posts_by_user",
+			Columns: []cfg.Column{
+				{Title: "Title", Width: 40, Value: cfg.Path{"title"}},
+			},
+		},
+	},
 		Screens: map[string]*cfg.Screen{
 			"users": {
 				Title:  "Users",
@@ -291,19 +271,17 @@ func TestParamsBindEndToEnd(t *testing.T) {
 				Layout: cfg.Node{Component: "posts_table"},
 			},
 		},
-		Initial: "users",
+		Initial: "users"},
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
 
 	multi := &Multi{
-		Screens:     c.Screens,
-		Components:  c.Components,
-		DataSources: c.DataSources,
-		Pipelines:   c.Pipelines,
+		Screens:    c.TUI.Screens,
+		Components: c.TUI.Components, Sources: c.Data.Sources,
 	}
-	root, err := NewMulti(c.Initial, multi, build.Selection{}, nil, theme.Nord())
+	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,37 +370,25 @@ func TestParamsBindFromListSelection(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"namespaces": {
-				Type: "http",
-				URL:  srv.URL + "/namespaces",
-				Root: "items",
-			},
-			"pods": {
-				Type: "http",
-				URL:  srv.URL + "/namespaces/${params.namespace}/pods",
-				Root: "items",
-				Parameters: map[string]*cfg.Parameter{
-					"namespace": {Type: "string", Required: true},
-				},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"namespaces": cfg.NewEntry(&cfg.Source{Type: "http", Root: "items", URL: srv.URL + "/namespaces"}),
+		"pods": cfg.NewEntry(&cfg.Source{Type: "http", Parameters: map[string]*cfg.Parameter{
+			"namespace": {Type: "string", Required: true},
+		}, Root: "items", URL: srv.URL + "/namespaces/${params.namespace}/pods"},
+		)}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"namespaces_list": {
+			Type:       "list",
+			Source:     "namespaces",
+			Item:       "metadata.name",
+			Filterable: true, // mirror kube.yaml — see if this gates enter
+		},
+		"pods_table": {
+			Type:   "table",
+			Source: "pods",
+			Columns: []cfg.Column{
+				{Title: "Name", Width: 30, Value: cfg.Path{"metadata.name"}},
 			},
 		},
-		Components: map[string]*cfg.Component{
-			"namespaces_list": {
-				Type:       "list",
-				Source:     "namespaces",
-				Item:       "metadata.name",
-				Filterable: true, // mirror kube.yaml — see if this gates enter
-			},
-			"pods_table": {
-				Type:   "table",
-				Source: "pods",
-				Columns: []cfg.Column{
-					{Title: "Name", Width: 30, Value: cfg.Path{"metadata.name"}},
-				},
-			},
-		},
+	},
 		Screens: map[string]*cfg.Screen{
 			"namespaces": {
 				Layout: cfg.Node{Component: "namespaces_list"},
@@ -441,17 +407,16 @@ func TestParamsBindFromListSelection(t *testing.T) {
 				Layout: cfg.Node{Component: "pods_table"},
 			},
 		},
-		Initial: "namespaces",
+		Initial: "namespaces"},
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
 
 	multi := &Multi{
-		Screens: c.Screens, Components: c.Components,
-		DataSources: c.DataSources, Pipelines: c.Pipelines,
+		Screens: c.TUI.Screens, Components: c.TUI.Components, Sources: c.Data.Sources,
 	}
-	root, err := NewMulti(c.Initial, multi, build.Selection{}, nil, theme.Nord())
+	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -535,55 +500,44 @@ func TestParamsBindIgnoresUnusedSources(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"namespaces": {Type: "http", URL: srv.URL + "/namespaces", Root: "items"},
-			"pods": {
-				Type: "http",
-				URL:  srv.URL + "/namespaces/${params.namespace}/pods",
-				Root: "items",
-				Parameters: map[string]*cfg.Parameter{
-					"namespace": {Type: "string", Required: true},
-				},
-			},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"namespaces": cfg.NewEntry(&cfg.Source{Type: "http", Root: "items", URL: srv.URL + "/namespaces"}),
+		"pods": cfg.NewEntry(&cfg.Source{Type: "http", Parameters: map[string]*cfg.Parameter{
+			"namespace": {Type: "string", Required: true},
+		},
+
 			// Unrelated to the namespaces→pods push: these are used by
 			// the (not-yet-pushed-to) detail screen. They need params
 			// the namespaces→pods bind cannot supply, but that
 			// shouldn't break the namespaces→pods push.
-			"pod_detail": {
-				Type: "http",
-				URL:  srv.URL + "/namespaces/${params.namespace}/pods/${params.name}",
-				Parameters: map[string]*cfg.Parameter{
-					"namespace": {Type: "string", Required: true},
-					"name":      {Type: "string", Required: true},
-				},
-			},
-			"pod_logs": {
-				Type: "http",
-				URL:  srv.URL + "/namespaces/${params.namespace}/pods/${params.name}/log",
-				Parameters: map[string]*cfg.Parameter{
-					"namespace": {Type: "string", Required: true},
-					"name":      {Type: "string", Required: true},
-				},
+			Root: "items", URL: srv.URL + "/namespaces/${params.namespace}/pods"},
+		),
+
+		"pod_detail": cfg.NewEntry(&cfg.Source{Type: "http", Parameters: map[string]*cfg.Parameter{
+			"namespace": {Type: "string", Required: true},
+			"name":      {Type: "string", Required: true},
+		}, URL: srv.URL + "/namespaces/${params.namespace}/pods/${params.name}"},
+		),
+		"pod_logs": cfg.NewEntry(&cfg.Source{Type: "http", Parameters: map[string]*cfg.Parameter{
+			"namespace": {Type: "string", Required: true},
+			"name":      {Type: "string", Required: true},
+		}, URL: srv.URL + "/namespaces/${params.namespace}/pods/${params.name}/log"},
+		)}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"namespaces_list": {
+			Type: "list", Source: "namespaces", Item: "metadata.name",
+			Filterable: true,
+		},
+		"pods_table": {
+			Type: "table", Source: "pods",
+			Columns: []cfg.Column{
+				{Title: "Name", Width: 24, Value: cfg.Path{"metadata.name"}},
+				{Title: "Namespace", Width: 16, Value: cfg.Path{"metadata.namespace"}},
 			},
 		},
-		Components: map[string]*cfg.Component{
-			"namespaces_list": {
-				Type: "list", Source: "namespaces", Item: "metadata.name",
-				Filterable: true,
-			},
-			"pods_table": {
-				Type: "table", Source: "pods",
-				Columns: []cfg.Column{
-					{Title: "Name",      Width: 24, Value: cfg.Path{"metadata.name"}},
-					{Title: "Namespace", Width: 16, Value: cfg.Path{"metadata.namespace"}},
-				},
-			},
-			// Components for the detail screen — would be touched only
-			// if we pushed into detail (which this test doesn't).
-			"pod_inspector": {Type: "inspector", Source: "pod_detail"},
-			"pod_logs_view": {Type: "logview", Source: "pod_logs"},
-		},
+		// Components for the detail screen — would be touched only
+		// if we pushed into detail (which this test doesn't).
+		"pod_inspector": {Type: "inspector", Source: "pod_detail"},
+		"pod_logs_view": {Type: "logview", Source: "pod_logs"},
+	},
 		Screens: map[string]*cfg.Screen{
 			"namespaces": {
 				Layout: cfg.Node{Component: "namespaces_list"},
@@ -606,17 +560,16 @@ func TestParamsBindIgnoresUnusedSources(t *testing.T) {
 				}},
 			},
 		},
-		Initial: "namespaces",
+		Initial: "namespaces"},
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
 
 	multi := &Multi{
-		Screens: c.Screens, Components: c.Components,
-		DataSources: c.DataSources, Pipelines: c.Pipelines,
+		Screens: c.TUI.Screens, Components: c.TUI.Components, Sources: c.Data.Sources,
 	}
-	root, err := NewMulti(c.Initial, multi, build.Selection{}, nil, theme.Nord())
+	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -688,30 +641,23 @@ func TestParamsBindMissingRequired(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := cfg.Config{
-		DataSources: map[string]*cfg.DataSource{
-			"users": {Type: "http", URL: srv.URL + "/users"},
-			"posts_by_user": {
-				Type: "http",
-				URL:  srv.URL + "/users/${params.user_id}/posts",
-				Parameters: map[string]*cfg.Parameter{
-					"user_id": {Type: "string", Required: true},
-				},
+	c := cfg.Config{Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"users": cfg.NewEntry(&cfg.Source{Type: "http", URL: srv.URL + "/users"}),
+		"posts_by_user": cfg.NewEntry(&cfg.Source{Type: "http", Parameters: map[string]*cfg.Parameter{
+			"user_id": {Type: "string", Required: true},
+		}, URL: srv.URL + "/users/${params.user_id}/posts"},
+		)}}, TUI: cfg.TUIBlock{Components: map[string]*cfg.Component{
+		"users_table": {
+			Type: "table", Source: "users",
+			Columns: []cfg.Column{
+				{Title: "ID", Width: 8, Value: cfg.Path{"ID"}},
+				{Title: "Name", Width: 16, Value: cfg.Path{"Name"}},
 			},
 		},
-		Components: map[string]*cfg.Component{
-			"users_table": {
-				Type: "table", Source: "users",
-				Columns: []cfg.Column{
-					{Title: "ID",   Width: 8,  Value: cfg.Path{"ID"}},
-					{Title: "Name", Width: 16, Value: cfg.Path{"Name"}},
-				},
-			},
-			"posts_table": {
-				Type: "table", Source: "posts_by_user",
-				Columns: []cfg.Column{{Title: "Title", Value: cfg.Path{"title"}}},
-			},
+		"posts_table": {
+			Type: "table", Source: "posts_by_user",
+			Columns: []cfg.Column{{Title: "Title", Value: cfg.Path{"title"}}},
 		},
+	},
 		Screens: map[string]*cfg.Screen{
 			"users": {
 				Layout: cfg.Node{Component: "users_table"},
@@ -722,17 +668,16 @@ func TestParamsBindMissingRequired(t *testing.T) {
 			},
 			"posts": {Layout: cfg.Node{Component: "posts_table"}},
 		},
-		Initial: "users",
+		Initial: "users"},
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
 
 	multi := &Multi{
-		Screens: c.Screens, Components: c.Components,
-		DataSources: c.DataSources, Pipelines: c.Pipelines,
+		Screens: c.TUI.Screens, Components: c.TUI.Components, Sources: c.Data.Sources,
 	}
-	root, err := NewMulti(c.Initial, multi, build.Selection{}, nil, theme.Nord())
+	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}

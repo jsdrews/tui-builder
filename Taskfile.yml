@@ -45,6 +45,12 @@ tasks:
       - go build -o bin/wrangl ./cmd/wrangl
       - cd "{{.USER_WORKING_DIR}}" && "{{.TASKFILE_DIR}}/bin/wrangl" {{.CLI_ARGS}}
 
+  tui-builder:
+    desc: "Run tui-builder"
+    cmds:
+      - go build -o bin/tui-builder ./cmd/tui-builder
+      - cd "{{.USER_WORKING_DIR}}" && "{{.TASKFILE_DIR}}/bin/tui-builder" {{.CLI_ARGS}}
+
   wrangl:sources:
     desc: List the sources / pipelines defined in every examples/*.yaml
     # Build once, then run --list against each example. Reuses the shared

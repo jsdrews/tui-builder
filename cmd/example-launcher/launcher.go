@@ -114,14 +114,13 @@ func loadScreen(path string, th theme.Theme) (tscreen.Screen, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(c.Screens) > 0 {
+	if len(c.TUI.Screens) > 0 {
 		multi := &tqscreen.Multi{
-			Screens:     c.Screens,
-			Components:  c.Components,
-			DataSources: c.DataSources,
-			Pipelines:   c.Pipelines,
+			Screens:    c.TUI.Screens,
+			Components: c.TUI.Components,
+			Sources:    c.Data.Sources,
 		}
-		return tqscreen.NewMulti(c.Initial, multi, build.Selection{}, nil, th)
+		return tqscreen.NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, th)
 	}
-	return tqscreen.New(&c.Screen, c.Components, c.DataSources, c.Pipelines, th)
+	return tqscreen.New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, th)
 }
