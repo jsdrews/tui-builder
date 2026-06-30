@@ -18,12 +18,14 @@ not a TUI implementation detail:
 - **`tui-builder`** — uses the same data layer, then renders it
   through tuilib components. The TUI is one sink, not the product.
 
-A `pipelines:` block in the YAML declares named, addressable pipelines
-over your sources. Pipelines support a full operator catalog:
-`filter`, `project`, `derive`, `sort`, `union`, `compose`, `join`,
-and `cache` (plus pure passthrough via `from:`). Operator expressions
-use an embedded expression language (`expr-lang`). Pipelines have
-their own typed `parameters:` blocks, bindable via wrangl `--param`.
+The `data.sources:` block holds every named, addressable producer of
+data — both leaf sources (http / exec / file / websocket / static /
+merge) and operator pipelines (`filter`, `project`, `derive`, `sort`,
+`union`, `compose`, `join`, `cache`, `passthrough`). Every entry
+carries a `type:` discriminator that picks its kind. Operator
+expressions use an embedded expression language (`expr-lang`). Any
+entry can declare its own typed `parameters:` block, bindable via
+wrangl `--param`.
 
 See [`docs/data-layer.md`](docs/data-layer.md) for the full reference.
 
@@ -44,9 +46,9 @@ See [`docs/data-layer.md`](docs/data-layer.md) for the full reference.
 
 | Capability | What it looks like |
 |---|---|
-| **Declarative TUIs** | One YAML file per app: `components:` + `screen:`/`screens:` + (optional) `data_sources:`. No Go to write for the common case. |
+| **Declarative TUIs** | One YAML file per app: `data.sources:` + `tui.components:` + `tui.screen:` / `tui.screens:`. No Go to write for the common case. |
 | **Components** | `list`, `table`, `inspector`, `tree`, `logview` — every tuilib component except those that don't fit a config model |
-| **Data sources** | `http`, `exec`, `file`, `websocket`, and `merge` (compose any of the above) |
+| **Data sources** | `http`, `exec`, `file`, `websocket`, `static`, `merge` — plus operator kinds (`filter`, `project`, `derive`, `sort`, `union`, `compose`, `join`, `cache`, `passthrough`) layered on top |
 | **Multi-screen** | Push/pop with breadcrumbs; `${selection.*}` substitutes parent row into child config (URL, title, fields) |
 | **Streaming** | Long-running `exec` + `websocket` push events into a logview as they arrive |
 | **Live data** | Per-source `refresh: <duration>` polling with in-place updates — cursor / filter / sort survive every refresh |
@@ -79,14 +81,15 @@ go run ./cmd/wrangl examples/http_countries.yaml all_countries | jq '.[0].name.c
 
 ## Two ways to consume a config
 
-Once you've written a YAML config with `data_sources:` + `pipelines:`,
-you can either render it as a TUI or just dump the data:
+Once you've written a YAML config with `data.sources:` + (optionally)
+`tui.components:` + `tui.screen:`, you can either render it as a TUI
+or just dump the data:
 
 ```sh
 # Render the TUI:
 bin/tui-builder examples/http_countries.yaml
 
-# Or dump every defined source / pipeline:
+# Or dump every defined entry:
 bin/wrangl --list examples/http_countries.yaml
 # NAME            KIND                     LIFECYCLE              UPSTREAM
 # all_countries   pipeline / passthrough   polled (refresh: 5m)   countries
@@ -117,22 +120,23 @@ app:
   title: Cities
   theme: nord
 
-components:
-  cities:
-    type: table
-    filterable: true
-    columns:
-      - {title: City,   width: 16, sortable: true}
-      - {title: Region, width: 14, sortable: true}
-      - {title: Pop,    width: 8,  sortable: true, sort: si, align: right}
-    rows:
-      - [London,    Europe,   "9M"]
-      - [Tokyo,     Asia,     "37M"]
-      - [Reykjavík, Europe,   "130K"]
+tui:
+  components:
+    cities:
+      type: table
+      filterable: true
+      columns:
+        - {title: City,   width: 16, sortable: true}
+        - {title: Region, width: 14, sortable: true}
+        - {title: Pop,    width: 8,  sortable: true, sort: si, align: right}
+      rows:
+        - [London,    Europe,   "9M"]
+        - [Tokyo,     Asia,     "37M"]
+        - [Reykjavík, Europe,   "130K"]
 
-screen:
-  layout:
-    component: cities
+  screen:
+    layout:
+      component: cities
 ```
 
 ```sh
@@ -151,23 +155,25 @@ across all source types; the same `color_rules` syntax works against
 any pluckable value.
 
 ```yaml
-data_sources:
-  countries:
-    type: http
-    url: https://restcountries.com/v3.1/all?fields=name,region,population
-    refresh: 5m
+data:
+  sources:
+    countries:
+      type: http
+      url: https://restcountries.com/v3.1/all?fields=name,region,population
+      refresh: 5m
 
-components:
-  countries:
-    type: table
-    source: countries
-    columns:
-      - {title: Name,       value: name.common}
-      - {title: Region,     value: region}
-      - {title: Population, value: population, sort: si, align: right}
+tui:
+  components:
+    countries:
+      type: table
+      source: countries
+      columns:
+        - {title: Name,       value: name.common}
+        - {title: Region,     value: region}
+        - {title: Population, value: population, sort: si, align: right}
 ```
 
-Source kinds:
+Source kinds (leaf — fetch externally):
 
 | Type | When | Notes |
 |---|---|---|
@@ -175,7 +181,22 @@ Source kinds:
 | `exec` | Anything that prints JSON: `kubectl get -o json`, `gh api`, `terraform output -json`, custom scripts | Per-source `env:` adds to inherited env |
 | `file` | Fixtures, generated dumps, lab notebook output | `refresh: <duration>` re-reads; omit for once |
 | `websocket` | Live event streams: chat, custom buses | Headers pass through on the upgrade request |
+| `static` | Inline data, fixtures, lookup tables | `data:` carries the value directly — list, object, scalar |
 | `merge` | Compose N children, union the rows, tag each item by source — cross-cluster / cross-account / cross-anything | `tag_field:` writes child name into each item; `on_error: skip` returns survivors + a partial-error notice |
+
+Operator kinds (transform an upstream entry):
+
+| Type | What it does |
+|---|---|
+| `passthrough` | Stable addressable alias over an upstream (`from:`); no transformation |
+| `filter` | Drop items whose `where:` predicate doesn't match |
+| `project` | Rebuild each item from declared output keys (`keep:`) |
+| `derive` | Copy each item and add computed fields (`compute:`) |
+| `sort` | Reorder by key expression (`by:`, `order: asc\|desc`) |
+| `union` | Flatten N homogeneous upstreams into one list (same shape as `merge` but children can be operators too) |
+| `compose` | Bundle N heterogeneous upstreams into one object (`parts: {key: upstream-name}`) |
+| `join` | Per-row enrichment: driver iterable + per-row lookup fetches |
+| `cache` | TTL-memoise an upstream's Fetch |
 
 See [`docs/components.md`](docs/components.md) for the full schema.
 
@@ -188,19 +209,21 @@ without resetting cursor / filter / scroll.
 **Into a logview** — lines append as-is:
 
 ```yaml
-data_sources:
-  logs:
-    type: exec
-    follow: true
-    command: [kubectl, logs, -f, "-n", default, my-pod]
+data:
+  sources:
+    logs:
+      type: exec
+      follow: true
+      command: [kubectl, logs, -f, "-n", default, my-pod]
 
-components:
-  log:
-    type: logview
-    source: logs
-    color_rules:
-      - {when: "~\\b(ERROR|FATAL)\\b", color: red}
-      - {when: "~\\bWARN\\b",          color: yellow}
+tui:
+  components:
+    log:
+      type: logview
+      source: logs
+      color_rules:
+        - {when: "~\\b(ERROR|FATAL)\\b", color: red}
+        - {when: "~\\bWARN\\b",          color: yellow}
 ```
 
 **Into a table — two modes**:
@@ -244,20 +267,22 @@ table. The selected row's values flow into the child's config via
 `${selection.col}` (table) or `${selection}` (list).
 
 ```yaml
-screens:
-  pods:
-    layout: {component: pods_table}
-    on_enter:
-      - {source: pods_table, push: detail}
-  detail:
-    title: ${selection.Name}
-    layout: {component: pod_inspector}
-initial: pods
+data:
+  sources:
+    pod_detail:
+      type: http
+      url: http://localhost:8001/api/v1/namespaces/${selection.Namespace}/pods/${selection.Name}
 
-data_sources:
-  pod_detail:
-    type: http
-    url: http://localhost:8001/api/v1/namespaces/${selection.Namespace}/pods/${selection.Name}
+tui:
+  screens:
+    pods:
+      layout: {component: pods_table}
+      on_enter:
+        - {source: pods_table, push: detail}
+    detail:
+      title: ${selection.Name}
+      layout: {component: pod_inspector}
+  initial: pods
 ```
 
 `esc` pops; breadcrumbs accumulate at the top of the screen.
@@ -268,21 +293,22 @@ Bind a key to a subprocess. Confirms can be required; errors land in a
 modal with the captured stderr.
 
 ```yaml
-screens:
-  pods:
-    layout: {component: pods_table}
-    actions:
-      - key: x
-        label: exec
-        source: pods_table
-        confirm: "Open shell in ${selection.Name}?"
-        run: [kubectl, exec, -it, -n, "${selection.Namespace}", "${selection.Name}", --, sh]
-      - key: D
-        label: delete
-        source: pods_table
-        confirm: "Delete pod ${selection.Name}? Cannot be undone."
-        interactive: false
-        run: [kubectl, delete, -n, "${selection.Namespace}", pod, "${selection.Name}"]
+tui:
+  screens:
+    pods:
+      layout: {component: pods_table}
+      actions:
+        - key: x
+          label: exec
+          source: pods_table
+          confirm: "Open shell in ${selection.Name}?"
+          run: [kubectl, exec, -it, -n, "${selection.Namespace}", "${selection.Name}", --, sh]
+        - key: D
+          label: delete
+          source: pods_table
+          confirm: "Delete pod ${selection.Name}? Cannot be undone."
+          interactive: false
+          run: [kubectl, delete, -n, "${selection.Namespace}", pod, "${selection.Name}"]
 ```
 
 ### Color rules
@@ -388,9 +414,9 @@ cmd/
   wrangl/             # CLI: wrangl [flags] <config.yaml>    (data sink: JSON / NDJSON)
   example-launcher/   # TUI for browsing every example
 internal/
-  config/             # YAML schema (one Go struct per shape) + validator + DAG check
-  datasource/         # Source interface + http / exec / file / websocket / merge
-  pipeline/           # named pipelines: filter / project / derive / sort / union / compose / join / cache
+  config/             # YAML schema: cfg.Source bag-of-fields + Type-discriminator dispatch
+  datasource/         # ds.Source interface + http / exec / file / websocket / static / merge builders
+  pipeline/           # operator builders: filter / project / derive / sort / union / compose / join / cache / passthrough
   expr/               # embedded expression language adapter (expr-lang/expr); used by every operator
   output/             # JSON / NDJSON stdout sink used by wrangl
   build/              # cfg → live tuilib components + binding layer       [TUI side]

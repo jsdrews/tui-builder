@@ -30,21 +30,32 @@ tui-builder has two halves, split by what they do with the same config:
 
 **Data layer** (the heart of the product):
 
-- **`internal/config`** owns the schema. One Go struct per YAML shape.
-  Yaml tags drive Unmarshal; `Validate()` walks the tree (including
-  cycle detection across the unified `data.sources:` graph).
-- **`internal/datasource`** owns the `Source` interface and the
-  concrete kinds (http, exec, file, websocket, static, merge).
-  Self-contained; no awareness of components, screens, or rendering.
+- **`internal/config`** owns the schema. The headline type is
+  `cfg.Source` — one bag-of-fields struct with a `Type` string
+  discriminator. Both leaf kinds (http / exec / file / websocket /
+  static / merge) and operator kinds (passthrough / filter / project
+  / derive / sort / union / compose / join / cache) populate the
+  same struct; each kind reads only the fields it cares about.
+  `DataBlock.Sources map[string]*Source` is the unified data map.
+  yaml.v3 drives Unmarshal directly into `Source`; `Source.Validate`
+  switches on `Type` to delegate to per-kind validators
+  (`validateHTTP`, `validateFilter`, etc.).
+  `Config.Validate` walks the source graph for cycle detection +
+  join-lookup constraints.
+- **`internal/datasource`** owns the `ds.Source` runtime interface
+  and the concrete leaf builders (http, exec, file, websocket,
+  static, merge). Each `newXxx(s *cfg.Source) (ds.Source, error)`
+  reads only the fields its kind uses. Self-contained; no awareness
+  of components, screens, or rendering.
 - **`internal/pipeline`** is the named, addressable composition layer
   over sources. Operator catalog (all shipped): passthrough (`from:`),
   `filter`, `project`, `derive`, `sort`, `union`, `compose`, `join`,
   `cache`. Every operator satisfies the same `ds.Source` interface,
   so neither the TUI binding nor `wrangl` special-cases them.
-  Pipelines also have their own typed `parameters:` blocks (visible
+  Operators also have their own typed `parameters:` blocks (visible
   in operator expressions as `params.X`); wrangl `--param` routes to
-  pipeline params when declared, otherwise falls through to source
-  params.
+  operator params when declared, otherwise falls through to the
+  underlying leaf's params.
 - **`internal/expr`** is the embedded expression language adapter —
   wraps `expr-lang/expr` behind a `Compile` / `Eval` / `EvalBool`
   (+ `EvalWithParams` / `EvalBoolWithParams`) surface. Operators use
@@ -121,12 +132,11 @@ poll-via-`tea.Tick` path.
 ## Pipelines: named, addressable data over sources
 
 Pipelines live alongside leaf sources in the unified `data.sources:`
-map — every entry carries a `type:` that picks its kind from the
-registry (`internal/config/source.go`). Leaf kinds (http, exec,
-file, websocket, static, merge) fetch externally; operator kinds
-(passthrough, filter, project, derive, sort, union, compose, join,
-cache) transform an upstream named via `from:` (or fan out over
-`sources:` / `parts:` / `lookups:`).
+map — every entry is a `*cfg.Source` whose `Type` field picks its
+kind. Leaf kinds (http, exec, file, websocket, static, merge) fetch
+externally; operator kinds (passthrough, filter, project, derive,
+sort, union, compose, join, cache) transform an upstream named via
+`from:` (or fan out over `sources:` / `parts:` / `lookups:`).
 
 ```yaml
 data:
@@ -172,30 +182,35 @@ adding a new source kind ("Adding a new pipeline operator" below).
 Trace the trip for `value: name.common` on a table column bound to an
 HTTP source:
 
-1. **Parse.** `config.Load(path)` reads the file, unmarshals into the
-   `Config` struct in `internal/config/config.go`.
-2. **Validate.** `Config.Validate()` checks per-type field shape,
-   cross-references (source-name resolution, merge cycle detection),
-   and component / data-source bindings.
-3. **Build sources.** `datasource.Build(defs)` constructs every source.
-   Topologically-correct order via recursive build — leaves (http,
-   exec, file, websocket) first, merges last with their resolved
-   children attached.
-4. **Build components.** `build.Build(layout, components, theme)`
+1. **Parse.** `config.Load(path)` reads the file. yaml.v3 unmarshals
+   into the `Config` struct. Every entry under `data.sources:`
+   decodes into a `*cfg.Source` with its `Type` field set.
+2. **Desugar.** `ExpandSourcesPipe` rewrites any `pipe:` chain into
+   standalone entries linked by `from:`.
+3. **Validate.** `Config.Validate()` calls `Source.Validate(path)`
+   on each entry (switches on `Type` to per-kind helpers), then
+   walks the graph for cycle detection + join-lookup constraints +
+   component bindings.
+4. **Build.** `pipeline.Build(prebuilt, sources, params)` walks the
+   graph topologically. Leaves dispatch to `ds.BuildLeaf` which
+   switches on `Type` and calls `newHTTP` / `newExec` / etc. with
+   the source. Operators dispatch to `newFilter` / `newSort` / etc.
+   with their upstream pre-resolved.
+5. **Build components.** `build.Build(layout, components, theme)`
    walks the layout tree, constructs each component leaf via the
    matching `buildList` / `buildTable` / etc. function.
-5. **Bind.** `screen.Model.build_()` wires components-by-source-name
+6. **Bind.** `screen.Model.build_()` wires components-by-source-name
    into a registry (`m.sources[name]`).
-6. **OnEnter.** Screen kicks off `startFetch(name)` per source.
-7. **Fetch.** `http.Fetch` GETs the URL, parses JSON, applies the
+7. **OnEnter.** Screen kicks off `startFetch(name)` per source.
+8. **Fetch.** `http.Fetch` GETs the URL, parses JSON, applies the
    source's own `root:` slicing, returns the resulting value.
-8. **Apply.** `build.ApplyData(component, data, theme)` dispatches by
+9. **Apply.** `build.ApplyData(component, data, theme)` dispatches by
    `Component.Kind`. For tables: walk `items := ds.Iter(data)`, then
    for each row + column, call `applyColorRules(ds.FirstString(item,
    col.Value), col.ColorRules, theme)` and hand the assembled `[]Row`
    to `table.SetRows`.
-9. **Render.** tuilib's `pkg/table` does the actual rendering on next
-   View().
+10. **Render.** tuilib's `pkg/table` does the actual rendering on
+    next View().
 
 When something is "not appearing," walk this chain from both ends.
 Usually it's a path mismatch (step 8 plucks `""`), a binding mismatch
@@ -218,8 +233,8 @@ existing multi-screen + `on_enter`. Don't add a `drilldown:` field.
 If the user request *can't* be expressed in YAML, the smallest extension
 is the right answer:
 
-- New leaf-level capability per kind → new field on `cfg.Component`
-- New behavior across kinds → new field on `cfg.DataSource`
+- New per-component-kind capability → new field on `cfg.Component`
+- New leaf-source or operator field → new field on `cfg.Source`
 - New layout primitive → new tag in `cfg.Node`'s tagged union
 
 Each addition costs a schema field, a validator clause, a build-layer
@@ -284,10 +299,11 @@ the whole point of having one interface.
 If you find yourself wanting to extend the `Source` interface itself —
 stop. Most "I need richer source semantics" are actually:
 
-- "I need a new field on the source's config" — add to `cfg.DataSource`
-- "I need to compose sources" — that's `merge`
-- "I need transformations" — wrap the source with `exec` (any CLI
-  that prints JSON is a source)
+- "I need a new field on the source's config" — add to `cfg.Source`
+- "I need to compose sources" — that's `merge` (leaf) or `union` (operator)
+- "I need transformations" — that's an operator pipeline (filter /
+  project / derive / sort / cache), or wrap with `exec` if the
+  transform belongs in a CLI
 
 The one legitimate extension we've added is `StreamingSource` for the
 fundamentally different lifecycle of push-based events. Don't add more
@@ -382,12 +398,14 @@ The pipeline operator catalog is mature (passthrough, filter,
 project, derive, sort, union, compose, join, cache). New operators
 plug in by following the same shape:
 
-1. **Schema.** Add fields to `cfg.Pipeline` (the tagged-union arm)
-   plus an `*XxxOp` struct for operator-specific config. Update the
-   operator-count check in `validatePipelines` AND extend
-   `upstreamsOf` so cycle detection + Build resolution walk the
-   right edges (single-input: one element; multi-input: all
-   children).
+1. **Schema.** Add the operator's fields directly to `cfg.Source`
+   (or reuse existing ones — `From` is shared by every single-input
+   operator). Add the new `Type` value to `operatorTypes` in
+   `source.go`. Add a `case "newkind":` to `Source.Validate` calling
+   a new `validateNewKind` method. Add a branch to
+   `Source.Upstreams` so cycle detection + Build resolution walk
+   the right edges (single-input: one element via `From`;
+   multi-input: union over the relevant fields).
 2. **Implementation.** Add an operator file in `internal/pipeline/`
    (e.g. `filter.go`, `compose.go`). The `Pipeline` wrapper
    delegates Fetch / Subscribe to its `upstream ds.Source` with
@@ -396,28 +414,29 @@ plug in by following the same shape:
    `disableStreaming: true` so Subscribe returns ErrNotStreaming.
    Operators that need custom execution semantics (compose, join)
    define a private `<op>Source` implementing `ds.Source` and wrap
-   it as the Pipeline's upstream.
-3. **Wire it into Build.** Add the case to the operator switch in
-   `pipeline.Build`; if your operator needs raw `cfg.DataSource`
-   defs (like join, for per-row cloning), they're already threaded
-   in via the `sourceDefs` arg.
+   it as the Pipeline's upstream. Each `newXxx` takes `*cfg.Source`
+   and reads only the fields its kind populates.
+3. **Wire it into Build.** Add a `case "newkind":` to the operator
+   switch in `pipeline.Build`; if your operator needs raw
+   `*cfg.Source` defs (like join, for per-row cloning), they're
+   already threaded in via the `sources` arg.
 4. **Expressions.** Use `internal/expr.EvalWithParams` /
-   `EvalBoolWithParams` so the pipeline's bound `parameters:`
+   `EvalBoolWithParams` so the operator's bound `parameters:`
    surface as `params.X` alongside item fields. Compile once at
    newXxx; pass the compiled program + params closure into the
    per-item evaluation.
 5. **Tests.** Unit tests using the in-package `fakeSource` /
    `fakeStreamer` patterns from `pipeline_test.go`. Don't pull in
    real http/exec/file for operator tests — they're transformations,
-   so feed them fake data.
+   so feed them fake data. Use `cfg.NewEntry(&cfg.Source{Type:
+   "newkind", From: "src", ...})` for fixtures.
 6. **Docs.** New operator section in `docs/data-layer.md`, plus an
    example pipeline in `examples/filter_demo.yaml` (the canonical
-   "operator showroom"). Update `plans/pipeline-operators.md` —
-   mark the operator as shipped, prune the forward-looking notes.
+   "operator showroom").
 7. **wrangl.** Nothing to do — `wrangl <name>` already works
    uniformly across every operator, because they all satisfy
-   `ds.Source`. `--list` shows the operator kind via
-   `operatorKind()`; add a case if you introduce a new arm.
+   `ds.Source`. `--list` shows the operator kind via `s.Type`
+   directly.
 
 Look at `internal/pipeline/filter.go` and `internal/pipeline/cache.go`
 as templates — they cover the transform-hook and custom-source
@@ -432,16 +451,18 @@ construct, the design is wrong.
 A worked example: suppose you're adding an `sse` (Server-Sent Events)
 source. Steps:
 
-1. **Schema.** Add per-type fields to `cfg.DataSource` (probably
-   `URL`, headers — possibly shareable with `http`). Update the type
-   whitelist in `DataSource.validate`. Decide if it's `Source` or
-   `StreamingSource`.
-2. **Implementation.** New `internal/datasource/sse.go`. Implement
+1. **Schema.** Add per-type fields to `cfg.Source` (probably `URL`,
+   `Headers` — already there for http/websocket). Add the new
+   `Type` value to `leafTypes` in `source.go`. Add a `case "sse":`
+   to `Source.Validate` calling a new `validateSSE` method. Decide
+   if it's `ds.Source` or `ds.StreamingSource`.
+2. **Implementation.** New `internal/datasource/sse.go` with a
+   `newSSE(s *cfg.Source) (ds.Source, error)` constructor. Implement
    `Source` (always) and `StreamingSource` (probably, for SSE).
    Apply `root:` inside `Fetch` per rule 3.
-3. **Registry.** Add the case in `newLeaf` in `source.go`.
+3. **Dispatch.** Add the case in `ds.BuildLeaf` in `source.go`.
 4. **Example.** `examples/stream_sse.yaml` or wherever it fits.
-5. **Docs.** README + `docs/components.md` data-source section.
+5. **Docs.** README + `docs/data-layer.md` source-kind section.
 
 That's it — no screen / binding / build changes. The `Source`
 interface is doing its job when adding a source touches just one new

@@ -45,7 +45,7 @@ of the leaf kinds (`http`, `exec`, `file`, `websocket`, `static`,
 externally; operators transform an upstream named via `from:` (or
 fan out over `sources:` / `parts:` / `lookups:`). There is no
 separate `data.pipelines:` block — leaves and operators share one
-map and resolve through one registry.
+map.
 
 **Throughout this doc**, snippets that focus on a single kind show
 just the entry being discussed — in a real config those entries live
@@ -81,19 +81,20 @@ the interface doesn't care which one it's reading from.
 
 ### Pipelines
 
-A `Pipeline` is a named, addressable wrapper that satisfies the same
-`Source` interface as the underlying source. v1 pipelines are
-**passthrough** — `from: <source-or-pipeline>` and that's it.
-Operators (`filter`, `project`, `union`, `join`) will land later
-without changing the contract.
+Operator entries in `data.sources:` (filter / project / derive /
+sort / union / compose / join / cache / passthrough) satisfy the
+same `ds.Source` interface as leaf sources. A passthrough is the
+simplest operator — `from: <source-or-pipeline>` and a stable
+addressable name on top, with no transformation:
 
 ```yaml
 all_countries:
-  from: countries        # source name OR another pipeline name
+  type: passthrough
+  from: countries        # leaf-source name OR another operator name
 ```
 
-Components and wrangl can target either a source or a pipeline by
-name; the pipeline registry resolves transparently.
+Components and wrangl target either a leaf or an operator by name;
+the binding resolution doesn't distinguish — both are `ds.Source`.
 
 ---
 
@@ -929,7 +930,7 @@ to avoid silent overwrites.
 **Execution shape**:
 
 - Driver fetched once; for each row, every lookup runs in parallel.
-- Per-row lookup execution: clone the lookup's `cfg.DataSource`,
+- Per-row lookup execution: clone the lookup's `*cfg.Source`,
   bind row-derived params via `BindParams`, build a fresh
   `ds.Source` from the bound cfg, fetch.
 - No caching (yet). For N driver rows × M lookups, expect N×M

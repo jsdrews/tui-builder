@@ -48,9 +48,11 @@ consume them through the existing contract.
 | **passthrough** | any source / pipeline | unchanged | ✅ shipped |
 
 ```yaml
-pipelines:
-  pods:
-    from: pods_raw
+data:
+  sources:
+    pods:
+      type: passthrough
+      from: pods_raw
 ```
 
 ### Transforms — 1 in, 1 out (different shape)
@@ -77,9 +79,10 @@ pipelines:
 | **join** | driver iterable + N lookup sources | driver items enriched with lookup results | ✅ shipped — snapshot only; lookups must be parameterized sources; emit separate (default) / merged; on_error fail / skip; no caching yet |
 
 ```yaml
-pipelines:
-  pods_with_detail:
-    join:
+data:
+  sources:
+    pods_with_detail:
+      type: join
       driver:
         from: pods                 # one fetch returns N pods
       lookups:
@@ -176,12 +179,12 @@ true cross-source chained fetches first-class:
    pipeline). That's a sub-feature for when join lands.
 8. ~~**`join` operator**~~ ✅ shipped — driver iterable + N parameterized
    lookups. For each driver row, expressions evaluate against the row
-   to compute lookup params; `cfg.DataSource.Clone` + `BindParams`
+   to compute lookup params; `cfg.Source.Clone` + `BindParams`
    produces a per-row lookup source; lookups fan out in parallel
    within a row. emit: separate (default) | merged; on_error: fail
    (default) | skip. Snapshot-only (Subscribe → ErrNotStreaming);
    no caching (every row triggers fresh fetches). Lookups must be
-   SOURCES with `parameters:` declared — pipelines-as-lookups +
+   leaf sources with `parameters:` declared — pipelines-as-lookups +
    per-row LRU caching + streaming-with-windowing are the next-level
    enhancements when use cases materialize.
 9. ~~**Materialization / caching**~~ ✅ shipped — `cache:` operator

@@ -198,10 +198,13 @@ Unchanged from round 1. `layout.Center` lands when modal components
 ## Schema cheat sheet (current)
 
 > **Note**: this cheat sheet is grouped by field category for
-> readability. In the actual config, `data_sources:` (now the
-> unified `sources:` map — every entry carries a `type:`) lives
-> under `data:` and `components:` / `screen[s]:` / `initial:` live
-> under `tui:`. See [data-layer.md](data-layer.md#top-level-config-shape)
+> readability. In the actual config, the `sources:` map lives under
+> `data:` and `components:` / `screen[s]:` / `initial:` live under
+> `tui:`. Every entry in `data.sources:` carries a `type:` that
+> picks its kind — leaf sources (http / exec / file / websocket /
+> static / merge) and operator pipelines (filter / project / derive
+> / sort / union / compose / join / cache / passthrough) share the
+> single map. See [data-layer.md](data-layer.md#top-level-config-shape)
 > for the top-level shape.
 
 ```yaml
@@ -224,9 +227,9 @@ app:
       initial_index: <int>    # select default index
       initial_bool:  <bool>   # confirm default
 
-data_sources:                 # optional — components bind to these via `source:`
+sources:                      # optional — components bind to these via `source:`
   <name>:
-    type: http | exec | file | merge | websocket
+    type: http | exec | file | websocket | static | merge | passthrough | filter | project | derive | sort | union | compose | join | cache
     # ---- shared by every type ----
     root: <dot-path>          # slice into the response (empty = use whole result)
     format: json | text       # default json; use text for plain-text endpoints
