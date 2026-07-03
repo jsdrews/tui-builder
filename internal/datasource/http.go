@@ -29,16 +29,23 @@ import (
 // StreamingSource so the screen / wrangl picks Subscribe over the
 // poll-via-Fetch path.
 type httpSource struct {
-	url     string
-	method  string
-	headers map[string]string
-	body    string
-	format  string // "json" (default) or "text"
-	root    string // dot-path applied to parsed JSON before return
-	follow  bool
-	timeout time.Duration
-	refresh time.Duration
+	url      string
+	method   string
+	headers  map[string]string
+	body     string
+	format   string // "json" (default) or "text"
+	root     string // dot-path applied to parsed JSON before return
+	follow   bool
+	timeout  time.Duration
+	refresh  time.Duration
+	paginate *cfg.PaginateConfig // nil = single-page fetch
 }
+
+// defaultMaxPages caps a paginate walk when the user didn't set one.
+// Sized to comfortably handle typical REST APIs (AWX defaults to 25/page;
+// Django REST 100; GitHub 30/100) without exposing runaway walks that
+// could OOM the process on a badly-configured endpoint.
+const defaultMaxPages = 20
 
 func newHTTP(d *cfg.Source) (Source, error) {
 	method := strings.ToUpper(d.Method)
@@ -62,15 +69,16 @@ func newHTTP(d *cfg.Source) (Source, error) {
 		}
 	}
 	return &httpSource{
-		url:     d.URL,
-		method:  method,
-		headers: d.Headers,
-		body:    d.Body,
-		format:  d.Format,
-		root:    d.Root,
-		follow:  d.Follow,
-		timeout: timeout,
-		refresh: refresh,
+		url:      d.URL,
+		method:   method,
+		headers:  d.Headers,
+		body:     d.Body,
+		format:   d.Format,
+		root:     d.Root,
+		follow:   d.Follow,
+		timeout:  timeout,
+		refresh:  refresh,
+		paginate: d.Paginate,
 	}, nil
 }
 
@@ -83,11 +91,32 @@ func (s *httpSource) Fetch(ctx context.Context) (any, error) {
 		// over. Matches the exec follow contract.
 		return "", nil
 	}
+	if s.paginate != nil {
+		return s.fetchPaginated(ctx)
+	}
 
+	raw, err := s.fetchOne(ctx, s.url)
+	if err != nil {
+		return nil, err
+	}
+	if s.format == "text" {
+		return string(raw), nil
+	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("parse json: %w", err)
+	}
+	return applyRoot(out, s.root), nil
+}
+
+// fetchOne issues one request against url and returns the raw body.
+// Shared between the single-page path and the paginate walk so both
+// use the same timeout / auth / non-2xx handling.
+func (s *httpSource) fetchOne(ctx context.Context, url string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
-	resp, err := s.do(ctx)
+	resp, err := s.doURL(ctx, url)
 	if err != nil {
 		return nil, err
 	}
@@ -103,14 +132,66 @@ func (s *httpSource) Fetch(ctx context.Context) (any, error) {
 		}
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, snippet)
 	}
-	if s.format == "text" {
-		return string(raw), nil
+	return raw, nil
+}
+
+// fetchPaginated walks the configured paginate strategy until either
+// there's no next page, MaxPages is reached, or a mid-walk error kills
+// the walk (respecting OnPageError). Each page's Root-sliced items are
+// concatenated into one []any.
+//
+// The walk exclusively uses the RAW (pre-Root) response for
+// next-link lookup — Root sees the items, next_path sees the envelope
+// (both live at the same level in Django REST / AWX responses:
+// `{next: "...", results: [...]}`).
+func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
+	max := s.paginate.MaxPages
+	if max == 0 {
+		max = defaultMaxPages
 	}
-	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("parse json: %w", err)
+	skipOnErr := s.paginate.OnPageError == "skip"
+
+	var acc []any
+	url := s.url
+	for page := 0; page < max; page++ {
+		raw, err := s.fetchOne(ctx, url)
+		if err != nil {
+			if skipOnErr && page > 0 {
+				// Return what we have; the caller sees a partial result
+				// rather than losing every page we already succeeded on.
+				return acc, nil
+			}
+			return nil, fmt.Errorf("page %d: %w", page+1, err)
+		}
+		var parsed any
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			if skipOnErr && page > 0 {
+				return acc, nil
+			}
+			return nil, fmt.Errorf("page %d: parse json: %w", page+1, err)
+		}
+		// Extract this page's items via Root, then flatten into acc.
+		// Non-array pages pass through as one element — matches the
+		// non-paginated Fetch's behaviour on single-object responses.
+		items := applyRoot(parsed, s.root)
+		acc = append(acc, Iter(items)...)
+
+		// Find the next page's URL. Missing / null / empty string all
+		// mean "no more pages" — Django REST returns null for `next`
+		// on the last page, and that's how we know to stop.
+		next := Get(parsed, s.paginate.NextPath)
+		nextStr, ok := next.(string)
+		if !ok || nextStr == "" {
+			return acc, nil
+		}
+		url = nextStr
 	}
-	return applyRoot(out, s.root), nil
+	// Hit max_pages with more pages potentially available. Return what
+	// we have; the cap is a safety measure, not an error. If callers
+	// need to know we truncated they can set on_page_error: fail and
+	// bump max_pages, or add a follow-up feature (a "truncated" flag
+	// on the result) if this becomes a real complaint.
+	return acc, nil
 }
 
 // Subscribe implements StreamingSource for follow mode. Holds the
@@ -169,14 +250,23 @@ func (s *httpSource) Subscribe(ctx context.Context) (<-chan Event, error) {
 	return ch, nil
 }
 
-// do builds the request, applies headers, and dispatches it. Shared
-// between Fetch (one-shot) and Subscribe (streaming).
+// do builds a request against s.url, applies headers, and dispatches
+// it. Shared between the non-paginated Fetch and Subscribe (streaming).
 func (s *httpSource) do(ctx context.Context) (*http.Response, error) {
+	return s.doURL(ctx, s.url)
+}
+
+// doURL is the URL-override form used by the paginate walker to hit
+// successive pages. Body / method / headers / Accept default all
+// carry over from the original request — Django REST's `next` URLs
+// are meant to be called with the same auth headers, so this is
+// correct-by-default.
+func (s *httpSource) doURL(ctx context.Context, url string) (*http.Response, error) {
 	var bodyReader io.Reader
 	if s.body != "" {
 		bodyReader = strings.NewReader(s.body)
 	}
-	req, err := http.NewRequestWithContext(ctx, s.method, s.url, bodyReader)
+	req, err := http.NewRequestWithContext(ctx, s.method, url, bodyReader)
 	if err != nil {
 		return nil, err
 	}

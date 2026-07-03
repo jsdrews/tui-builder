@@ -24,6 +24,12 @@ func Load(path string) (*Config, error) {
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("validate %s: %w", path, err)
 	}
+	// Env-var check runs after Validate so schema errors surface
+	// first. Applies defaults, errors on missing required vars,
+	// warns on undeclared-and-unset references.
+	if err := checkEnv(&c); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	return &c, nil
 }
 

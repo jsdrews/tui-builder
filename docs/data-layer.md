@@ -190,11 +190,55 @@ The same templates can also use:
 
 | Token | Resolves to |
 |---|---|
-| `${env.NAME}` | `os.Getenv("NAME")` — empty when unset |
+| `${env.NAME}` | `os.Getenv("NAME")` — empty when unset, unless declared under `app.env` (see below) |
 | `${selection}` | parent screen's focused list selection (TUI only) |
 | `${selection.N}` | parent's table row, 1-based cell index (TUI only) |
 | `${selection.COLNAME}` | parent's table row, cell by column-title prefix (TUI only) |
 | `${prompt.KEY}` | action prompt value (actions only) |
+
+### Declaring env-var dependencies (`app.env`)
+
+An unset env var referenced in a URL / Command / Header silently
+substitutes to the empty string. That's a footgun — you get a cryptic
+`HTTP 401` or a double-slash URL instead of "you forgot to export
+`AWX_TOKEN`." Declare the dependency under `app.env` and Load-time
+checks catch it early:
+
+```yaml
+app:
+  title: AWX
+  env:
+    - name:        AWX_HOST
+      required:    true
+      description: "Tower base URL (e.g. https://awx.example.com)"
+    - name:        AWX_TOKEN
+      required:    true
+      description: "OAuth2 bearer token, from Users → Tokens"
+    - name:        DEBUG
+      default:     "0"
+      description: "Set to 1 for verbose fetch logging"
+```
+
+Behavior:
+
+- **`required: true` + unset (no default)** → hard error at `Load`.
+  Every missing required var lands in one message so you fix the
+  whole batch in one edit.
+- **`default:` set + unset** → `os.Setenv` applies the default. Same
+  shape as `app.prompts` defaults.
+- **`${env.X}` referenced but not declared under `app.env` AND
+  unset** → stderr warning. Not an error because empty-string
+  substitution is a legitimate pattern for some fields (optional
+  headers, feature-flag vars). Declare it if you want to elevate to
+  a hard error.
+- **`app.prompts.key` counts as declared** — those vars are filled
+  in by the boot-time TUI form modal, so no warning even though
+  they're not under `app.env` at Load time.
+- **`required:` and `default:` are mutually exclusive** — defaults
+  imply optional.
+
+Applies to both `wrangl` and `tui-builder`. wrangl exits with a
+non-zero status on missing required, which CI can catch.
 
 `${selection.*}` and `${prompt.*}` only resolve in TUI contexts —
 they don't make sense to wrangl. The recommended pattern post-params:

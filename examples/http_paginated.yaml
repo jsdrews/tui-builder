@@ -1,0 +1,71 @@
+# http_paginated.yaml — walk a paginated REST API in one Fetch.
+#
+# The public JSONPlaceholder API returns 100 photos across pages of 30
+# (with `?_page=N&_limit=30`) and links `Link: <...>; rel="next"` in
+# the response header. It doesn't quite fit the `link` strategy (which
+# reads the `next` URL from the response BODY, Django REST style), but
+# it makes a self-contained demo when we substitute a body-carrying
+# stub in tests.
+#
+# For a real-world Django REST / AWX / GitLab endpoint that ships the
+# next URL in the body:
+#
+#   sources:
+#     awx_jobs:
+#       type: http
+#       url: ${env.AWX_HOST}/api/v2/jobs/?order_by=-created
+#       headers: {Authorization: "Bearer ${env.AWX_TOKEN}"}
+#       root: results
+#       paginate:
+#         strategy: link          # follow response.next
+#         next_path: next
+#         max_pages: 20           # safety cap; ~4000 jobs at page_size=200
+#
+# Semantics:
+#   - Fetch the URL, parse JSON, extract items via `root:`.
+#   - Look up the `next_path` in the RAW response (pre-root) to find
+#     the next page's URL. Missing / null / empty string = we're done.
+#   - Concatenate all pages' items into one flat list; hand back.
+#   - Mutually exclusive with `follow: true` (streaming) and
+#     `format: text` (needs JSON to find the next link).
+#   - `on_page_error: skip` returns what we have on a mid-walk error
+#     instead of throwing everything away.
+#
+# Try it:
+#
+#   task wrangl -- examples/http_paginated.yaml photos_all | jq 'length'
+
+app:
+  title: Paginated fetch demo
+
+data:
+  sources:
+    # Same public API as http_countries.yaml, but sized so pagination
+    # actually matters. JSONPlaceholder doesn't carry a body-next
+    # link — this entry works as a config-load smoke test but a real
+    # fetch will just return one page's worth. Point at a Django REST
+    # / AWX endpoint to see the walk in action.
+    photos_all:
+      type: http
+      url: https://jsonplaceholder.typicode.com/photos
+      paginate:
+        strategy: link
+        next_path: next   # JSONPlaceholder returns a flat array, so
+                          # this lookup returns nil and the walk stops
+                          # after page 1. Real APIs carry a URL.
+        max_pages: 5
+
+tui:
+  components:
+    photos:
+      type: table
+      title: Photos
+      source: photos_all
+      columns:
+        - {title: ID,     width: 6,  value: id,        sort: number}
+        - {title: Album,  width: 6,  value: albumId,   sort: number}
+        - {title: Title,  width: 60, value: title}
+      filterable: true
+  screen:
+    layout:
+      component: photos

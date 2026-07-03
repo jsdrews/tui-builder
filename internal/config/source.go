@@ -59,6 +59,14 @@ type Source struct {
 	Body    string            `yaml:"body,omitempty"`
 	Follow  bool              `yaml:"follow,omitempty"`
 
+	// Paginate opts an http source into multi-page walking. On Fetch,
+	// the source fetches the URL, applies Root: to get the page's
+	// items, extracts the next page's URL via the configured strategy,
+	// and repeats until there's no next or MaxPages is reached. The
+	// concatenated item list is returned. Mutually exclusive with
+	// Follow (streaming) and Format: text. See PaginateConfig.
+	Paginate *PaginateConfig `yaml:"paginate,omitempty"`
+
 	// ── exec ──
 	Command []string          `yaml:"command,omitempty"`
 	Env     map[string]string `yaml:"env,omitempty"`
@@ -310,6 +318,10 @@ func (s *Source) Clone() *Source {
 	if s.Pipe != nil {
 		out.Pipe = append([]Source(nil), s.Pipe...)
 	}
+	if s.Paginate != nil {
+		cp := *s.Paginate
+		out.Paginate = &cp
+	}
 	// Parameters / Keep / Compute / Parts / Lookups are treated as
 	// immutable declarations after load; aliasing is safe.
 	return &out
@@ -399,6 +411,42 @@ func (s *Source) validateHTTP(path string) error {
 	}
 	if s.URL == "" {
 		return fmt.Errorf("%s: http source needs url", path)
+	}
+	if s.Paginate != nil {
+		if err := s.Paginate.validate(path + ".paginate"); err != nil {
+			return err
+		}
+		if s.Follow {
+			return fmt.Errorf("%s: `paginate:` and `follow: true` are mutually exclusive (pagination walks a finite N-page snapshot; follow is an open-ended stream)", path)
+		}
+		if s.Format == "text" {
+			return fmt.Errorf("%s: `paginate:` requires json format (needs to parse the response to find the next-page reference)", path)
+		}
+	}
+	return nil
+}
+
+// validate enforces PaginateConfig's per-strategy required fields +
+// value ranges. path is the YAML path (e.g.
+// `data.sources.users.paginate`); errors embed it.
+func (p *PaginateConfig) validate(path string) error {
+	switch p.Strategy {
+	case "":
+		return fmt.Errorf("%s: `strategy:` is required (one of: link)", path)
+	case "link":
+		if p.NextPath == "" {
+			return fmt.Errorf("%s.next_path: required for strategy=link (dot-path into the response body to the next page's URL, e.g. \"next\")", path)
+		}
+	default:
+		return fmt.Errorf("%s: unknown strategy %q (want: link)", path, p.Strategy)
+	}
+	if p.MaxPages < 0 {
+		return fmt.Errorf("%s.max_pages: must be >= 0 (0 = unlimited; positive = cap)", path)
+	}
+	switch p.OnPageError {
+	case "", "fail", "skip":
+	default:
+		return fmt.Errorf("%s.on_page_error: unknown %q (want: fail|skip)", path, p.OnPageError)
 	}
 	return nil
 }

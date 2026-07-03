@@ -17,6 +17,10 @@
 app:
   title: GitHub (auth)
   theme: nord
+  env:
+    - name:        GITHUB_TOKEN
+      required:    true
+      description: "Classic PAT or fine-grained token with repo:read scope. https://github.com/settings/tokens"
 
 data:
   sources:

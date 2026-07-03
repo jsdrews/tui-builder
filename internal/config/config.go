@@ -87,6 +87,41 @@ type JoinLookup struct {
 
 
 
+// PaginateConfig controls multi-page walking on an http source. Only
+// meaningful when the source's `type:` is `http` and Format is JSON
+// (not text). Set via `paginate:` in YAML.
+//
+// Strategy semantics:
+//
+//   - "link": the response body carries a URL for the next page at
+//     dot-path NextPath. Django REST Framework does this — every
+//     response has `{next: "https://...?page=2", ...}`. AWX, GitLab
+//     (some endpoints), and many other REST APIs use this shape.
+//     Walk: fetch → apply Root: to get items → follow NextPath →
+//     repeat until next is null / missing / empty string.
+//
+// Additional strategies (link_header for GitHub, cursor for Stripe,
+// offset for manual paging) can layer on later behind the same
+// discriminator without breaking configs.
+type PaginateConfig struct {
+	// Strategy picks the page-walking method. Required; must be one
+	// of the values enumerated above.
+	Strategy string `yaml:"strategy"`
+	// NextPath is the dot-path into the RAW response (pre-Root
+	// slicing) that carries the next page's URL. Required for
+	// strategy "link". Common values: "next", "links.next",
+	// "meta.pagination.next".
+	NextPath string `yaml:"next_path,omitempty"`
+	// MaxPages caps the walk. Default 20. Zero means unlimited (not
+	// recommended — one runaway API can OOM the process).
+	MaxPages int `yaml:"max_pages,omitempty"`
+	// OnPageError chooses what happens when a mid-walk page fails:
+	//   "" / "fail" (default) — abort, return the error
+	//   "skip"                — return the accumulated pages so far
+	//                            (subsequent pages simply omitted)
+	OnPageError string `yaml:"on_page_error,omitempty"`
+}
+
 // App configures the surrounding tuilib app shell.
 type App struct {
 	// Title prefixes the breadcrumb (the screen title appears after it).
@@ -115,6 +150,45 @@ type App struct {
 	// so `SYMBOLS=btcusdt,ethusdt tui-builder ...` lets you skip the
 	// modal entirely.
 	Prompts []Prompt `yaml:"prompts,omitempty"`
+
+	// Env declares environment variables the config depends on.
+	// Load-time behavior:
+	//   - `required: true` + unset (and no default) → hard error at
+	//     Load with a message naming every missing var at once so
+	//     the user fixes them in one edit rather than one-at-a-time.
+	//   - `default:` + unset → os.Setenv applied so downstream
+	//     ${env.X} substitution picks up the default value. Same
+	//     semantics as app.prompts defaults.
+	//   - Referenced-but-undeclared `${env.X}` in a URL / Command /
+	//     Header / Body / Action.Run / etc. → stderr warning at
+	//     Load. Not a hard error because empty-string substitution
+	//     is a legitimate pattern for some fields (optional
+	//     headers, feature-flag env vars).
+	//
+	// Purpose: catch "I forgot to export AWX_TOKEN" at load time
+	// with a clear message, rather than at first fetch with a
+	// cryptic 401 or a double-slash URL.
+	Env []EnvSpec `yaml:"env,omitempty"`
+}
+
+// EnvSpec declares one environment variable dependency. Same shape
+// as Parameter (required + default + description) but scoped to
+// process-level env rather than per-source parameters.
+type EnvSpec struct {
+	// Name is the env var name (e.g. AWX_TOKEN). Required.
+	Name string `yaml:"name"`
+	// Required, when true, makes Load fail hard if the var is unset
+	// in the environment AND no default is given. Mutually exclusive
+	// with Default (default implies optional).
+	Required bool `yaml:"required,omitempty"`
+	// Default is applied via os.Setenv when the var is unset in the
+	// environment at Load time. Mutually exclusive with Required.
+	Default string `yaml:"default,omitempty"`
+	// Description surfaces in the missing-required error message so
+	// the user knows what to set the var to. Optional but strongly
+	// recommended — a good description turns a cryptic failure into
+	// a self-serve fix.
+	Description string `yaml:"description,omitempty"`
 }
 
 // Screen describes one screen — its breadcrumb title, its layout tree,

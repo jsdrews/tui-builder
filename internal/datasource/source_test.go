@@ -2,6 +2,9 @@ package datasource
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -313,5 +316,207 @@ func TestMergeOnErrorFail(t *testing.T) {
 	}
 	if _, err := live["all"].Fetch(context.Background()); err == nil {
 		t.Fatal("default on_error:fail should propagate child failure")
+	}
+}
+
+// TestHTTPPaginateLinkWalksAllPages exercises the Django-REST /
+// AWX-style pagination pattern: each response carries `next` as a
+// URL, `results` as the page's items, and we walk until next is nil.
+// The stub server hands out 3 pages of 2 items each; the fetch should
+// return all 6 concatenated.
+func TestHTTPPaginateLinkWalksAllPages(t *testing.T) {
+	// Stub with 3 pages. Server sets `next` to point at the next
+	// page's URL — same host, different `?page=N`. Last page has
+	// next: null.
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		if page == "" {
+			page = "1"
+		}
+		switch page {
+		case "1":
+			fmt.Fprintf(w, `{"next":%q,"results":[{"id":1},{"id":2}]}`, srvURL+"/?page=2")
+		case "2":
+			fmt.Fprintf(w, `{"next":%q,"results":[{"id":3},{"id":4}]}`, srvURL+"/?page=3")
+		case "3":
+			fmt.Fprintf(w, `{"next":null,"results":[{"id":5},{"id":6}]}`)
+		}
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+
+	s, err := newHTTP(&cfg.Source{
+		Type: "http",
+		URL:  srv.URL + "/",
+		Root: "results",
+		Paginate: &cfg.PaginateConfig{
+			Strategy: "link",
+			NextPath: "next",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Fetch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, ok := got.([]any)
+	if !ok {
+		t.Fatalf("paginated fetch returned non-slice: %T", got)
+	}
+	if len(items) != 6 {
+		t.Fatalf("want 6 items across 3 pages, got %d (%v)", len(items), items)
+	}
+	// Preserve order: page 1's items come first, page 3's last.
+	firstID := items[0].(map[string]any)["id"]
+	lastID := items[5].(map[string]any)["id"]
+	if firstID != float64(1) || lastID != float64(6) {
+		t.Errorf("want first=1 last=6, got first=%v last=%v", firstID, lastID)
+	}
+}
+
+// TestHTTPPaginateStopsOnNullNext confirms the walk halts cleanly when
+// `next` is null (Django REST's end-of-list signal) — no extra fetch
+// attempt, no error.
+func TestHTTPPaginateStopsOnNullNext(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		fmt.Fprintf(w, `{"next":null,"results":[{"n":1}]}`)
+	}))
+	defer srv.Close()
+
+	s, err := newHTTP(&cfg.Source{
+		Type: "http",
+		URL:  srv.URL + "/",
+		Root: "results",
+		Paginate: &cfg.PaginateConfig{
+			Strategy: "link",
+			NextPath: "next",
+			MaxPages: 5,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Fetch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if hits != 1 {
+		t.Errorf("expected 1 fetch (single page, next=null), got %d", hits)
+	}
+}
+
+// TestHTTPPaginateMaxPagesCaps confirms we stop at MaxPages even when
+// the server would keep serving next links forever. The stub always
+// returns a `next` pointing at itself; without a cap, this would
+// infinite-loop.
+func TestHTTPPaginateMaxPagesCaps(t *testing.T) {
+	var srvURL string
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		fmt.Fprintf(w, `{"next":%q,"results":[{"h":%d}]}`, srvURL+"/", hits)
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+
+	s, err := newHTTP(&cfg.Source{
+		Type: "http",
+		URL:  srv.URL + "/",
+		Root: "results",
+		Paginate: &cfg.PaginateConfig{
+			Strategy: "link",
+			NextPath: "next",
+			MaxPages: 3,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Fetch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := got.([]any)
+	if len(items) != 3 {
+		t.Errorf("max_pages=3 with infinite feed: want 3 items, got %d", len(items))
+	}
+	if hits != 3 {
+		t.Errorf("max_pages=3: want 3 server hits, got %d", hits)
+	}
+}
+
+// TestHTTPPaginateSkipOnMidWalkError uses on_page_error: skip so a
+// mid-walk failure returns what we've accumulated instead of losing
+// everything. Simulates a server that succeeds on page 1 then 500s
+// on page 2.
+func TestHTTPPaginateSkipOnMidWalkError(t *testing.T) {
+	var srvURL string
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if hits >= 2 {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, "boom")
+			return
+		}
+		fmt.Fprintf(w, `{"next":%q,"results":[{"n":1}]}`, srvURL+"/?p=2")
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+
+	s, err := newHTTP(&cfg.Source{
+		Type: "http",
+		URL:  srv.URL + "/",
+		Root: "results",
+		Paginate: &cfg.PaginateConfig{
+			Strategy:    "link",
+			NextPath:    "next",
+			MaxPages:    5,
+			OnPageError: "skip",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("skip mode should swallow the mid-walk 500; got err %v", err)
+	}
+	items, ok := got.([]any)
+	if !ok || len(items) != 1 {
+		t.Errorf("want [page1 item] after skip, got %v", got)
+	}
+}
+
+// TestHTTPPaginateValidatorRejectsMissingStrategy ensures Validate
+// catches obviously broken paginate blocks at config-load time — the
+// user shouldn't have to hit an ambiguous fetch error to learn they
+// forgot to set strategy.
+func TestHTTPPaginateValidatorRejectsMissingStrategy(t *testing.T) {
+	s := &cfg.Source{
+		Type: "http", URL: "https://x",
+		Paginate: &cfg.PaginateConfig{NextPath: "next"},
+	}
+	err := s.Validate("data.sources.x")
+	if err == nil || !strings.Contains(err.Error(), "strategy") {
+		t.Fatalf("want strategy-required error, got %v", err)
+	}
+}
+
+// TestHTTPPaginateValidatorRejectsFollowCombination — paginate walks
+// a finite N-page snapshot; follow is an open-ended stream. Combining
+// them is nonsense, so the validator says no.
+func TestHTTPPaginateValidatorRejectsFollowCombination(t *testing.T) {
+	s := &cfg.Source{
+		Type: "http", URL: "https://x", Follow: true,
+		Paginate: &cfg.PaginateConfig{Strategy: "link", NextPath: "next"},
+	}
+	err := s.Validate("data.sources.x")
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("want mutex error, got %v", err)
 	}
 }
