@@ -425,8 +425,19 @@ screens:
   <name>:
     title: <string>            # may contain ${selection} when pushed
     layout: <Node>
-    on_enter:                  # optional — enter on Source pushes Push
-      - {source: <component>, push: <screen-name>}
+    on_enter:                  # optional — a keypress on Source pushes Push
+      - source: <component>    # list or table
+        push:   <screen-name>  # destination screen name
+        key:    <string>       # optional — key that triggers the push.
+                               # Empty (or omitted) = Enter. Any tea.KeyMsg
+                               # string works: "d", "l", "ctrl+r", etc.
+                               # Multiple bindings on the same source are
+                               # allowed if their (source, key) pairs differ.
+        label:  <string>       # optional — custom help-strip label.
+                               # Defaults to "open".
+        bind:                  # optional — templated params forwarded to
+                               # the pushed screen's parameterized sources.
+          <param>: ${selection.*}
     actions:                   # optional — bind a key to a subprocess
                                # (kubectl exec, $EDITOR, open, ...) via pkg/runner
       - key:         <string>  # dispatch key (avoid q/t/?/tab/esc/enter/r//j/k)
@@ -498,6 +509,7 @@ initial: <screen-name>         # required when `screens:` is set
 | `examples/layout.yaml` | Nested layouts, mixed flex weights |
 | `examples/themes.yaml` | Built-in theme picker reference |
 | `examples/multi.yaml` | Multi-screen drilldown (Regions → Cities → Detail) with breadcrumbing and `${selection}` substitution |
+| `examples/on_key_push.yaml` | `on_enter` with `key:` — GitHub users list where Enter pushes to repos and `s` pushes to starred, both binding `${selection}` |
 | `examples/http_countries.yaml` | Table backed by restcountries.com REST API; `refresh: 5m` polling; per-column `value:` dot-paths |
 | `examples/http_github.yaml` | Multi-screen drilldown over the GitHub API: users → repos (via `/users/${selection}/repos`) → repo inspector (via `/repos/${selection.Repo}`). Shows URL templating from list and table selections |
 | `examples/http_github_auth.yaml` | Authenticated GitHub: `/user/starred` → repo inspector. Uses `${env.GITHUB_TOKEN}` in the Authorization header — token stays out of YAML |

@@ -1,0 +1,109 @@
+# on_key_push.yaml — key-bound screen pushes (feature D).
+#
+# `on_enter:` used to fire only on Enter. Now each binding can declare a
+# `key:` so any key pushes a screen. Enter still works — leave `key:`
+# empty (or omit it) for the historical behavior. Add extra bindings on
+# the same source with different keys to expose parallel drilldowns.
+#
+# kubectl-shape UX pattern this enables:
+#
+#   Enter → open detail (default)
+#   d     → describe
+#   l     → logs
+#   e     → edit (via action, not push — see other examples)
+#
+# This demo uses the same GitHub users → repo drilldown as the vanilla
+# http example but exposes TWO push targets on the same list:
+#
+#   Enter → repo table (all this user's public repos)
+#   s     → starred (what THIS user has starred)
+#
+# Both destinations bind `${selection}` = the focused login into their
+# parameterized source, so the same list feeds two different views.
+app:
+  title: GitHub (key pushes)
+  theme: nord
+
+data:
+  sources:
+    users:
+      type: http
+      url: https://api.github.com/users?per_page=30
+      refresh: 10m
+      timeout: 15s
+
+    repos_by_user:
+      type: http
+      parameters:
+        login: {type: string, required: true, description: GitHub login}
+      url:     https://api.github.com/users/${params.login}/repos?per_page=30&sort=updated
+      refresh: 10m
+      timeout: 15s
+
+    starred_by_user:
+      type: http
+      parameters:
+        login: {type: string, required: true, description: GitHub login}
+      url:     https://api.github.com/users/${params.login}/starred?per_page=30
+      refresh: 10m
+      timeout: 15s
+
+tui:
+  components:
+    users_list:
+      type: list
+      title: Users
+      filterable: true
+      source: users
+      item: login
+
+    repos_table:
+      type: table
+      title: ${selection} — repos
+      filterable: true
+      source: repos_by_user
+      initial_sort: {column: Stars, desc: true}
+      columns:
+        - {title: Name,     width: 30, sortable: true,                       value: name}
+        - {title: Language, width: 14, sortable: true,                       value: language}
+        - {title: Stars,    width: 8,  sortable: true, sort: number, align: right, value: stargazers_count}
+        - {title: Updated,  width: 22, sortable: true,                       value: updated_at}
+
+    starred_table:
+      type: table
+      title: ${selection} — starred
+      filterable: true
+      source: starred_by_user
+      initial_sort: {column: Stars, desc: true}
+      columns:
+        - {title: Repo,     width: 40, sortable: true,                       value: full_name}
+        - {title: Language, width: 14, sortable: true,                       value: language}
+        - {title: Stars,    width: 8,  sortable: true, sort: number, align: right, value: stargazers_count}
+
+  screens:
+    users:
+      title: Users
+      layout: {component: users_list}
+      on_enter:
+        # Enter → user's own repos (default trigger, no `key:` needed)
+        - source: users_list
+          push:   repos
+          bind:
+            login: ${selection}
+        # `s` → what the user has starred. Custom label shows in the help strip.
+        - source: users_list
+          push:   starred
+          key:    s
+          label:  starred
+          bind:
+            login: ${selection}
+
+    repos:
+      title: ${selection} — repos
+      layout: {component: repos_table}
+
+    starred:
+      title: ${selection} — starred
+      layout: {component: starred_table}
+
+  initial: users

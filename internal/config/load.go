@@ -117,6 +117,10 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("tui.screens.%s: components.%s referenced %d times — each component may be placed only once per screen", name, cname, n)
 			}
 		}
+		// Track (source, key) → binding index so a screen can't wire two
+		// different pushes onto the same keystroke — the first-match
+		// behavior of the dispatch loop would silently pick one.
+		seenKeys := map[string]int{}
 		for i, b := range s.OnEnter {
 			if b.Source == "" || b.Push == "" {
 				return fmt.Errorf("tui.screens.%s.on_enter[%d]: source and push are required", name, i)
@@ -131,6 +135,16 @@ func (c *Config) Validate() error {
 			if src.Type != "list" && src.Type != "table" {
 				return fmt.Errorf("tui.screens.%s.on_enter[%d]: source %q must be a list or table (got %s)", name, i, b.Source, src.Type)
 			}
+			// Empty Key means Enter — the historical default.
+			trigger := b.Key
+			if trigger == "" {
+				trigger = "enter"
+			}
+			dedupKey := b.Source + "\x00" + trigger
+			if prev, ok := seenKeys[dedupKey]; ok {
+				return fmt.Errorf("tui.screens.%s.on_enter[%d]: source %q + key %q already bound at on_enter[%d]", name, i, b.Source, trigger, prev)
+			}
+			seenKeys[dedupKey] = i
 		}
 		if err := validateActions(s.Actions, refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name)); err != nil {
 			return err

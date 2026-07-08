@@ -345,6 +345,18 @@ type OnEnterBinding struct {
 	Source string            `yaml:"source"`
 	Push   string            `yaml:"push"`
 	Bind   map[string]string `yaml:"bind,omitempty"`
+	// Key overrides the default trigger. Empty (or omitted) means the
+	// binding fires on Enter — the historical behavior. Any other value
+	// is the tea.KeyMsg.String() name of the key that should push
+	// instead (e.g. `key: d` for describe, `key: l` for logs, `key:
+	// ctrl+r` for a resource reload push). Multiple bindings on the
+	// same source are allowed as long as their (source, key) pairs are
+	// distinct.
+	Key string `yaml:"key,omitempty"`
+	// Label is an optional custom label for the help strip. When empty,
+	// the strip shows the key + "open". Handy for kubectl-shape UIs
+	// that want "d → describe", "l → logs", etc.
+	Label string `yaml:"label,omitempty"`
 }
 
 // Node is a tagged-union layout node. Exactly one of VStack / HStack /

@@ -100,7 +100,10 @@ type Model struct {
 	tree     *build.Tree
 	focus    int                            // index into tree.All(); -1 means no component focused
 	multi    *Multi                         // nil for single-screen mode
-	bindings map[string]*cfg.OnEnterBinding // component name -> the full on_enter binding (target screen + bind: map for params)
+	// bindings holds every on_enter push for this screen. A single source
+	// may declare multiple bindings distinguished by Key (empty Key means
+	// Enter), so lookups scan linearly per keystroke.
+	bindings []cfg.OnEnterBinding
 	actions  []cfg.Action                   // per-key subprocess bindings for this screen
 
 	// Data-source state. sources is keyed by source name; sourceUsers
@@ -193,11 +196,7 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, entries map[str
 		m.focus = 0
 	}
 	if multi != nil {
-		m.bindings = map[string]*cfg.OnEnterBinding{}
-		for i := range s.OnEnter {
-			b := s.OnEnter[i] // take address of a stable copy, not the loop var
-			m.bindings[b.Source] = &b
-		}
+		m.bindings = append([]cfg.OnEnterBinding(nil), s.OnEnter...)
 	}
 	m.actions = append([]cfg.Action(nil), s.Actions...)
 
@@ -393,10 +392,20 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 			m.cycleFocus(-1)
 			return m, nil
 		case "enter":
-			if cmd, handled := m.tryPush(); handled {
+			if cmd, handled := m.tryPush("enter"); handled {
 				return m, cmd
 			}
 		default:
+			// on_enter bindings with a custom `key:` fire before actions
+			// so a screen author can bind `d → describe` (push) without
+			// colliding with an action on the same key (which would also
+			// have matched). Uniqueness is enforced at validate time on
+			// the push side; collision with an action is still possible
+			// and picks push-first (deliberate — pushes are lower risk
+			// than firing a subprocess).
+			if cmd, handled := m.tryPush(k.String()); handled {
+				return m, cmd
+			}
 			if cmd, handled := m.tryAction(k); handled {
 				return m, cmd
 			}
@@ -576,10 +585,19 @@ func (m *Model) Help() []key.Binding {
 	}
 	name := m.tree.Order[m.focus]
 	if m.multi != nil {
-		if _, ok := m.bindings[name]; ok {
-			out = append(out,
-				key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "open")),
-			)
+		for _, b := range m.bindings {
+			if b.Source != name {
+				continue
+			}
+			trigger, glyph := "enter", "⏎"
+			if b.Key != "" {
+				trigger, glyph = b.Key, b.Key
+			}
+			label := b.Label
+			if label == "" {
+				label = "open"
+			}
+			out = append(out, key.NewBinding(key.WithKeys(trigger), key.WithHelp(glyph, label)))
 		}
 	}
 	for _, a := range m.actions {
@@ -907,10 +925,12 @@ func wrapMessage(s string, maxWidth, maxLines int) string {
 	return strings.Join(lines, "\n")
 }
 
-// tryPush handles enter when the focused component has an on_enter binding.
-// Returns (cmd, true) when handled; (nil, false) to fall through to the
-// normal forward-to-component path.
-func (m *Model) tryPush() (tea.Cmd, bool) {
+// tryPush handles a key that the focused component has an on_enter
+// binding for. `press` is the key string as produced by tea.KeyMsg.String()
+// — "enter" for the Enter key, "d" / "l" / "ctrl+r" / etc. for arbitrary
+// bindings. Returns (cmd, true) when a matching binding fires; (nil, false)
+// to fall through to actions or normal component forwarding.
+func (m *Model) tryPush(press string) (tea.Cmd, bool) {
 	if m.multi == nil || m.focus < 0 {
 		return nil, false
 	}
@@ -919,8 +939,22 @@ func (m *Model) tryPush() (tea.Cmd, bool) {
 		return nil, false
 	}
 	name := m.tree.Order[m.focus]
-	binding, ok := m.bindings[name]
-	if !ok {
+	var binding *cfg.OnEnterBinding
+	for i := range m.bindings {
+		b := &m.bindings[i]
+		if b.Source != name {
+			continue
+		}
+		trigger := b.Key
+		if trigger == "" {
+			trigger = "enter"
+		}
+		if trigger == press {
+			binding = b
+			break
+		}
+	}
+	if binding == nil {
 		return nil, false
 	}
 	sel := selectionFrom(cur)
