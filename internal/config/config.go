@@ -511,6 +511,47 @@ type Component struct {
 	// expands every node whose depth is < InitialDepth: 0 = root only,
 	// 1 = root expanded, 2 = root + first level, …
 	InitialDepth int `yaml:"initial_depth,omitempty"`
+
+	// OnCursor makes this component reactive to another component's
+	// cursor. The driver's RowFocusedMsg triggers a re-bind of the
+	// target's source parameters via the Bind map (templates evaluated
+	// against the driver's current focused row via ${cursor.*}), then
+	// a re-fetch through the source's param cache. Used to build
+	// "table on top, detail below" interfaces where scrolling the top
+	// pane refreshes the bottom.
+	OnCursor *OnCursor `yaml:"on_cursor,omitempty"`
+}
+
+// OnCursor wires a component to another component's row-focus state.
+// The driver must be a table (list drivers aren't implemented yet —
+// list.Selected has less-structured selection semantics; when tuilib
+// grows a similar ListFocusedMsg we can lift the restriction). The
+// pattern:
+//
+//	inspector:
+//	  type: inspector
+//	  source: pod_detail
+//	  auto: true
+//	  on_cursor:
+//	    source: pods_table            # driver component name
+//	    bind:
+//	      name:      ${cursor.Name}   # driver row cells feed the target
+//	      namespace: ${cursor.Namespace} # source's params
+//
+// Bind templates can reference ${cursor.*} (the driver's current row)
+// alongside ${env.*} — same substitution as everywhere else, minus
+// selection/prompt which don't apply mid-screen.
+type OnCursor struct {
+	// Source names the driver component in the same screen's layout.
+	Source string `yaml:"source"`
+	// Bind maps destination-source parameter names to templates
+	// evaluated against the driver's current cursor. Values support
+	// ${cursor.*} and ${env.*}. Every declared param in the target
+	// source's Parameters map should have an entry; the fetcher
+	// substitutes an empty string for unresolved cells so the URL
+	// stays well-formed even when the cursor lands on a row missing
+	// a referenced column.
+	Bind map[string]string `yaml:"bind,omitempty"`
 }
 
 // Sort declares an initial table sort. Column may be a column title
@@ -550,6 +591,14 @@ type Column struct {
 	// no rule matches the cell is rendered plain. See ColorRule for the
 	// `when:` syntax.
 	ColorRules []ColorRule `yaml:"color_rules,omitempty"`
+	// Hidden opts the column out of rendering while keeping it in the
+	// row payload — it still participates in filter matching AND still
+	// shows up in Selected() / RowFocusedMsg cells. This is the
+	// "identity column" pattern: bind ${cursor.Namespace} against a
+	// hidden Namespace column so a drilldown gets the value without
+	// giving up screen real estate. Passed through to tuilib's
+	// table.Column.Hidden (shipped in v0.16.0).
+	Hidden bool `yaml:"hidden,omitempty"`
 }
 
 // ColorRule pairs a `when:` matcher with a `color:`. Recognised `when:`

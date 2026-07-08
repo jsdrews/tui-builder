@@ -360,6 +360,15 @@ components:
         sortable: <bool>
         sort: string | number | si
         value: <dot-path>      # when source: is set — pluck this cell from each item
+        hidden: <bool>         # optional — omit from render + width computation.
+                               # Row payload still carries the cell so
+                               # RowFocusedMsg.Cells / SelectedRow expose it —
+                               # `${cursor.<Title>}` and `${selection.<Title>}`
+                               # still resolve. Filter matching still hits it
+                               # (both bare terms and `key:value` scopes).
+                               # Use for identity columns you need for
+                               # drilldown/reactive binding but don't want
+                               # to consume screen real estate.
         color_rules:           # optional — data-driven cell coloring; rules eval in order,
                                # first match wraps the cell with ansi.CellColor.
                                # `when:` syntax:
@@ -422,6 +431,19 @@ components:
                                    # Children; arrays get [0], [1] labels; scalars
                                    # render naturally. Mutually exclusive with fields:.
     initial_depth: <int>           # shared with tree
+
+    # ── Reactive binding (any source-bound component) ─────────────────
+    # Wire a table's cursor state to another component's source. Every
+    # RowFocusedMsg from the driver rebinds the target's parameterized
+    # source via the Bind map and refetches through a params-aware
+    # LRU (feature G's ParamCache). Enables the "kubectl describe on
+    # hover" pattern without pushing a new screen.
+    on_cursor:
+      source: <driver-component>   # a table in the same screen's layout
+      bind:                        # target source's params <- driver row cells
+        <param>: <template>        # ${cursor.*} + ${env.*} substituted;
+                                   # ${selection.*} passes through literal
+                                   # (this fires mid-screen, not at push time).
 
 # Single-screen mode:
 screen:
@@ -499,6 +521,17 @@ initial: <screen-name>         # required when `screens:` is set
 #                             table source: first cell
 #   ${selection.N}          — table source: 1-based cell index
 #   ${selection.COLNAME}    — table source: cell by column-title prefix
+#   ${cursor}               — LIVE: driver component's currently focused
+#                             row's first cell. Refetches when the cursor
+#                             moves. Only meaningful on components that
+#                             declare `on_cursor:` (the driver names
+#                             which table's cursor to follow).
+#   ${cursor.N}             — driver row cell by 1-based index
+#   ${cursor.COLNAME}       — driver row cell by column title (case-
+#                             insensitive exact match). Unresolved
+#                             lookups resolve to "" (not the literal
+#                             token) since cursor moves are high-
+#                             frequency and a broken URL would 404 storm.
 #   ${env.NAME}             — os.Getenv("NAME") (empty when unset).
 #                             Use for tokens / API keys / boot-time params
 #                             (app.prompts values are written to env, so
@@ -509,7 +542,8 @@ initial: <screen-name>         # required when `screens:` is set
 #
 # Selection tokens substitute at push time; env tokens substitute at push
 # time too (boot params already in env by that point); prompt tokens
-# substitute at action-fire time.
+# substitute at action-fire time; cursor tokens substitute at every
+# RowFocusedMsg from the declared driver — the reactive path.
 
 # Node is one of:
 #   {vstack: [<Item>, ...]}
@@ -536,6 +570,7 @@ initial: <screen-name>         # required when `screens:` is set
 | `examples/tree_source.yaml` | Data-driven tree: a `type: file` source of people bucketed by `group_by: team`; cursor + expand state survive `refresh: 5s` polling |
 | `examples/inspector.yaml` | Two-column label/value record viewer, nested groups |
 | `examples/inspector_auto.yaml` | `auto: true` — inspector derives fields from any JSON response (GitHub repo record). Nested maps/arrays expand instead of stringifying |
+| `examples/on_cursor.yaml` | On-hover detail: GitHub repos table on top, `on_cursor:`-bound inspector below. Scrolling the table refetches the detail pane via `${cursor.*}` tokens + params-aware cache. Uses a hidden `Owner` column for identity binding |
 | `examples/table_wide.yaml` | Wide table demonstrating horizontal scroll (`←`/`→`, `shift+←`/`shift+→`, `0`/`$`) |
 | `examples/layout.yaml` | Nested layouts, mixed flex weights |
 | `examples/themes.yaml` | Built-in theme picker reference |

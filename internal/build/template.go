@@ -267,36 +267,59 @@ func substituteCell(v any, sel Selection) any {
 	return v
 }
 
-// tokenRe matches three token families:
+// tokenRe matches four token families:
 //
-//	${selection}            — parent row's primary string
-//	${selection.SUFFIX}     — table cell by 1-based index or column-title prefix
+//	${selection}            — frozen at push time: the parent screen's
+//	                          focused row when the push fired
+//	${selection.SUFFIX}     — same, indexed by 1-based cell or column title
+//	${cursor}               — LIVE: the current focused row on the driving
+//	                          component. Refetches when the cursor moves.
+//	${cursor.SUFFIX}        — same, indexed like selection
 //	${env.NAME}             — os.Getenv("NAME") (empty when unset)
 //	${prompt.KEY}           — value collected from a form prompt at action-fire time
 //
 // The first capture group is the namespace; the second is the optional suffix.
-var tokenRe = regexp.MustCompile(`\$\{(selection|env|prompt)(?:\.([A-Za-z0-9_]+))?\}`)
+var tokenRe = regexp.MustCompile(`\$\{(selection|cursor|env|prompt)(?:\.([A-Za-z0-9_]+))?\}`)
 
 func substitute(s string, sel Selection) string {
 	return substituteAll(s, sel, nil)
 }
 
 // substituteAll is the general form — sel for ${selection.*}, prompts
-// for ${prompt.*}. Either map can be nil.
+// for ${prompt.*}. Either map can be nil. Cursor is unresolved via
+// this path (push-time substitution freezes selection; cursor stays
+// live for its own resolver).
 func substituteAll(s string, sel Selection, prompts map[string]string) string {
 	if s == "" || !strings.Contains(s, "${") {
 		return s
 	}
 	return tokenRe.ReplaceAllStringFunc(s, func(match string) string {
 		groups := tokenRe.FindStringSubmatch(match)
-		return resolveToken(groups[1], groups[2], sel, prompts)
+		return resolveToken(groups[1], groups[2], sel, Selection{}, prompts)
 	})
 }
 
-func resolveToken(namespace, key string, sel Selection, prompts map[string]string) string {
+// SubstituteCursor resolves both ${cursor.*} (against the live cursor
+// Selection) AND every other namespace (env, prompt-less) so a cursor
+// bind template like `${cursor.Name}-${env.CLUSTER}` composes cleanly.
+// Selection tokens pass through as literals — this is the runtime
+// path, not the push-time one, and no push-site sel is in scope.
+func SubstituteCursor(s string, cursor Selection) string {
+	if s == "" || !strings.Contains(s, "${") {
+		return s
+	}
+	return tokenRe.ReplaceAllStringFunc(s, func(match string) string {
+		groups := tokenRe.FindStringSubmatch(match)
+		return resolveToken(groups[1], groups[2], Selection{}, cursor, nil)
+	})
+}
+
+func resolveToken(namespace, key string, sel, cursor Selection, prompts map[string]string) string {
 	switch namespace {
 	case "selection":
 		return resolveSelection(key, sel)
+	case "cursor":
+		return resolveCursor(key, cursor)
 	case "env":
 		return os.Getenv(key)
 	case "prompt":
@@ -304,6 +327,34 @@ func resolveToken(namespace, key string, sel Selection, prompts map[string]strin
 			return ""
 		}
 		return prompts[key]
+	}
+	return ""
+}
+
+// resolveCursor mirrors resolveSelection but reports unresolved lookups
+// as "" instead of passing the literal ${cursor.X} through. This path
+// fires on every cursor move; a stale template surface in a URL would
+// generate 404 storms. Empty string keeps the request well-formed so
+// the destination component just shows "loading"/nothing until the
+// cursor lands on a row that has the referenced column.
+func resolveCursor(key string, cursor Selection) string {
+	if key == "" {
+		return cursor.String
+	}
+	if n, err := strconv.Atoi(key); err == nil {
+		idx := n - 1
+		if idx >= 0 && idx < len(cursor.Cells) {
+			return cursor.Cells[idx]
+		}
+		return ""
+	}
+	for i, col := range cursor.Columns {
+		if strings.EqualFold(col, key) {
+			if i < len(cursor.Cells) {
+				return cursor.Cells[i]
+			}
+			return ""
+		}
 	}
 	return ""
 }

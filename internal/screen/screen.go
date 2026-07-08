@@ -27,6 +27,7 @@ import (
 	"github.com/jsdrews/tuilib/pkg/layout"
 	"github.com/jsdrews/tuilib/pkg/runner"
 	tscreen "github.com/jsdrews/tuilib/pkg/screen"
+	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	"github.com/jsdrews/tui-builder/internal/build"
@@ -112,6 +113,28 @@ type Model struct {
 	sources     map[string]*sourceEntry
 	sourceUsers map[string][]string // source name -> component names
 	started     bool                // OnEnter has fired the initial fetch wave
+
+	// cursorBindings lists every component whose `on_cursor:` block ties
+	// its source refetch to another table's focused row. Scanned when a
+	// RowFocusedMsg arrives from a driver.
+	cursorBindings []cursorBinding
+	// cursorState tracks the latest Selection emitted by each driver
+	// table — indexed by driver component name. Populated by tagged
+	// RowFocusedMsgs. Used by lifecycle events (screen re-enter) to
+	// re-drive dependent fetches without needing another cursor
+	// movement to prime the pump.
+	cursorState map[string]build.Selection
+	// cursorCaches wraps each cursor-driven source's per-params LRU.
+	// Indexed by target source name (which is unique per binding since
+	// the same source shouldn't be cursor-bound twice). Lookups here
+	// dedup rapid cursor sweeps that would otherwise hammer the
+	// upstream — the caching layer built in feature G, reused.
+	cursorCaches map[string]*ds.ParamCache
+	// cursorSourceDefs holds the *cfg.Source template for each cursor-
+	// bound target. Runtime BindParams clones this per fetch so we can
+	// keep swapping in different param tuples without disturbing the
+	// canonical config.
+	cursorSourceDefs map[string]*cfg.Source
 
 	// Confirm-modal state. When confirmModal is non-nil it overlays the
 	// body via ZStack and captures all keys until ConfirmedMsg /
@@ -225,6 +248,9 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, entries map[str
 		}
 		m.sourceUsers[boundName] = append(m.sourceUsers[boundName], name)
 	}
+	if err := m.initCursor(components, entries); err != nil {
+		return nil, err
+	}
 	return m, nil
 }
 
@@ -251,6 +277,14 @@ func (m *Model) OnEnter(any) tea.Cmd {
 	m.started = true
 	var cmds []tea.Cmd
 	for name, entry := range m.sources {
+		// Cursor-driven sources fetch only when their driver has a
+		// focused row — kicking a fetch on OnEnter would try to hit
+		// the upstream with empty template substitutions. Skip; the
+		// first RowFocusedMsg from the driver (which tuilib fires as
+		// part of initial view) primes the pump.
+		if _, ok := m.cursorCaches[name]; ok {
+			continue
+		}
 		// Streaming sources take a different path: subscribe once and
 		// pump events into the logview as they arrive. Fetch still
 		// fires alongside so the bound logview can render an empty
@@ -432,7 +466,7 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 			}
 		}
 		if cur := m.current(); cur != nil {
-			return m, updateComponent(cur, msg)
+			return m, tagCursorFocused(updateComponent(cur, msg), m.tree.Order[m.focus])
 		}
 		return m, nil
 	}
@@ -444,6 +478,10 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		return m, m.startFetch(x.source)
 	case streamMsg:
 		return m, m.handleStream(x)
+	case taggedRowFocusedMsg:
+		return m, m.handleRowFocused(x)
+	case cursorFetchMsg:
+		return m, m.applyCursorFetch(x)
 	case runner.Result:
 		captured := ""
 		if m.inFlightStderr != nil {
@@ -456,9 +494,9 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 	}
 
 	var cmds []tea.Cmd
-	for _, c := range m.tree.All() {
+	for i, c := range m.tree.All() {
 		if cmd := updateComponent(c, msg); cmd != nil {
-			cmds = append(cmds, cmd)
+			cmds = append(cmds, tagCursorFocused(cmd, m.tree.Order[i]))
 		}
 	}
 	return m, tea.Batch(cmds...)
@@ -1067,6 +1105,174 @@ func updateComponent(c *build.Component, msg tea.Msg) tea.Cmd {
 		m, cmd := c.Textview.Update(msg)
 		*c.Textview = m
 		return cmd
+	}
+	return nil
+}
+
+// cursorBinding is the resolved form of a component's `on_cursor:`
+// declaration. Compared against every driver's tagged RowFocusedMsg
+// to decide which dependent source should refetch.
+type cursorBinding struct {
+	driver string            // driver component name (a table)
+	target string            // dependent component name
+	source string            // dependent source's registry name
+	bind   map[string]string // param name -> template ("${cursor.Name}", etc.)
+}
+
+// taggedRowFocusedMsg attaches a driver component name to a
+// RowFocusedMsg so screen.Update can route it. tuilib's message
+// doesn't carry the emitting component's identity — the fan-out
+// path wraps each component's returned Cmd to add the tag.
+type taggedRowFocusedMsg struct {
+	driver string
+	msg    table.RowFocusedMsg
+}
+
+// cursorFetchMsg carries a cursor-driven fetch result back to
+// Update. Distinct from the polled fetchMsg because it applies to a
+// specific target (one component), not all sourceUsers of the source.
+type cursorFetchMsg struct {
+	target string
+	data   any
+	err    error
+}
+
+// tagCursorFocused wraps a component's returned Cmd so any
+// RowFocusedMsg the cmd produces is tagged with the emitting
+// component's name. Non-matching messages pass through untouched.
+// Called from the broadcast fan-out — every component's Update
+// return value goes through this — so we never lose track of which
+// table's cursor moved.
+func tagCursorFocused(cmd tea.Cmd, name string) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg := cmd()
+		if rfm, ok := msg.(table.RowFocusedMsg); ok {
+			return taggedRowFocusedMsg{driver: name, msg: rfm}
+		}
+		return msg
+	}
+}
+
+// initCursor collects every OnCursor binding on this screen and
+// prepares its per-source ParamCache. Called from New / NewMulti
+// after the tree + source registry are set up. Uses the same
+// caching primitive built for join lookups (feature G) so cursor
+// sweeps don't hammer parameterized sources.
+func (m *Model) initCursor(components map[string]*cfg.Component, sources map[string]*cfg.Source) error {
+	m.cursorState = map[string]build.Selection{}
+	m.cursorCaches = map[string]*ds.ParamCache{}
+	m.cursorSourceDefs = map[string]*cfg.Source{}
+	for _, name := range m.tree.Order {
+		comp := components[name]
+		if comp == nil || comp.OnCursor == nil {
+			continue
+		}
+		srcName := comp.Source
+		srcDef := sources[srcName]
+		if srcDef == nil {
+			return fmt.Errorf("on_cursor target %q references undefined source %q", name, srcName)
+		}
+		spec := srcDef.Cache
+		if spec == nil {
+			// Match the join operator's lookupCacheDefaults so
+			// cursor-driven and join-lookup call sites converge on the
+			// same "reasonable default" story.
+			spec = &cfg.CacheSpec{TTL: "60s", Size: ds.ParamCacheDefaultSize}
+		}
+		cache, err := ds.NewParamCache(spec)
+		if err != nil {
+			return fmt.Errorf("on_cursor cache for %q: %w", name, err)
+		}
+		m.cursorCaches[srcName] = cache
+		m.cursorSourceDefs[srcName] = srcDef
+		m.cursorBindings = append(m.cursorBindings, cursorBinding{
+			driver: comp.OnCursor.Source,
+			target: name,
+			source: srcName,
+			bind:   comp.OnCursor.Bind,
+		})
+	}
+	return nil
+}
+
+// handleRowFocused updates cursor state for the emitting driver and
+// dispatches a cursor-driven fetch on every binding that watches it.
+// Empty focus (transition to no visible row) clears the state so
+// downstream templates resolve to "" instead of stale values.
+func (m *Model) handleRowFocused(t taggedRowFocusedMsg) tea.Cmd {
+	if t.msg.Empty {
+		m.cursorState[t.driver] = build.Selection{}
+	} else {
+		first := ""
+		if len(t.msg.Cells) > 0 {
+			first = t.msg.Cells[0]
+		}
+		m.cursorState[t.driver] = build.Selection{
+			String:  first,
+			Cells:   append([]string(nil), t.msg.Cells...),
+			Columns: append([]string(nil), t.msg.Columns...),
+		}
+	}
+	var cmds []tea.Cmd
+	for _, b := range m.cursorBindings {
+		if b.driver != t.driver {
+			continue
+		}
+		if cmd := m.startCursorFetch(b); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+// startCursorFetch computes the current param tuple by substituting
+// the driver's cursor Selection into the binding's Bind templates,
+// then consults the shared ParamCache. Hit → apply cached value to
+// the target immediately (no goroutine hop). Miss → return a Cmd
+// that clones the source cfg, binds params, builds a fresh leaf,
+// fetches, stores. Cache single-flight collapses rapid re-triggers.
+func (m *Model) startCursorFetch(b cursorBinding) tea.Cmd {
+	sel := m.cursorState[b.driver]
+	params := make(map[string]string, len(b.bind))
+	for k, tmpl := range b.bind {
+		params[k] = build.SubstituteCursor(tmpl, sel)
+	}
+	cache := m.cursorCaches[b.source]
+	srcDef := m.cursorSourceDefs[b.source]
+	target := b.target
+	return func() tea.Msg {
+		data, err := cache.FetchOrLoad(params, func() (any, error) {
+			cloned := srcDef.Clone()
+			if err := cloned.BindParams(params); err != nil {
+				return nil, fmt.Errorf("bind: %w", err)
+			}
+			src, err := ds.BuildLeaf(cloned, nil)
+			if err != nil {
+				return nil, fmt.Errorf("build: %w", err)
+			}
+			return src.Fetch(context.Background())
+		})
+		return cursorFetchMsg{target: target, data: data, err: err}
+	}
+}
+
+// applyCursorFetch routes a cursor-driven fetch result to its single
+// target component. Errors surface in the statusbar via app.Error;
+// we don't pop an alert modal here because cursor moves are
+// high-frequency and a modal per failed hover would be miserable.
+func (m *Model) applyCursorFetch(x cursorFetchMsg) tea.Cmd {
+	c := m.tree.Components[x.target]
+	if c == nil {
+		return nil
+	}
+	if x.err != nil {
+		return app.Error(fmt.Sprintf("cursor fetch %s: %v", x.target, x.err))
+	}
+	if x.data != nil {
+		build.ApplyData(c, x.data, m.th)
 	}
 	return nil
 }

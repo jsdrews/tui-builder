@@ -237,6 +237,7 @@ func buildTable(c *cfg.Component, th theme.Theme) table.Model {
 			Align:    parseAlign(col.Align),
 			Sortable: col.Sortable,
 			Less:     parseLess(col.Sort),
+			Hidden:   col.Hidden,
 		}
 	}
 	if c.Source == "" {

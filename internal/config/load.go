@@ -94,6 +94,9 @@ func (c *Config) Validate() error {
 		if err := validateActions(c.TUI.Screen.Actions, refs, c.TUI.Components, "tui.screen"); err != nil {
 			return err
 		}
+		if err := validateOnCursor(refs, c.TUI.Components, "tui.screen"); err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -148,6 +151,47 @@ func (c *Config) Validate() error {
 		}
 		if err := validateActions(s.Actions, refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name)); err != nil {
 			return err
+		}
+		if err := validateOnCursor(refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateOnCursor checks every layout-participating component's
+// OnCursor binding. Rules:
+//   - Source names another component in the same screen's layout.
+//   - Driver must be a table (list drivers pending — see OnCursor doc).
+//   - Target component must itself be source-bound: the bind: block's
+//     job is to feed the target's source's parameters, and a
+//     component with no source has nowhere for those params to land.
+//   - Target's source must declare `parameters:` covering every bind
+//     key; extraneous bind entries error so users notice typos.
+func validateOnCursor(refs map[string]int, components map[string]*Component, path string) error {
+	for name, comp := range components {
+		if comp == nil || comp.OnCursor == nil {
+			continue
+		}
+		if refs[name] == 0 {
+			// Component defined but not in this screen's layout —
+			// on_cursor doesn't apply here. Skip; each layout-relevant
+			// screen validates its own participants.
+			continue
+		}
+		oc := comp.OnCursor
+		if oc.Source == "" {
+			return fmt.Errorf("%s.components.%s.on_cursor: `source:` is required", path, name)
+		}
+		if refs[oc.Source] == 0 {
+			return fmt.Errorf("%s.components.%s.on_cursor: source %q not used in this screen's layout", path, name, oc.Source)
+		}
+		driver := components[oc.Source]
+		if driver.Type != "table" {
+			return fmt.Errorf("%s.components.%s.on_cursor: source %q must be a table (got %s)", path, name, oc.Source, driver.Type)
+		}
+		if comp.Source == "" {
+			return fmt.Errorf("%s.components.%s.on_cursor: target component has no `source:` — nothing to rebind on cursor moves", path, name)
 		}
 	}
 	return nil
