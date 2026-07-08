@@ -337,6 +337,17 @@ func resolveToken(namespace, key string, sel, cursor Selection, prompts map[stri
 // generate 404 storms. Empty string keeps the request well-formed so
 // the destination component just shows "loading"/nothing until the
 // cursor lands on a row that has the referenced column.
+//
+// Extra keys — meaningful mainly for tree drivers:
+//
+//   - `label` — alias for bare ${cursor} (the focused node's label).
+//   - `depth` — number of path elements (0 for root, 1 for its
+//     children, ...). Handy for parameterized sources whose URL
+//     depends on tree depth (`/api/v1/nodes/${cursor.1}` at depth 1
+//     vs `/api/v1/nodes/${cursor.1}/subs/${cursor.2}` at depth 2).
+//
+// Numeric ${cursor.N} indexes into Cells uniformly across driver
+// kinds — table row cells, list items, or tree path segments.
 func resolveCursor(key string, cursor Selection) string {
 	if key == "" {
 		return cursor.String
@@ -347,6 +358,12 @@ func resolveCursor(key string, cursor Selection) string {
 			return cursor.Cells[idx]
 		}
 		return ""
+	}
+	switch strings.ToLower(key) {
+	case "label":
+		return cursor.String
+	case "depth":
+		return strconv.Itoa(len(cursor.Cells))
 	}
 	for i, col := range cursor.Columns {
 		if strings.EqualFold(col, key) {

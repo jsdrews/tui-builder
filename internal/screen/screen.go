@@ -26,9 +26,11 @@ import (
 	"github.com/jsdrews/tuilib/pkg/form"
 	"github.com/jsdrews/tuilib/pkg/layout"
 	"github.com/jsdrews/tuilib/pkg/runner"
+	"github.com/jsdrews/tuilib/pkg/list"
 	tscreen "github.com/jsdrews/tuilib/pkg/screen"
 	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/theme"
+	"github.com/jsdrews/tuilib/pkg/tree"
 
 	"github.com/jsdrews/tui-builder/internal/build"
 	cfg "github.com/jsdrews/tui-builder/internal/config"
@@ -478,8 +480,8 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		return m, m.startFetch(x.source)
 	case streamMsg:
 		return m, m.handleStream(x)
-	case taggedRowFocusedMsg:
-		return m, m.handleRowFocused(x)
+	case taggedCursorMsg:
+		return m, m.handleCursorChange(x)
 	case cursorFetchMsg:
 		return m, m.applyCursorFetch(x)
 	case runner.Result:
@@ -1112,13 +1114,16 @@ type cursorBinding struct {
 	bind   map[string]string // param name -> template ("${cursor.Name}", etc.)
 }
 
-// taggedRowFocusedMsg attaches a driver component name to a
-// RowFocusedMsg so screen.Update can route it. tuilib's message
-// doesn't carry the emitting component's identity — the fan-out
-// path wraps each component's returned Cmd to add the tag.
-type taggedRowFocusedMsg struct {
+// taggedCursorMsg attaches a driver component name to a
+// pre-normalized Selection built from whichever tuilib focus-change
+// message the driver emitted (table.RowFocusedMsg,
+// list.SelectedChangedMsg, or tree.SelectedChangedMsg). The fan-out
+// path wraps each component's Cmd, translates the message, and
+// re-emits this so screen.Update can route it uniformly.
+type taggedCursorMsg struct {
 	driver string
-	msg    table.RowFocusedMsg
+	empty  bool
+	sel    build.Selection
 }
 
 // cursorFetchMsg carries a cursor-driven fetch result back to
@@ -1130,20 +1135,69 @@ type cursorFetchMsg struct {
 	err    error
 }
 
-// tagCursorFocused wraps a component's returned Cmd so any
-// RowFocusedMsg the cmd produces is tagged with the emitting
-// component's name. Non-matching messages pass through untouched.
-// Called from the broadcast fan-out — every component's Update
-// return value goes through this — so we never lose track of which
-// table's cursor moved.
+// tagCursorFocused wraps a component's returned Cmd so any tuilib
+// focus-change message the cmd produces is normalised into a
+// taggedCursorMsg carrying the emitting component's name plus a
+// pre-built build.Selection. Non-matching messages pass through
+// untouched. Called from the broadcast fan-out — every component's
+// Update return value goes through this — so we never lose track of
+// which driver's cursor moved. Selection shape per driver kind:
+//
+//   - table.RowFocusedMsg  → String = first cell, Cells = row cells,
+//                            Columns = column titles
+//   - list.SelectedChangedMsg → String = item, Cells = [item],
+//                            Columns = ["item"] (so ${cursor.item}
+//                            reads naturally alongside bare ${cursor})
+//   - tree.SelectedChangedMsg → String = label, Cells = path,
+//                            Columns = nil (numeric ${cursor.N} indexes
+//                            into path; ${cursor.depth} is special-cased
+//                            in the resolver; bare ${cursor} = label)
 func tagCursorFocused(cmd tea.Cmd, name string) tea.Cmd {
 	if cmd == nil {
 		return nil
 	}
 	return func() tea.Msg {
 		msg := cmd()
-		if rfm, ok := msg.(table.RowFocusedMsg); ok {
-			return taggedRowFocusedMsg{driver: name, msg: rfm}
+		switch x := msg.(type) {
+		case table.RowFocusedMsg:
+			if x.Empty {
+				return taggedCursorMsg{driver: name, empty: true}
+			}
+			first := ""
+			if len(x.Cells) > 0 {
+				first = x.Cells[0]
+			}
+			return taggedCursorMsg{
+				driver: name,
+				sel: build.Selection{
+					String:  first,
+					Cells:   append([]string(nil), x.Cells...),
+					Columns: append([]string(nil), x.Columns...),
+				},
+			}
+		case list.SelectedChangedMsg:
+			if x.Empty {
+				return taggedCursorMsg{driver: name, empty: true}
+			}
+			return taggedCursorMsg{
+				driver: name,
+				sel: build.Selection{
+					String:  x.Item,
+					Cells:   []string{x.Item},
+					Columns: []string{"item"},
+				},
+			}
+		case tree.SelectedChangedMsg:
+			if x.Empty {
+				return taggedCursorMsg{driver: name, empty: true}
+			}
+			return taggedCursorMsg{
+				driver: name,
+				sel: build.Selection{
+					String: x.Label,
+					Cells:  append([]string(nil), x.Path...),
+				},
+			}
 		}
 		return msg
 	}
@@ -1191,23 +1245,17 @@ func (m *Model) initCursor(components map[string]*cfg.Component, sources map[str
 	return nil
 }
 
-// handleRowFocused updates cursor state for the emitting driver and
-// dispatches a cursor-driven fetch on every binding that watches it.
-// Empty focus (transition to no visible row) clears the state so
-// downstream templates resolve to "" instead of stale values.
-func (m *Model) handleRowFocused(t taggedRowFocusedMsg) tea.Cmd {
-	if t.msg.Empty {
+// handleCursorChange updates cursor state for the emitting driver
+// and dispatches a cursor-driven fetch on every binding that watches
+// it. Empty focus (transition to no visible row / item / node) clears
+// the state so downstream templates resolve to "" instead of stale
+// values. The Selection is already normalised — tagCursorFocused
+// handles the per-driver-kind translation.
+func (m *Model) handleCursorChange(t taggedCursorMsg) tea.Cmd {
+	if t.empty {
 		m.cursorState[t.driver] = build.Selection{}
 	} else {
-		first := ""
-		if len(t.msg.Cells) > 0 {
-			first = t.msg.Cells[0]
-		}
-		m.cursorState[t.driver] = build.Selection{
-			String:  first,
-			Cells:   append([]string(nil), t.msg.Cells...),
-			Columns: append([]string(nil), t.msg.Columns...),
-		}
+		m.cursorState[t.driver] = t.sel
 	}
 	var cmds []tea.Cmd
 	for _, b := range m.cursorBindings {

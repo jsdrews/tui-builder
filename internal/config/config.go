@@ -522,11 +522,11 @@ type Component struct {
 	OnCursor *OnCursor `yaml:"on_cursor,omitempty"`
 }
 
-// OnCursor wires a component to another component's row-focus state.
-// The driver must be a table (list drivers aren't implemented yet —
-// list.Selected has less-structured selection semantics; when tuilib
-// grows a similar ListFocusedMsg we can lift the restriction). The
-// pattern:
+// OnCursor wires a component to another component's cursor state.
+// Driver may be a table, list, or tree — all three emit tuilib
+// focus-change messages (table.RowFocusedMsg from v0.16.0;
+// list.SelectedChangedMsg and tree.SelectedChangedMsg from v0.17.0).
+// The pattern:
 //
 //	inspector:
 //	  type: inspector

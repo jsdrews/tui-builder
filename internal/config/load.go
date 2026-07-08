@@ -160,7 +160,10 @@ func (c *Config) Validate() error {
 // validateOnCursor checks every layout-participating component's
 // OnCursor binding. Rules:
 //   - Source names another component in the same screen's layout.
-//   - Driver must be a table (list drivers pending — see OnCursor doc).
+//   - Driver must be a table, list, or tree (the three tuilib
+//     components that emit focus-change messages: RowFocusedMsg from
+//     v0.16.0 for table; SelectedChangedMsg from v0.17.0 for list
+//     and tree).
 //   - Target component must itself be source-bound: the bind: block's
 //     job is to feed the target's source's parameters, and a
 //     component with no source has nowhere for those params to land.
@@ -185,8 +188,11 @@ func validateOnCursor(refs map[string]int, components map[string]*Component, pat
 			return fmt.Errorf("%s.components.%s.on_cursor: source %q not used in this screen's layout", path, name, oc.Source)
 		}
 		driver := components[oc.Source]
-		if driver.Type != "table" {
-			return fmt.Errorf("%s.components.%s.on_cursor: source %q must be a table (got %s)", path, name, oc.Source, driver.Type)
+		switch driver.Type {
+		case "table", "list", "tree":
+			// ok — all three emit tuilib focus-change messages
+		default:
+			return fmt.Errorf("%s.components.%s.on_cursor: source %q must be a table, list, or tree (got %s)", path, name, oc.Source, driver.Type)
 		}
 		if comp.Source == "" {
 			return fmt.Errorf("%s.components.%s.on_cursor: target component has no `source:` — nothing to rebind on cursor moves", path, name)

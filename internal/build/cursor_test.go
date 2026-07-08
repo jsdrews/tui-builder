@@ -77,3 +77,70 @@ func TestSubstituteCursorComposesWithEnv(t *testing.T) {
 		t.Errorf("want prod/nginx, got %q", got)
 	}
 }
+
+// TestSubstituteCursorLabelAlias covers ${cursor.label} — an explicit
+// alias for bare ${cursor}. Useful for tree drivers where "label"
+// reads more naturally than the bare form.
+func TestSubstituteCursorLabelAlias(t *testing.T) {
+	sel := Selection{String: "nginx-abc"}
+	if got := SubstituteCursor("${cursor.label}", sel); got != "nginx-abc" {
+		t.Errorf("want nginx-abc, got %q", got)
+	}
+}
+
+// TestSubstituteCursorDepth covers the tree-driver depth key —
+// returns the number of path elements as a string.
+func TestSubstituteCursorDepth(t *testing.T) {
+	// Tree cursor: Cells IS the path.
+	sel := Selection{
+		String: "leaf",
+		Cells:  []string{"root", "level1", "leaf"},
+	}
+	if got := SubstituteCursor("${cursor.depth}", sel); got != "3" {
+		t.Errorf("want 3, got %q", got)
+	}
+	// Empty cursor → depth 0.
+	if got := SubstituteCursor("${cursor.depth}", Selection{}); got != "0" {
+		t.Errorf("want 0 for empty selection, got %q", got)
+	}
+}
+
+// TestSubstituteCursorTreePathIndex confirms numeric indexing works
+// as expected for tree paths (uniform with tables and lists — Cells
+// carries the path).
+func TestSubstituteCursorTreePathIndex(t *testing.T) {
+	sel := Selection{
+		String: "leaf",
+		Cells:  []string{"root", "namespace", "pod-name"},
+	}
+	cases := []struct {
+		tmpl, want string
+	}{
+		{"${cursor.1}", "root"},
+		{"${cursor.2}", "namespace"},
+		{"${cursor.3}", "pod-name"},
+		{"${cursor.4}", ""}, // out-of-range → empty
+	}
+	for _, tc := range cases {
+		if got := SubstituteCursor(tc.tmpl, sel); got != tc.want {
+			t.Errorf("%s: want %q, got %q", tc.tmpl, tc.want, got)
+		}
+	}
+}
+
+// TestSubstituteCursorListItem — for a list driver Columns is
+// ["item"], so ${cursor.item} resolves. Confirms the list wiring
+// exposes item-by-name access alongside the bare form.
+func TestSubstituteCursorListItem(t *testing.T) {
+	sel := Selection{
+		String:  "default",
+		Cells:   []string{"default"},
+		Columns: []string{"item"},
+	}
+	if got := SubstituteCursor("${cursor.item}", sel); got != "default" {
+		t.Errorf("want default, got %q", got)
+	}
+	if got := SubstituteCursor("${cursor}", sel); got != "default" {
+		t.Errorf("bare form: want default, got %q", got)
+	}
+}

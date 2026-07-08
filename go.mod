@@ -9,7 +9,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/coder/websocket v1.8.14
 	github.com/expr-lang/expr v1.17.8
-	github.com/jsdrews/tuilib v0.16.0
+	github.com/jsdrews/tuilib v0.17.0
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
 )

@@ -1,0 +1,81 @@
+# on_cursor_tree.yaml — reactive detail on tree cursor.
+#
+# Extends the on_cursor pattern (see on_cursor.yaml for the table
+# version) to tree drivers. Landed once tuilib v0.17.0 shipped
+# tree.SelectedChangedMsg (issue #45).
+#
+# When the tree's cursor lands on a node, the inspector's parameterized
+# source rebinds via ${cursor.*} and refetches through the params-aware
+# LRU. The tree's label-based path (from #38's expand-state preservation
+# scheme) becomes the Selection's Cells, so numeric ${cursor.N} indexes
+# into the path uniformly with tables.
+#
+# Cursor tokens for tree drivers:
+#
+#   ${cursor}         → the focused node's label   (bare form)
+#   ${cursor.label}   → same as ${cursor}          (explicit alias)
+#   ${cursor.depth}   → number of path elements    (0 root, 1 child, ...)
+#   ${cursor.1}       → the root label             (path[0], 1-based)
+#   ${cursor.2}       → level-2 label              (path[1])
+#   ${cursor.N}       → path[N-1]
+#
+# This example uses the `people.json` fixture (same as tree_source.yaml).
+# The tree groups people by team; the inspector below shows the raw
+# fixture record for the focused person (matched by name).
+app:
+  title: Org (on-hover detail)
+  theme: nord
+
+data:
+  sources:
+    people:
+      type:    file
+      path:    examples/fixtures/people.json
+      root:    people
+      refresh: 5s
+
+    # Parameterized filter — narrows the same fixture down to the
+    # single record whose `name` field matches the cursor-driven bind.
+    # A real config would swap in a REST endpoint; the pipeline
+    # operator keeps this demo self-contained. Default is empty so
+    # the pipeline can construct before any cursor arrives; the
+    # inspector renders empty until a leaf is focused.
+    person_by_name:
+      type: filter
+      parameters:
+        name: {type: string, default: "", description: person's full name}
+      from: people
+      where: "name == params.name"
+
+tui:
+  components:
+    org_tree:
+      type:          tree
+      title:         Team tree
+      searchable:    true
+      initial_depth: 2
+      source:        people
+      root_label:    engineering
+      group_by:      team
+      label:         name
+
+    person_pane:
+      type:  inspector
+      title: ${cursor.label}
+      auto:  true
+      source: person_by_name
+      # Skip the branch nodes (team names) — the leaf's depth is 2
+      # (engineering → team → person). We can't yet condition
+      # on_cursor on depth, so the inspector will refetch on every
+      # cursor move; the ParamCache absorbs the cost.
+      on_cursor:
+        source: org_tree
+        bind:
+          name: ${cursor.label}   # leaf label = person's name
+
+  screen:
+    title: Org (tree + hover)
+    layout:
+      hstack:
+        - {flex: 1, component: org_tree}
+        - {flex: 1, component: person_pane}

@@ -433,14 +433,17 @@ components:
     initial_depth: <int>           # shared with tree
 
     # ── Reactive binding (any source-bound component) ─────────────────
-    # Wire a table's cursor state to another component's source. Every
-    # RowFocusedMsg from the driver rebinds the target's parameterized
-    # source via the Bind map and refetches through a params-aware
-    # LRU (feature G's ParamCache). Enables the "kubectl describe on
-    # hover" pattern without pushing a new screen.
+    # Wire a driver's cursor state to another component's source. Every
+    # focus-change message from the driver rebinds the target's
+    # parameterized source via the Bind map and refetches through a
+    # params-aware LRU (feature G's ParamCache). Enables the
+    # "kubectl describe on hover" pattern without pushing a new screen.
+    #
+    # Valid driver kinds: `table`, `list`, `tree`. All three emit
+    # tuilib focus-change messages (RowFocusedMsg / SelectedChangedMsg).
     on_cursor:
-      source: <driver-component>   # a table in the same screen's layout
-      bind:                        # target source's params <- driver row cells
+      source: <driver-component>   # table / list / tree in the same layout
+      bind:                        # target source's params <- driver cursor
         <param>: <template>        # ${cursor.*} + ${env.*} substituted;
                                    # ${selection.*} passes through literal
                                    # (this fires mid-screen, not at push time).
@@ -522,17 +525,32 @@ initial: <screen-name>         # required when `screens:` is set
 #                             table source: first cell
 #   ${selection.N}          — table source: 1-based cell index
 #   ${selection.COLNAME}    — table source: cell by column-title prefix
-#   ${cursor}               — LIVE: driver component's currently focused
-#                             row's first cell. Refetches when the cursor
-#                             moves. Only meaningful on components that
-#                             declare `on_cursor:` (the driver names
-#                             which table's cursor to follow).
-#   ${cursor.N}             — driver row cell by 1-based index
-#   ${cursor.COLNAME}       — driver row cell by column title (case-
-#                             insensitive exact match). Unresolved
-#                             lookups resolve to "" (not the literal
-#                             token) since cursor moves are high-
-#                             frequency and a broken URL would 404 storm.
+#   ${cursor}               — LIVE: the driver's current focus.
+#                             Table:  first cell of the focused row
+#                             List:   the focused item's string
+#                             Tree:   the focused node's label
+#                             Refetches when the driver's cursor moves.
+#                             Only meaningful on components that declare
+#                             `on_cursor:` (the driver names which
+#                             component's cursor to follow).
+#   ${cursor.N}             — 1-based index into the driver's cells.
+#                             Table:  cell by column position
+#                             List:   `${cursor.1}` = the item
+#                             Tree:   path[N-1] (root at .1)
+#   ${cursor.COLNAME}       — Table:  cell by column title (case-
+#                             insensitive exact match).
+#                             List:   `${cursor.item}` (Columns=["item"]).
+#                             Tree:   n/a — trees have no columns; use
+#                             .N indexing or the special-cased keys.
+#   ${cursor.label}         — Tree/List: explicit alias for bare ${cursor}.
+#   ${cursor.depth}         — Tree: number of path elements (0 for root,
+#                             1 for its children, ...) as a string.
+#                             Table/List: length of Cells (usually 1
+#                             for lists; the row width for tables).
+#                             Unresolved lookups resolve to "" (not the
+#                             literal token) since cursor moves are
+#                             high-frequency and a broken URL would
+#                             404 storm.
 #   ${env.NAME}             — os.Getenv("NAME") (empty when unset).
 #                             Use for tokens / API keys / boot-time params
 #                             (app.prompts values are written to env, so
@@ -572,6 +590,7 @@ initial: <screen-name>         # required when `screens:` is set
 | `examples/inspector.yaml` | Two-column label/value record viewer, nested groups |
 | `examples/inspector_auto.yaml` | `auto: true` — inspector derives fields from any JSON response (GitHub repo record). Nested maps/arrays expand instead of stringifying |
 | `examples/on_cursor.yaml` | On-hover detail: GitHub repos table on top, `on_cursor:`-bound inspector below. Scrolling the table refetches the detail pane via `${cursor.*}` tokens + params-aware cache. Uses a hidden `Owner` column for identity binding |
+| `examples/on_cursor_tree.yaml` | Same pattern but tree-driven: team tree on the left (bucketed by team), inspector on the right rebinds via `${cursor.label}` as you scroll through the tree nodes |
 | `examples/table_wide.yaml` | Wide table demonstrating horizontal scroll (`←`/`→`, `shift+←`/`shift+→`, `0`/`$`) |
 | `examples/layout.yaml` | Nested layouts, mixed flex weights |
 | `examples/themes.yaml` | Built-in theme picker reference |

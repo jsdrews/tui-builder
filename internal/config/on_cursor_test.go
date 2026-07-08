@@ -60,12 +60,35 @@ func TestOnCursorSourceMustBeInLayout(t *testing.T) {
 	}
 }
 
-func TestOnCursorDriverMustBeTable(t *testing.T) {
+func TestOnCursorDriverListAccepted(t *testing.T) {
 	c := onCursorFixture()
-	// Swap the driver for a list, which isn't allowed as a cursor driver.
+	// Swap the driver for a list — v0.17.0 emits SelectedChangedMsg
+	// from lists, so this is now a valid driver.
 	c.TUI.Components["pods_table"] = &Component{Type: "list", Source: "pods", Item: "metadata.name"}
+	if err := c.Validate(); err != nil {
+		t.Errorf("list driver should be accepted, got %v", err)
+	}
+}
+
+func TestOnCursorDriverTreeAccepted(t *testing.T) {
+	c := onCursorFixture()
+	// Swap the driver for a source-bound tree — v0.17.0 emits
+	// SelectedChangedMsg from trees, so this is now a valid driver.
+	c.TUI.Components["pods_table"] = &Component{
+		Type: "tree", Source: "pods", Label: Path{"name"},
+	}
+	if err := c.Validate(); err != nil {
+		t.Errorf("tree driver should be accepted, got %v", err)
+	}
+}
+
+func TestOnCursorDriverInspectorRejected(t *testing.T) {
+	c := onCursorFixture()
+	c.TUI.Components["pods_table"] = &Component{
+		Type: "inspector", Source: "pods", Auto: true,
+	}
 	err := c.Validate()
-	if err == nil || !strings.Contains(err.Error(), "must be a table") {
+	if err == nil || !strings.Contains(err.Error(), "must be a table, list, or tree") {
 		t.Errorf("want driver-type error, got %v", err)
 	}
 }
