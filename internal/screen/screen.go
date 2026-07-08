@@ -39,7 +39,7 @@ import (
 // Multi is the shared context for a multi-screen app: every named
 // screen, the top-level components map, and the unified data
 // sources map. Passed once to every Model so any screen can build +
-// push its on_enter targets, and so pushed screens get the same
+// push its on_key targets, and so pushed screens get the same
 // data layer.
 type Multi struct {
 	Screens    map[string]*cfg.Screen
@@ -93,7 +93,7 @@ type nonInteractiveResult struct {
 }
 
 // Model is the config-driven screen. Construct with New (single-screen)
-// or NewMulti (multi-screen with on_enter push support) and pass as the
+// or NewMulti (multi-screen with on_key push support) and pass as the
 // root to app.New.
 type Model struct {
 	title    string
@@ -101,10 +101,10 @@ type Model struct {
 	tree     *build.Tree
 	focus    int                            // index into tree.All(); -1 means no component focused
 	multi    *Multi                         // nil for single-screen mode
-	// bindings holds every on_enter push for this screen. A single source
-	// may declare multiple bindings distinguished by Key (empty Key means
-	// Enter), so lookups scan linearly per keystroke.
-	bindings []cfg.OnEnterBinding
+	// bindings holds every on_key push for this screen. A single source
+	// may declare multiple bindings distinguished by Key, so lookups
+	// scan linearly per keystroke.
+	bindings []cfg.OnKeyBinding
 	actions  []cfg.Action                   // per-key subprocess bindings for this screen
 
 	// Data-source state. sources is keyed by source name; sourceUsers
@@ -112,7 +112,7 @@ type Model struct {
 	// out to every consumer.
 	sources     map[string]*sourceEntry
 	sourceUsers map[string][]string // source name -> component names
-	started     bool                // OnEnter has fired the initial fetch wave
+	started     bool                // the initial fetch wave has fired
 
 	// cursorBindings lists every component whose `on_cursor:` block ties
 	// its source refetch to another table's focused row. Scanned when a
@@ -194,7 +194,7 @@ func New(s *cfg.Screen, components map[string]*cfg.Component, entries map[string
 // params carries the push-site `bind:` block's resolved values for the
 // destination screen's parameterized sources. Pass nil on the initial
 // multi-screen construction (no push has fired yet) and on screens
-// whose on_enter has no Bind: map. Missing required params surface as
+// whose on_key has no Bind: map. Missing required params surface as
 // a build error so tryPush can pop an alert instead of constructing
 // a half-broken screen.
 func NewMulti(screenName string, multi *Multi, sel build.Selection, params map[string]string, th theme.Theme) (*Model, error) {
@@ -219,7 +219,7 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, entries map[str
 		m.focus = 0
 	}
 	if multi != nil {
-		m.bindings = append([]cfg.OnEnterBinding(nil), s.OnEnter...)
+		m.bindings = append([]cfg.OnKeyBinding(nil), s.OnKey...)
 	}
 	m.actions = append([]cfg.Action(nil), s.Actions...)
 
@@ -359,7 +359,7 @@ func (m *Model) Layout() layout.Node {
 
 // Update routes KeyMsgs to the focused component (with tab/shift+tab
 // intercepted for focus cycling and enter intercepted when the focused
-// component has an on_enter binding). Non-key messages fan out so
+// component has an on_key binding). Non-key messages fan out so
 // spinner ticks reach every component.
 func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 	// Alert modal takes precedence — single OK button, dismiss is the
@@ -434,7 +434,7 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 				return m, cmd
 			}
 		default:
-			// on_enter bindings with a custom `key:` fire before actions
+			// on_key bindings fire before actions
 			// so a screen author can bind `d → describe` (push) without
 			// colliding with an action on the same key (which would also
 			// have matched). Uniqueness is enforced at validate time on
@@ -616,8 +616,8 @@ func (m *Model) IsCapturingKeys() bool {
 }
 
 // Help returns the bindings the focused component currently exposes,
-// plus "enter → open" when this screen has an on_enter binding for the
-// focused component, plus any action keys bound to the focused source.
+// plus one entry per on_key push binding for the focused component,
+// plus any action keys bound to the focused source.
 func (m *Model) Help() []key.Binding {
 	c := m.current()
 	if c == nil {
@@ -633,15 +633,15 @@ func (m *Model) Help() []key.Binding {
 			if b.Source != name {
 				continue
 			}
-			trigger, glyph := "enter", "⏎"
-			if b.Key != "" {
-				trigger, glyph = b.Key, b.Key
+			glyph := b.Key
+			if b.Key == "enter" {
+				glyph = "⏎"
 			}
 			label := b.Label
 			if label == "" {
 				label = "open"
 			}
-			out = append(out, key.NewBinding(key.WithKeys(trigger), key.WithHelp(glyph, label)))
+			out = append(out, key.NewBinding(key.WithKeys(b.Key), key.WithHelp(glyph, label)))
 		}
 	}
 	for _, a := range m.actions {
@@ -955,7 +955,7 @@ func (m *Model) newAlertModal(title, message string) alert.Model {
 	return alert.New(opts)
 }
 
-// tryPush handles a key that the focused component has an on_enter
+// tryPush handles a key that the focused component has an on_key
 // binding for. `press` is the key string as produced by tea.KeyMsg.String()
 // — "enter" for the Enter key, "d" / "l" / "ctrl+r" / etc. for arbitrary
 // bindings. Returns (cmd, true) when a matching binding fires; (nil, false)
@@ -969,17 +969,10 @@ func (m *Model) tryPush(press string) (tea.Cmd, bool) {
 		return nil, false
 	}
 	name := m.tree.Order[m.focus]
-	var binding *cfg.OnEnterBinding
+	var binding *cfg.OnKeyBinding
 	for i := range m.bindings {
 		b := &m.bindings[i]
-		if b.Source != name {
-			continue
-		}
-		trigger := b.Key
-		if trigger == "" {
-			trigger = "enter"
-		}
-		if trigger == press {
+		if b.Source == name && b.Key == press {
 			binding = b
 			break
 		}
@@ -1006,7 +999,7 @@ func (m *Model) tryPush(press string) (tea.Cmd, bool) {
 }
 
 // selectionFrom extracts a Selection from a list or table component. The
-// validator restricts on_enter sources / action sources to lists and
+// validator restricts on_key sources / action sources to lists and
 // tables, so other kinds return a zero Selection.
 //
 // Items and cells are ANSI-stripped before being captured so that

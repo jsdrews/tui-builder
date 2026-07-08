@@ -201,7 +201,9 @@ HTTP source:
    matching `buildList` / `buildTable` / etc. function.
 6. **Bind.** `screen.Model.build_()` wires components-by-source-name
    into a registry (`m.sources[name]`).
-7. **OnEnter.** Screen kicks off `startFetch(name)` per source.
+7. **Screen enter.** The tuilib `OnEnter` hook fires `startFetch(name)`
+   per source (cursor-driven sources skip — they wait for their driver's
+   first RowFocusedMsg).
 8. **Fetch.** `http.Fetch` GETs the URL, parses JSON, applies the
    source's own `root:` slicing, returns the resulting value.
 9. **Apply.** `build.ApplyData(component, data, theme)` dispatches by
@@ -228,7 +230,7 @@ If a user request can be answered with a YAML pattern using existing
 schema, document the pattern. Don't add a new schema field.
 
 Example: "I want to drill from a list to a detail view" — that's
-existing multi-screen + `on_enter`. Don't add a `drilldown:` field.
+existing multi-screen + `on_key`. Don't add a `drilldown:` field.
 
 If the user request *can't* be expressed in YAML, the smallest extension
 is the right answer:

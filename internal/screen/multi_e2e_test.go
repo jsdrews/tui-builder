@@ -204,7 +204,7 @@ func TestKubeMultiAllClustersDown(t *testing.T) {
 // Schema this exercises (the kube.yaml drilldown pattern, abstracted):
 //
 //	users         → list of users
-//	    on_enter  → push posts with bind: {user_id: ${selection.ID}}
+//	    on_key    → push posts with bind: {user_id: ${selection.ID}}
 //	posts        → parameterized source /users/${params.user_id}/posts
 //
 // If this passes, kube.yaml's namespaces → pods → pod_detail chain
@@ -255,10 +255,11 @@ func TestParamsBindEndToEnd(t *testing.T) {
 			"users": {
 				Title:  "Users",
 				Layout: cfg.Node{Component: "users_table"},
-				OnEnter: []cfg.OnEnterBinding{
+				OnKey: []cfg.OnKeyBinding{
 					{
 						Source: "users_table",
 						Push:   "posts",
+						Key:    "enter",
 						// The whole point of this test: ${selection.ID}
 						// must resolve to the focused row's ID cell and
 						// land in the destination source's user_id param.
@@ -392,10 +393,11 @@ func TestParamsBindFromListSelection(t *testing.T) {
 		Screens: map[string]*cfg.Screen{
 			"namespaces": {
 				Layout: cfg.Node{Component: "namespaces_list"},
-				OnEnter: []cfg.OnEnterBinding{
+				OnKey: []cfg.OnKeyBinding{
 					{
 						Source: "namespaces_list",
 						Push:   "pods",
+						Key:    "enter",
 						// Bare ${selection} — the list's selected
 						// item drives the bind. Same shape as
 						// kube.yaml uses.
@@ -541,9 +543,9 @@ func TestParamsBindIgnoresUnusedSources(t *testing.T) {
 		Screens: map[string]*cfg.Screen{
 			"namespaces": {
 				Layout: cfg.Node{Component: "namespaces_list"},
-				OnEnter: []cfg.OnEnterBinding{
+				OnKey: []cfg.OnKeyBinding{
 					{
-						Source: "namespaces_list", Push: "pods",
+						Source: "namespaces_list", Push: "pods", Key: "enter",
 						Bind: map[string]string{"namespace": "${selection}"},
 					},
 				},
@@ -661,9 +663,9 @@ func TestParamsBindMissingRequired(t *testing.T) {
 		Screens: map[string]*cfg.Screen{
 			"users": {
 				Layout: cfg.Node{Component: "users_table"},
-				OnEnter: []cfg.OnEnterBinding{
+				OnKey: []cfg.OnKeyBinding{
 					// Intentionally omit Bind — destination needs user_id.
-					{Source: "users_table", Push: "posts"},
+					{Source: "users_table", Push: "posts", Key: "enter"},
 				},
 			},
 			"posts": {Layout: cfg.Node{Component: "posts_table"}},

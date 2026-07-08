@@ -1,13 +1,16 @@
 # on_key_push.yaml — key-bound screen pushes (feature D).
 #
-# `on_enter:` used to fire only on Enter. Now each binding can declare a
-# `key:` so any key pushes a screen. Enter still works — leave `key:`
-# empty (or omit it) for the historical behavior. Add extra bindings on
-# the same source with different keys to expose parallel drilldowns.
+# `on_key:` is the push-binding block on a multi-screen config. Every
+# entry declares a specific `key:` that, when pressed on the focused
+# `source:` component, pushes the named `push:` screen. `key:` is
+# required — spell out `key: enter` for the classic drilldown; use any
+# other tea.KeyMsg name (`d`, `l`, `ctrl+r`, ...) for parallel
+# drilldowns. Multiple entries per source are fine as long as their
+# (source, key) pairs are distinct.
 #
 # kubectl-shape UX pattern this enables:
 #
-#   Enter → open detail (default)
+#   enter → open detail
 #   d     → describe
 #   l     → logs
 #   e     → edit (via action, not push — see other examples)
@@ -15,7 +18,7 @@
 # This demo uses the same GitHub users → repo drilldown as the vanilla
 # http example but exposes TWO push targets on the same list:
 #
-#   Enter → repo table (all this user's public repos)
+#   enter → repo table (all this user's public repos)
 #   s     → starred (what THIS user has starred)
 #
 # Both destinations bind `${selection}` = the focused login into their
@@ -84,10 +87,11 @@ tui:
     users:
       title: Users
       layout: {component: users_list}
-      on_enter:
-        # Enter → user's own repos (default trigger, no `key:` needed)
+      on_key:
+        # enter → user's own repos (classic drilldown; spell key explicitly)
         - source: users_list
           push:   repos
+          key:    enter
           bind:
             login: ${selection}
         # `s` → what the user has starred. Custom label shows in the help strip.

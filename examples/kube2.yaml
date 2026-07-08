@@ -59,9 +59,10 @@ tui:
     clusters:
       title: Clusters
       layout: {component: clusters_list}
-      #on_enter:
+      #on_key:
       #  - source: namespaces_list
-      #    push: pods
+      #    push:   pods
+      #    key:    enter
       #    bind:
       #      namespace: ${selection}
   #initial: namespaces

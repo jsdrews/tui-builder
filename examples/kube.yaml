@@ -39,7 +39,7 @@ data:
       timeout: 10s
 
     # pods takes one required parameter (namespace). At push time, the
-    # parent screen's `bind:` block (see screens.namespaces.on_enter)
+    # parent screen's `bind:` block (see screens.namespaces.on_key)
     # resolves ${selection} → the picked namespace name and feeds it
     # into ${params.namespace}. From wrangl: `--param namespace=default`.
     pods:
@@ -272,9 +272,10 @@ tui:
       # Push site: when the user hits enter on a namespace row, push the
       # `pods` screen with the selected namespace name fed into the
       # destination's `pods` source via its declared `namespace` param.
-      on_enter:
+      on_key:
         - source: namespaces_list
-          push: pods
+          push:   pods
+          key:    enter
           bind:
             namespace: ${selection}
 
@@ -285,9 +286,10 @@ tui:
       # (Namespace, Name) of the selected row feed into the destination
       # screen's `pod_detail` AND `pod_logs` params. Same map, both
       # destinations see the same values.
-      on_enter:
+      on_key:
         - source: pods_table
-          push: detail
+          push:   detail
+          key:    enter
           bind:
             namespace: ${selection.Namespace}
             name:      ${selection.Name}

@@ -192,16 +192,18 @@ type EnvSpec struct {
 }
 
 // Screen describes one screen — its breadcrumb title, its layout tree,
-// and any on_enter bindings that push other screens.
+// and any on_key bindings that push other screens.
 type Screen struct {
 	// Title shows in the breadcrumb. May contain ${selection} tokens
-	// when this screen is reachable via an on_enter push.
+	// when this screen is reachable via an on_key push.
 	Title string `yaml:"title,omitempty"`
 	// Layout is the root of the layout tree. Required.
 	Layout Node `yaml:"layout"`
-	// OnEnter declares which components, when enter is pressed on them
-	// (and they're focused), push another screen. Multi-screen only.
-	OnEnter []OnEnterBinding `yaml:"on_enter,omitempty"`
+	// OnKey declares which components — when the given key is pressed
+	// on them and they're focused — push another screen. Multi-screen
+	// only. Each binding must spell out its key explicitly (`key:
+	// enter`, `key: d`, `key: ctrl+r`); there is no implicit default.
+	OnKey []OnKeyBinding `yaml:"on_key,omitempty"`
 	// Actions hand a key off to a subprocess (kubectl exec, $EDITOR, open,
 	// etc.) with the focused row's selection substituted into the argv.
 	Actions []Action `yaml:"actions,omitempty"`
@@ -322,9 +324,9 @@ func (a Action) InteractiveDefault() bool {
 	return *a.Interactive
 }
 
-// OnEnterBinding wires "enter on Source pushes Push." The source must be
-// a list or table component referenced in this screen's layout; Push
-// names a screen in Config.Screens. The source component's current
+// OnKeyBinding wires "pressing Key on Source pushes Push." The source
+// must be a list or table component referenced in this screen's layout;
+// Push names a screen in Config.Screens. The source component's current
 // selection becomes the ${selection} token in the pushed screen.
 //
 // Bind maps destination-screen parameter names to templates evaluated
@@ -341,18 +343,16 @@ func (a Action) InteractiveDefault() bool {
 //
 // Values support the same ${selection.*} / ${env.*} / ${prompt.*}
 // substitutions as everywhere else.
-type OnEnterBinding struct {
+type OnKeyBinding struct {
 	Source string            `yaml:"source"`
 	Push   string            `yaml:"push"`
 	Bind   map[string]string `yaml:"bind,omitempty"`
-	// Key overrides the default trigger. Empty (or omitted) means the
-	// binding fires on Enter — the historical behavior. Any other value
-	// is the tea.KeyMsg.String() name of the key that should push
-	// instead (e.g. `key: d` for describe, `key: l` for logs, `key:
-	// ctrl+r` for a resource reload push). Multiple bindings on the
-	// same source are allowed as long as their (source, key) pairs are
-	// distinct.
-	Key string `yaml:"key,omitempty"`
+	// Key is the trigger. Required — spell out `key: enter` for the
+	// classic drilldown, `key: d` for describe, `key: l` for logs,
+	// `key: ctrl+r` for a resource reload push. Any tea.KeyMsg.String()
+	// name works. Multiple bindings on the same source are allowed as
+	// long as their (source, key) pairs are distinct.
+	Key string `yaml:"key"`
 	// Label is an optional custom label for the help strip. When empty,
 	// the strip shows the key + "open". Handy for kubectl-shape UIs
 	// that want "d → describe", "l → logs", etc.

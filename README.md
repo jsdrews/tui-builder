@@ -277,8 +277,8 @@ tui:
   screens:
     pods:
       layout: {component: pods_table}
-      on_enter:
-        - {source: pods_table, push: detail}
+      on_key:
+        - {source: pods_table, push: detail, key: enter}
     detail:
       title: ${selection.Name}
       layout: {component: pod_inspector}

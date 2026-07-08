@@ -11,7 +11,7 @@ import (
 )
 
 // Selection is the data captured from a source component (list or table)
-// when an on_enter binding fires. It seeds the ${selection} token in the
+// when an on_key binding fires. It seeds the ${selection} token in the
 // pushed screen's config.
 type Selection struct {
 	// String is the primary representation: a list's selected item, or a

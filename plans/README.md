@@ -18,3 +18,7 @@ section in the plan gets trimmed or deleted.
   catalog (`filter`, `project`, `sort`, `derive`, `union`, `compose`,
   `join`), the implicit DAG that already exists, and the missing
   primitives that block richer chained data fetches.
+- [`tabs.md`](tabs.md) — deferred `type: tabs` container component
+  (feature E from the tui-builder integration batch). Schema, focus-
+  semantics tradeoffs, scope estimate. Build when a concrete case
+  shows up.

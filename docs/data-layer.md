@@ -253,9 +253,10 @@ parameters, declare them inline at the push site:
 
 ```yaml
 pods:
-  on_enter:
+  on_key:
     - source: pods_table
-      push: detail
+      push:   detail
+      key:    enter
       bind:
         namespace: ${selection.Namespace}
         name:      ${selection.Name}
