@@ -133,6 +133,8 @@ func componentNode(c *Component) layout.Node {
 		return layout.Sized(c.Tree)
 	case KInspector:
 		return layout.Sized(c.Inspector)
+	case KTextview:
+		return layout.Sized(c.Textview)
 	}
 	return layout.RenderFunc(func(w, h int) string { return "" })
 }

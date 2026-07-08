@@ -247,11 +247,11 @@ func (n *Node) validate(path string, components map[string]*Component, refs map[
 
 func (c *Component) validate(path string) error {
 	switch c.Type {
-	case "list", "table", "logview", "tree", "inspector":
+	case "list", "table", "logview", "tree", "inspector", "textview":
 	case "":
 		return fmt.Errorf("%s: missing type", path)
 	default:
-		return fmt.Errorf("%s: unknown component type %q (want list|table|logview|tree|inspector)", path, c.Type)
+		return fmt.Errorf("%s: unknown component type %q (want list|table|logview|tree|inspector|textview)", path, c.Type)
 	}
 	if c.Type == "table" {
 		if len(c.Columns) == 0 {
@@ -305,6 +305,10 @@ func (c *Component) validate(path string) error {
 			// logview takes whatever the source returns: format:text bodies
 			// are split on \n; JSON []string is used as-is. No per-line
 			// mapping field needed.
+		case "textview":
+			// textview takes whatever the source returns as a single string.
+			// format:text bodies pass through verbatim; JSON values fall
+			// back to a formatted string representation. No mapping field.
 		case "tree":
 			if len(c.Label) == 0 || c.Label[0] == "" {
 				return fmt.Errorf("%s: tree bound to source %q needs `label:` (dot-path to each leaf's display label)", path, c.Source)

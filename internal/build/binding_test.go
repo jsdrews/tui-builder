@@ -227,6 +227,58 @@ func TestApplyTreePreservesRootExpansionAcrossRefresh(t *testing.T) {
 	}
 }
 
+// TestApplyTextviewStringSetsContent covers the format:text source
+// path — a raw string (kubectl describe, help page, markdown blob)
+// lands as the textview's content untouched.
+func TestApplyTextviewStringSetsContent(t *testing.T) {
+	th := theme.Nord()
+	c, err := NewComponent(&cfg.Component{Type: "textview", Source: "src"}, th)
+	if err != nil {
+		t.Fatalf("build textview: %v", err)
+	}
+	c.Textview.SetDimensions(60, 20)
+	applyTextview(c, "line 1\nline 2\nline 3")
+	if got := c.Textview.Content(); got != "line 1\nline 2\nline 3" {
+		t.Errorf("content: want raw string, got %q", got)
+	}
+}
+
+// TestApplyTextviewJoinsStringSlice covers the []any-of-strings shape
+// (matches logview's convention so a source can back either component).
+func TestApplyTextviewJoinsStringSlice(t *testing.T) {
+	th := theme.Nord()
+	c, err := NewComponent(&cfg.Component{Type: "textview", Source: "src"}, th)
+	if err != nil {
+		t.Fatalf("build textview: %v", err)
+	}
+	c.Textview.SetDimensions(60, 20)
+	applyTextview(c, []any{"a", "b", "c"})
+	if got := c.Textview.Content(); got != "a\nb\nc" {
+		t.Errorf("content: want joined string, got %q", got)
+	}
+}
+
+// TestBuildTextviewReadsWrapAndContent pins that the config-time Content
+// + Wrap fields feed into the constructed model, so static-content mode
+// works without a source.
+func TestBuildTextviewReadsWrapAndContent(t *testing.T) {
+	th := theme.Nord()
+	c, err := NewComponent(&cfg.Component{
+		Type:    "textview",
+		Content: "hello",
+		Wrap:    true,
+	}, th)
+	if err != nil {
+		t.Fatalf("build textview: %v", err)
+	}
+	if !c.Textview.Wrap() {
+		t.Errorf("wrap should be true from config")
+	}
+	if got := c.Textview.Content(); got != "hello" {
+		t.Errorf("content: want %q, got %q", "hello", got)
+	}
+}
+
 // TestDeriveInspectorFieldsDeclaredModeIgnoresAuto covers the fallback:
 // with Auto=false, we take the declared Fields path unchanged. This
 // pins that adding the Auto branch doesn't disturb the existing wire.

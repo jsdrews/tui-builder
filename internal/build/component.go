@@ -16,6 +16,7 @@ import (
 	"github.com/jsdrews/tuilib/pkg/list"
 	"github.com/jsdrews/tuilib/pkg/logview"
 	"github.com/jsdrews/tuilib/pkg/table"
+	"github.com/jsdrews/tuilib/pkg/textview"
 	"github.com/jsdrews/tuilib/pkg/theme"
 	"github.com/jsdrews/tuilib/pkg/tree"
 
@@ -31,6 +32,7 @@ const (
 	KLogview
 	KTree
 	KInspector
+	KTextview
 )
 
 // Component is a live, themed component pointer plus the originating config
@@ -45,6 +47,7 @@ type Component struct {
 	Logview   *logview.Model
 	Tree      *tree.Model
 	Inspector *inspector.Model
+	Textview  *textview.Model
 
 	// StreamRows is the ring buffer used by KTable components bound to
 	// a streaming source. Newest events first; trimmed to Cfg.MaxRows
@@ -71,6 +74,9 @@ func NewComponent(c *cfg.Component, th theme.Theme) (*Component, error) {
 	case "inspector":
 		m := buildInspector(c, th)
 		return &Component{Cfg: c, Kind: KInspector, Inspector: &m}, nil
+	case "textview":
+		m := buildTextview(c, th)
+		return &Component{Cfg: c, Kind: KTextview, Textview: &m}, nil
 	}
 	return nil, fmt.Errorf("unknown component type %q", c.Type)
 }
@@ -130,6 +136,17 @@ func (c *Component) Rebuild(th theme.Theme) {
 		m.SetFilterMode(filterMode)
 		m.SetCursor(cursor)
 		*c.Inspector = m
+	case KTextview:
+		content := c.Textview.Content()
+		wrap := c.Textview.Wrap()
+		query := c.Textview.Query()
+		m := buildTextview(c.Cfg, th)
+		m.SetContent(content)
+		m.SetWrap(wrap)
+		if query != "" {
+			m.SetQuery(query)
+		}
+		*c.Textview = m
 	}
 }
 
@@ -310,6 +327,33 @@ func buildLogview(c *cfg.Component, th theme.Theme) logview.Model {
 		}
 		m.AppendLines(lines)
 	}
+	if c.InitialQuery != "" {
+		m.SetQuery(c.InitialQuery)
+	}
+	return m
+}
+
+// ------------------------------------------------------------ textview ---
+
+func buildTextview(c *cfg.Component, th theme.Theme) textview.Model {
+	opts := th.TextView()
+	opts.Title = c.Title
+	opts.Content = c.Content
+	opts.Wrap = c.Wrap
+	opts.Searchable = c.Searchable
+	if c.FilterPlaceholder != "" {
+		opts.Filter.Placeholder = c.FilterPlaceholder
+	}
+	applyPaneColors(&opts.ActiveColor, &opts.InactiveColor, &opts.SpinnerStyle, c.Colors, th)
+	if cs := c.Colors; cs != nil {
+		if v := parseColor(cs.Match, th); v != nil {
+			opts.MatchStyle = opts.MatchStyle.Foreground(v)
+		}
+		if v := parseColor(cs.CurrentLineBG, th); v != nil {
+			opts.CurrentLineStyle = opts.CurrentLineStyle.Background(v)
+		}
+	}
+	m := textview.New(opts)
 	if c.InitialQuery != "" {
 		m.SetQuery(c.InitialQuery)
 	}

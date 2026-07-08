@@ -459,8 +459,19 @@ type Component struct {
 	Searchable bool     `yaml:"searchable,omitempty"`
 	MaxLines   int      `yaml:"max_lines,omitempty"`
 	FilterMode bool     `yaml:"filter_mode,omitempty"`
-	// InitialQuery pre-populates the search query on logview / tree.
+	// InitialQuery pre-populates the search query on logview / tree /
+	// textview.
 	InitialQuery string `yaml:"initial_query,omitempty"`
+
+	// textview fields
+	// Content seeds the initial body. Overridden by SetContent when the
+	// component is source-bound. Static-content mode is handy for help
+	// panes, licence text, or any doc you want available in-app without
+	// a fetch.
+	Content string `yaml:"content,omitempty"`
+	// Wrap toggles word-wrap for textview. Default off matches tuilib's
+	// zero-value default; wrap is also runtime-toggleable via `w`.
+	Wrap bool `yaml:"wrap,omitempty"`
 
 	// tree fields
 	Root *TreeNode `yaml:"root,omitempty"`

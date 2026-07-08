@@ -37,12 +37,25 @@ data:
       timeout: 10s
     # Parameterized HTTP source used as a JOIN LOOKUP. Each driver row's
     # `id` field feeds into `user_id`, which substitutes into the URL.
+    #
+    # The `cache:` block opts this source into a params-aware LRU: the
+    # join operator (and any future cursor-driven refetch) memoises by
+    # (source, params-tuple), so N driver rows with the same user_id
+    # produce one upstream fetch, not N. TTL bounds staleness; size
+    # bounds memory. Omit `cache:` and the join uses defaults (60s /
+    # ParamCacheDefaultSize=100) — automatic caching is on by default
+    # for join lookups. Set `cache:` explicitly when you need to
+    # override the defaults, or for other consumers (cursor-driven
+    # detail panes) that don't get the automatic wrap.
     user_posts:
       type: http
       parameters:
         user_id: {type: int, required: true, description: "jsonplaceholder user id"}
       url: https://jsonplaceholder.typicode.com/users/${params.user_id}/posts
       timeout: 10s
+      cache:
+        ttl:  5m       # per (user_id → posts) freshness window
+        size: 200      # cap LRU entries — evicts LRU when exceeded
     # Passthrough — same upstream, no transform. Lets components or wrangl
     # target a stable public name regardless of whether a filter sits on
     # top tomorrow.

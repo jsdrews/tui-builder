@@ -294,7 +294,7 @@ sources:                      # optional — components bind to these via `sourc
 
 components:
   <name>:
-    type: list | table | logview | tree | inspector
+    type: list | table | logview | tree | inspector | textview
     title: <string>
     source: <data-source-name>  # optional — populates the component dynamically;
                                 # static items/rows/fields are ignored when set
@@ -381,6 +381,14 @@ components:
     lines:       [string, ...]
     max_lines:   <int>          # 0=default 10000, -1=unbounded
     filter_mode: <bool>
+
+    # textview (static-text viewer — SetContent on refresh, no follow)
+    content:     <string>        # optional — initial buffer for static
+                                 # mode; overridden by SetContent when
+                                 # source: is set.
+    wrap:        <bool>          # optional — default false; runtime
+                                 # toggle via `w`.
+    searchable:  <bool>          # optional — /-search, n/N navigate
 
     # tree (static — declare the root inline)
     root:
@@ -523,6 +531,7 @@ initial: <screen-name>         # required when `screens:` is set
 | `examples/table_columns.yaml` | Column sizing (fixed / auto / flex / max_width) + alignment |
 | `examples/table_styled.yaml` | Colored cells + clickable hyperlinks, `initial_sort` |
 | `examples/logview.yaml` | Streaming-log pane, `/`-search, filter mode, `initial_query` |
+| `examples/textview.yaml` | Static-text viewer (`type: textview`): a help pane using inline `content:` + a source-bound `date` clock refreshing every 3s. `/`-search, `w` wrap toggle |
 | `examples/tree.yaml` | Hierarchical view, expand/collapse, search, `initial_depth` |
 | `examples/tree_source.yaml` | Data-driven tree: a `type: file` source of people bucketed by `group_by: team`; cursor + expand state survive `refresh: 5s` polling |
 | `examples/inspector.yaml` | Two-column label/value record viewer, nested groups |

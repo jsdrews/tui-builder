@@ -1055,6 +1055,48 @@ together. The common case (sequential consumers within a Fetch
 tick) is unaffected. If you need strict single-flight, that's a
 follow-up.
 
+### `cache:` field — params-aware memoisation on a leaf source
+
+Distinct from the `type: cache` operator above. The operator
+memoises **one** snapshot per upstream. This field memoises **many
+snapshots per source**, keyed on the parameter tuple used at each
+Fetch. Attach it to any parameterised leaf source:
+
+```yaml
+user_posts:
+  type: http
+  parameters:
+    user_id: {type: int, required: true}
+  url:  https://api.example.com/users/${params.user_id}/posts
+  cache:
+    ttl:  5m         # freshness window per (user_id → posts) entry
+    size: 200        # LRU cap; oldest entry evicts when exceeded
+```
+
+Consumers that call the same source with the same params inside
+the TTL hit the cache. The cache is a bounded LRU with per-entry
+TTL and single-flight — N concurrent callers with the same params
+issue one upstream fetch, not N. Errors aren't cached (retry on
+next call).
+
+| Field | Required | Notes |
+|---|---|---|
+| `ttl:` | ✓ | duration string; same syntax as elsewhere |
+| `size:` |   | LRU cap. Zero (or omitted) → 100; negative → unbounded |
+
+**Where this actually fires today** — the `join` operator's
+per-lookup fan-out. Each driver row derives a params tuple via
+the lookup's `on:` expressions; identical tuples across driver
+rows hit the cache and skip the upstream call. This is feature G
+of the tui-builder integration batch. Automatic on for join
+lookups even without an explicit `cache:` block (defaults: 60s
+TTL, 100 entries) — declare `cache:` to tune the numbers.
+
+Same primitive will drive cursor-driven detail refetch (the
+"kubectl describe on hover" pattern) once that consumer lands — a
+cursor sweep across a table shouldn't re-hit the detail endpoint
+for a row it just visited.
+
 ### `merge` (source) is still supported
 
 The `merge` kind pre-dates the union operator and remains

@@ -2,6 +2,7 @@ package build
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/jsdrews/tuilib/pkg/inspector"
@@ -179,7 +180,49 @@ func ApplyData(c *Component, data any, th theme.Theme) {
 		if c.Cfg.Source != "" {
 			applyTree(c, data, th)
 		}
+	case KTextview:
+		applyTextview(c, data)
 	}
+}
+
+// applyTextview coerces a source's response into a single string and
+// replaces the textview buffer via SetContent. Handles the shapes tui-
+// builder sources emit:
+//
+//   - string       — format:text bodies (kubectl describe / help pages
+//                    / raw markdown) pass through verbatim.
+//   - []byte       — same as string.
+//   - []any strings — joined with '\n' (matches logview's []any-of-string
+//                    convention so a source can back either).
+//   - anything else — fmt.Sprint fallback (rare; declared JSON should
+//                    prefer type: inspector auto).
+//
+// tuilib's textview handles its own word-wrap + search + scroll, so we
+// don't preprocess the string in any way.
+func applyTextview(c *Component, data any) {
+	var s string
+	switch x := data.(type) {
+	case string:
+		s = x
+	case []byte:
+		s = string(x)
+	case []any:
+		var b strings.Builder
+		for i, v := range x {
+			if i > 0 {
+				b.WriteByte('\n')
+			}
+			if str, ok := v.(string); ok {
+				b.WriteString(str)
+			}
+		}
+		s = b.String()
+	default:
+		if data != nil {
+			s = fmt.Sprint(data)
+		}
+	}
+	c.Textview.SetContent(s)
 }
 
 // applyLogview replaces the logview buffer with the data. Plain strings

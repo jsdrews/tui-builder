@@ -557,6 +557,8 @@ func setLoading(c *build.Component, on bool) tea.Cmd {
 		return c.Tree.SetLoading(on)
 	case build.KInspector:
 		return c.Inspector.SetLoading(on)
+	case build.KTextview:
+		return c.Textview.SetLoading(on)
 	}
 	return nil
 }
@@ -667,6 +669,8 @@ func setFocused(c *build.Component, on bool) {
 		c.Tree.SetFocused(on)
 	case build.KInspector:
 		c.Inspector.SetFocused(on)
+	case build.KTextview:
+		c.Textview.SetFocused(on)
 	}
 }
 
@@ -682,6 +686,8 @@ func componentCapturing(c *build.Component) bool {
 		return c.Tree.Searching()
 	case build.KInspector:
 		return c.Inspector.Searching()
+	case build.KTextview:
+		return c.Textview.Searching()
 	}
 	return false
 }
@@ -698,6 +704,8 @@ func componentHelp(c *build.Component) []key.Binding {
 		return c.Tree.Help()
 	case build.KInspector:
 		return c.Inspector.Help()
+	case build.KTextview:
+		return c.Textview.Help()
 	}
 	return nil
 }
@@ -1054,6 +1062,10 @@ func updateComponent(c *build.Component, msg tea.Msg) tea.Cmd {
 	case build.KInspector:
 		m, cmd := c.Inspector.Update(msg)
 		*c.Inspector = m
+		return cmd
+	case build.KTextview:
+		m, cmd := c.Textview.Update(msg)
+		*c.Textview = m
 		return cmd
 	}
 	return nil

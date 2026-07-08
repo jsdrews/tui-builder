@@ -111,8 +111,40 @@ type Source struct {
 	Lookups map[string]JoinLookup `yaml:"lookups,omitempty"`
 	Emit    string                `yaml:"emit,omitempty"`
 
-	// ── cache ──
+	// ── cache (as an operator, `type: cache`) ──
 	TTL string `yaml:"ttl,omitempty"`
+
+	// ── cache (as a per-leaf modifier on any parameterized source) ──
+	//
+	// Distinct from `type: cache`. The operator wraps an upstream once
+	// and caches ONE snapshot for a TTL — right for sources whose
+	// params don't change (a background poll that everyone shares).
+	// This field, in contrast, opts a PARAMS-BOUND source into
+	// memoisation keyed on the parameter tuple: N different calls
+	// with M unique (param → value) tuples produce M upstream
+	// fetches, not N. Populated on http/exec/file/websocket/static
+	// sources that declare `parameters:`, or on any source used as a
+	// join lookup, so cursor-driven inspectors + join-per-row lookups
+	// don't hammer the upstream.
+	Cache *CacheSpec `yaml:"cache,omitempty"`
+}
+
+// CacheSpec configures the per-leaf param-aware cache attached to a
+// parameterized source. Applies to Fetch (snapshot mode) only —
+// streaming Subscribe passes through untouched, since caching
+// incremental events doesn't fit the (params → snapshot) model.
+type CacheSpec struct {
+	// TTL is the freshness window. Each entry evicts once
+	// time.Since(insertedAt) >= TTL, then the next Fetch with the
+	// same params re-invokes the upstream. Required; must parse
+	// via time.ParseDuration ("30s", "2m", "1h").
+	TTL string `yaml:"ttl"`
+	// Size caps the entry count. When a Fetch with a new params
+	// tuple would push over Size, the least-recently-used entry
+	// evicts. Zero (or omitted) means 100. Negative means unbounded
+	// — safe only when the parameter space itself is bounded (e.g.
+	// enum values); watch memory otherwise.
+	Size int `yaml:"size,omitempty"`
 }
 
 // NewEntry is an identity passthrough kept alive for test
@@ -400,6 +432,14 @@ func (s *Source) validateLeafShared(path string) error {
 	if s.Timeout != "" {
 		if _, err := time.ParseDuration(s.Timeout); err != nil {
 			return fmt.Errorf("%s: invalid timeout %q: %w", path, s.Timeout, err)
+		}
+	}
+	if s.Cache != nil {
+		if s.Cache.TTL == "" {
+			return fmt.Errorf("%s.cache: `ttl:` is required (duration string, e.g. 30s)", path)
+		}
+		if _, err := time.ParseDuration(s.Cache.TTL); err != nil {
+			return fmt.Errorf("%s.cache: invalid ttl %q: %w", path, s.Cache.TTL, err)
 		}
 	}
 	return nil

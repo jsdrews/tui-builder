@@ -21,18 +21,23 @@ import (
 //   - Fetch the driver once → get []any of rows.
 //   - For each row, compute lookup params by evaluating the `on:`
 //     expressions against the row.
-//   - For each lookup (in parallel within a row), clone the lookup
-//     source cfg, BindParams with the row's computed values, build a
-//     concrete ds.Source from the bound cfg, Fetch.
+//   - For each lookup (in parallel within a row), consult that
+//     lookup's ParamCache. Hit → return cached value; miss → clone
+//     the lookup source cfg, BindParams with the row's computed
+//     values, build a concrete ds.Source from the bound cfg, Fetch,
+//     store. Single-flight collapses concurrent duplicates.
 //   - Assemble per-row output by Emit shape (separate / merged).
 //   - On lookup error: fail (abort whole join) or skip (drop row).
 //
 // We don't subscribe — Subscribe returns ErrNotStreaming. Joining
 // over a stream needs windowing we haven't designed yet.
 //
-// We don't cache — each driver row triggers fresh lookup fetches. An
-// LRU keyed on the params tuple is a natural follow-up when N gets
-// large enough to hurt; v1 favours simplicity.
+// Caching (feature G): every lookup gets a ParamCache. When the
+// lookup's cfg.Source declares `cache: {ttl, size}` those values
+// drive the LRU; otherwise defaults kick in (see cacheDefaults
+// below). The cache lives for the join's process lifetime, so
+// re-fetches of the same join across polls also benefit from
+// prior-fetch results within the TTL.
 //
 // Lookups must be leaf-kind entries (not operator pipelines) with
 // declared `parameters:`. The validator enforces. The reason: joins
@@ -62,10 +67,15 @@ func newJoin(name string, driver ds.Source, def *cfg.Source, lookupSources map[s
 			}
 			progs[paramName] = prog
 		}
+		cache, err := buildLookupCache(src)
+		if err != nil {
+			return nil, fmt.Errorf("join.lookups.%s: %w", lname, err)
+		}
 		lookups = append(lookups, preparedLookup{
 			name:    lname,
 			source:  src,
 			onProgs: progs,
+			cache:   cache,
 		})
 	}
 
@@ -84,11 +94,31 @@ func newJoin(name string, driver ds.Source, def *cfg.Source, lookupSources map[s
 
 // preparedLookup pre-bakes everything reusable across rows: the
 // lookup's name, the cfg.Source template (we clone per row before
-// BindParams mutates it), and the compiled `on:` expressions.
+// BindParams mutates it), the compiled `on:` expressions, and a
+// ParamCache the runLookup path consults before hitting the network.
 type preparedLookup struct {
 	name    string
 	source  *cfg.Source
 	onProgs map[string]*expr.Program
+	cache   *ds.ParamCache
+}
+
+// lookupCacheDefaults are used when a join lookup's source omits
+// `cache:` — feature G's automatic caching, on by default. TTL
+// picked to comfortably cover a poll cycle without going stale in
+// the "next fetch surfaces a corrected value" cadence users tend to
+// expect from live dashboards.
+var lookupCacheDefaults = &cfg.CacheSpec{TTL: "60s", Size: ds.ParamCacheDefaultSize}
+
+// buildLookupCache returns a ParamCache for the given lookup source.
+// Uses the source's own `cache:` block when present, otherwise the
+// lookup defaults.
+func buildLookupCache(src *cfg.Source) (*ds.ParamCache, error) {
+	spec := src.Cache
+	if spec == nil {
+		spec = lookupCacheDefaults
+	}
+	return ds.NewParamCache(spec)
 }
 
 // joinSource implements ds.Source. Fetch fans out the per-row lookup
@@ -182,9 +212,13 @@ func (j *joinSource) enrichRow(ctx context.Context, row any) (any, error) {
 	}
 }
 
-// runLookup evaluates the lookup's `on:` expressions against the row,
-// clones the lookup source's cfg, binds the resulting params, builds
-// a concrete Source from the bound cfg, and fetches.
+// runLookup evaluates the lookup's `on:` expressions against the row
+// into a params tuple, then consults the lookup's ParamCache. A
+// cache hit returns immediately; a miss clones the lookup source's
+// cfg, binds the params, builds a concrete Source from the bound
+// cfg, fetches, and stores. The cache's single-flight collapses
+// concurrent duplicate rows so N driver rows with identical params
+// issue one upstream fetch, not N.
 func (j *joinSource) runLookup(ctx context.Context, look preparedLookup, row any) (any, error) {
 	params := make(map[string]string, len(look.onProgs))
 	for paramName, prog := range look.onProgs {
@@ -194,15 +228,17 @@ func (j *joinSource) runLookup(ctx context.Context, look preparedLookup, row any
 		}
 		params[paramName] = fmt.Sprint(v)
 	}
-	cloned := look.source.Clone()
-	if err := cloned.BindParams(params); err != nil {
-		return nil, fmt.Errorf("bind: %w", err)
-	}
-	src, err := ds.BuildLeaf(cloned, nil)
-	if err != nil {
-		return nil, fmt.Errorf("build: %w", err)
-	}
-	return src.Fetch(ctx)
+	return look.cache.FetchOrLoad(params, func() (any, error) {
+		cloned := look.source.Clone()
+		if err := cloned.BindParams(params); err != nil {
+			return nil, fmt.Errorf("bind: %w", err)
+		}
+		src, err := ds.BuildLeaf(cloned, nil)
+		if err != nil {
+			return nil, fmt.Errorf("build: %w", err)
+		}
+		return src.Fetch(ctx)
+	})
 }
 
 // mergeRowLookups merges every lookup result into the driver row (per

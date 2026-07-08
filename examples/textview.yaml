@@ -1,0 +1,74 @@
+# textview.yaml — static-text viewer with /-search + `w` wrap toggle.
+#
+# `type: textview` (feature F from the tui-builder integration batch) is
+# the "show me a document" primitive — kubectl describe output, help
+# pages, markdown blobs, any text you want scrolled, searched, wrapped.
+# Distinct from logview: logview streams, appends, and rings a tail;
+# textview replaces the whole buffer on refresh via tuilib's SetContent.
+#
+# Modes:
+#   - Static content: `content: |` inline in YAML (this example).
+#   - Source-bound:   `source: <name>` — any `format: text` source
+#                     works (exec / http / file). The response body
+#                     becomes the buffer wholesale on each fetch.
+#
+# Keys when focused:
+#   ↓/j ↑/k          scroll
+#   g / G            top / bottom
+#   ctrl+u / ctrl+d  half page
+#   pgup / pgdown    page
+#   /                search (esc clears)
+#   n / N            next / previous match
+#   w                toggle wrap
+#
+# The paired example below stacks a static help pane on top of a live
+# `date`-emitting exec pane, so you can see both modes side by side.
+app:
+  title: Textview demo
+  theme: nord
+
+data:
+  sources:
+    now:
+      type:    exec
+      command: [sh, -c, "printf 'Current time (refreshed every 3s):\\n\\n  %s' \"$(date)\""]
+      format:  text
+      refresh: 3s
+
+tui:
+  components:
+    help:
+      type:       textview
+      title:      Help (static)
+      searchable: true
+      wrap:       true
+      content: |
+        # Textview help
+
+        This pane is populated via the config's `content:` field — no
+        data source involved. Use it for onboarding notes, keybind
+        references, or any pinned document.
+
+        Try:
+          /         search for a term
+          n / N     next / previous match
+          w         toggle word-wrap
+          g / G     top / bottom
+          j / k     scroll
+
+        Source-bound textviews (see the right pane) work the same way
+        but replace the buffer on every fetch. Cursor + query survive
+        the swap.
+
+    clock:
+      type:       textview
+      title:      Now (source-bound, refresh 3s)
+      searchable: true
+      source:     now
+
+  screen:
+    title: Textview
+    layout:
+      hstack:
+        - {flex: 1, component: help}
+        - {flex: 1, component: clock}

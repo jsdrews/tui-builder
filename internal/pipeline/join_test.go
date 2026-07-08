@@ -264,6 +264,97 @@ func stubPostsServer(t *testing.T, posts map[int][]string) *httptest.Server {
 	}))
 }
 
+// TestJoinLookupCacheDedupsDuplicateParams pins feature G's win: when
+// two driver rows produce identical lookup params, the upstream only
+// fires once. Without the cache the stub server would see two calls;
+// with the cache it sees one.
+func TestJoinLookupCacheDedupsDuplicateParams(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`["hello"]`))
+	}))
+	defer srv.Close()
+
+	// Two driver rows resolve to the same user_id → same lookup params.
+	driver := &fakeSource{data: []any{
+		map[string]any{"id": 1, "name": "Ada"},
+		map[string]any{"id": 1, "name": "Ada-again"},
+	}}
+	sourceDefs := map[string]*cfg.Source{
+		"posts": cfg.NewEntry(&cfg.Source{
+			Type:       "http",
+			Parameters: map[string]*cfg.Parameter{"user_id": {Type: "int", Required: true}},
+			URL:        srv.URL + "/users/${params.user_id}/posts",
+		}),
+	}
+	defs := map[string]*cfg.Source{
+		"users_with_posts": cfg.NewEntry(&cfg.Source{
+			Type: "join", Driver: cfg.JoinDriver{From: "drv"},
+			Lookups: map[string]cfg.JoinLookup{
+				"posts": {From: "posts", On: map[string]string{"user_id": "id"}},
+			},
+		}),
+	}
+	reg, err := Build(map[string]ds.Source{"drv": driver}, mergeEntries(sourceDefs, defs), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Get("users_with_posts").Fetch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if hits != 1 {
+		t.Errorf("want 1 upstream call (cache dedup), got %d", hits)
+	}
+}
+
+// TestJoinLookupCacheHonorsCacheConfig — the lookup's own `cache:`
+// block overrides the automatic defaults. A pathologically short TTL
+// forces every visit to miss, so both rows fire distinct requests.
+func TestJoinLookupCacheHonorsCacheConfig(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`["hello"]`))
+	}))
+	defer srv.Close()
+
+	driver := &fakeSource{data: []any{
+		map[string]any{"id": 1},
+		map[string]any{"id": 1},
+	}}
+	sourceDefs := map[string]*cfg.Source{
+		"posts": cfg.NewEntry(&cfg.Source{
+			Type:       "http",
+			Parameters: map[string]*cfg.Parameter{"user_id": {Type: "int", Required: true}},
+			URL:        srv.URL + "/users/${params.user_id}/posts",
+			// 1ns TTL means each get() call sees the entry as already
+			// expired, forcing a fresh load every time.
+			Cache: &cfg.CacheSpec{TTL: "1ns", Size: 10},
+		}),
+	}
+	defs := map[string]*cfg.Source{
+		"users_with_posts": cfg.NewEntry(&cfg.Source{
+			Type: "join", Driver: cfg.JoinDriver{From: "drv"},
+			Lookups: map[string]cfg.JoinLookup{
+				"posts": {From: "posts", On: map[string]string{"user_id": "id"}},
+			},
+		}),
+	}
+	reg, err := Build(map[string]ds.Source{"drv": driver}, mergeEntries(sourceDefs, defs), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Get("users_with_posts").Fetch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if hits < 2 {
+		t.Errorf("want at least 2 upstream calls (short TTL forces re-fetch), got %d", hits)
+	}
+}
+
 func fmtSscanf(s, format string, args ...any) (int, error) {
 	return fmt.Sscanf(s, format, args...)
 }
