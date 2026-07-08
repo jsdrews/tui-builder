@@ -304,7 +304,11 @@ func (m *Model) Layout() layout.Node {
 	body := m.tree.RenderNode()
 	switch {
 	case m.alertModal != nil:
-		return layout.ZStack(body, layout.Center(70, 9, layout.Sized(m.alertModal)))
+		// Autosize is on (see newAlertModal) so the alert measures its
+		// own content and picks a centered rect within the outer bounds
+		// — no fixed-size Center wrapper. tuilib caps at 80%×60% and
+		// scrolls internally past that.
+		return layout.ZStack(body, layout.Sized(m.alertModal))
 	case m.confirmModal != nil:
 		return layout.ZStack(body, layout.Center(60, 7, layout.Sized(m.confirmModal)))
 	case m.formModal != nil:
@@ -888,41 +892,21 @@ func (m *Model) newConfirmModal(label, message string) confirm.Model {
 	return confirm.New(opts)
 }
 
-// newAlertModal builds an error-tinted alert dialog. The message is
-// wrapped to fit the modal width and capped at ~5 lines so very long
-// subprocess errors don't blow up the screen — alert itself does not
-// wrap text. tuilib's convention is to override ActiveColor with the
-// theme's ErrorBG to get the red-edge "something went wrong" look.
+// newAlertModal builds an error-tinted alert dialog. Autosize is on so
+// the modal caps at 80%×60% of the screen (per tuilib) and word-wraps
+// the full message with internal scroll — kubectl-describe-shape errors
+// no longer clip to five lines. tuilib's convention is to override
+// ActiveColor with the theme's ErrorBG to get the red-edge "something
+// went wrong" look. Layout() pairs this with layout.Sized(...) instead
+// of layout.Center(w, h, ...) since the alert measures itself.
 func (m *Model) newAlertModal(title, message string) alert.Model {
 	opts := m.th.Alert()
 	opts.Title = title
-	opts.Message = wrapMessage(message, 64, 5)
+	opts.Message = message
 	opts.OK = "OK"
 	opts.ActiveColor = m.th.ErrorBG
+	opts.Autosize = true
 	return alert.New(opts)
-}
-
-// wrapMessage hard-wraps s into at most maxLines lines of maxWidth cells.
-// Overflow lines are truncated with an ellipsis on the last visible line.
-// Doesn't try to be word-boundary smart — error text isn't prose.
-func wrapMessage(s string, maxWidth, maxLines int) string {
-	var lines []string
-	for _, raw := range strings.Split(s, "\n") {
-		for len(raw) > maxWidth {
-			lines = append(lines, raw[:maxWidth])
-			raw = raw[maxWidth:]
-		}
-		lines = append(lines, raw)
-	}
-	if len(lines) > maxLines {
-		lines = lines[:maxLines]
-		last := lines[maxLines-1]
-		if len(last) > maxWidth-1 {
-			last = last[:maxWidth-1]
-		}
-		lines[maxLines-1] = last + "…"
-	}
-	return strings.Join(lines, "\n")
 }
 
 // tryPush handles a key that the focused component has an on_enter
