@@ -455,11 +455,33 @@ screens:
         prompts:               # optional — collect input via a form modal BEFORE
                                # dispatch. Values feed ${prompt.<key>} into run argv
                                # AND confirm message AND notice. Same field shapes
-                               # as app.prompts (text / select / confirm). Cancel
-                               # from the form aborts the action.
-          - {key: <string>, label: <string>, type: text|select|confirm, ...}
+                               # as app.prompts. Cancel from the form aborts the
+                               # action. Field shapes per `type:`:
+                               #
+                               # text (default):
+                               #   - {key: <string>, label: <string>,
+                               #      placeholder: <string>, initial: <string>}
+                               #
+                               # select (selection popup — good for "pick a target
+                               # before running" or gating destructive commands
+                               # behind an explicit choice; scope, environment,
+                               # container, replica-count, etc.):
+                               #   - {key: <string>, label: <string>, type: select,
+                               #      options: [<string>, ...],
+                               #      initial_index: <int>}
+                               #
+                               # confirm (yes/no toggle — value is "true" or
+                               # "false" when substituted):
+                               #   - {key: <string>, label: <string>, type: confirm,
+                               #      initial_bool: <bool>}
         run:         [<argv...>] # ${selection.*} + ${env.*} + ${prompt.*} substituted
                                # at fire time (after any prompts have been collected)
+                               #
+                               # Confirming destructive actions: `confirm:` is a
+                               # yes/no modal shown AFTER prompts and BEFORE run.
+                               # Reference ${prompt.*} in the message to include
+                               # the collected values in the preview — e.g.
+                               # "Delete pod ${selection.Name} in ${prompt.namespace}?"
 initial: <screen-name>         # required when `screens:` is set
 
 # Template tokens (substituted in titles, URLs, headers, body, items,
