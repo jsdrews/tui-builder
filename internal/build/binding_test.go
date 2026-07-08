@@ -1,9 +1,11 @@
 package build
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jsdrews/tuilib/pkg/theme"
+	"github.com/jsdrews/tuilib/pkg/tree"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
 )
@@ -76,6 +78,152 @@ func TestDeriveInspectorFieldsAutoNestsSubStructures(t *testing.T) {
 	}
 	if tags.Children[0].Label != "[0]" || tags.Children[0].Value != "a" {
 		t.Errorf("tags[0]: want ([0], a), got (%q, %q)", tags.Children[0].Label, tags.Children[0].Value)
+	}
+}
+
+// treeComponent builds a KTree Component from a config the way NewComponent
+// would — used by the applyTree tests to exercise the real construction
+// path (including the seeded placeholder root that makes InitialDepth's
+// pre-expansion carry across SetRoot).
+func treeComponent(t *testing.T, cfgComp *cfg.Component) *Component {
+	t.Helper()
+	th := theme.Nord()
+	c, err := NewComponent(cfgComp, th)
+	if err != nil {
+		t.Fatalf("build tree component: %v", err)
+	}
+	c.Tree.SetDimensions(60, 20)
+	return c
+}
+
+// collectLabels walks the current tree and returns every node's label
+// in DFS order. Uses tree.Selected() by moving the cursor row-by-row —
+// tuilib doesn't expose the row set directly, so we scan via View()
+// instead which reflects only currently-visible rows.
+func visibleLabels(m *tree.Model) []string {
+	view := m.View()
+	// The view includes the pane frame + tree body. Split lines and keep
+	// non-empty ones after trimming whitespace and the expand glyphs.
+	lines := strings.Split(view, "\n")
+	var labels []string
+	for _, ln := range lines {
+		trimmed := strings.TrimSpace(ln)
+		if trimmed == "" {
+			continue
+		}
+		// Strip leading tree glyphs (▸ ▾ · space).
+		trimmed = strings.TrimLeft(trimmed, "▸▾· \t")
+		labels = append(labels, trimmed)
+	}
+	return labels
+}
+
+// TestApplyTreeFlatBindsItemsAsChildren covers the ungrouped path:
+// items become direct children of the root, labeled via Cfg.Label.
+func TestApplyTreeFlatBindsItemsAsChildren(t *testing.T) {
+	th := theme.Nord()
+	c := treeComponent(t, &cfg.Component{
+		Type:         "tree",
+		Title:        "Resources",
+		Source:       "src",
+		Label:        cfg.Path{"name"},
+		InitialDepth: 2,
+	})
+	data := []any{
+		map[string]any{"name": "alpha"},
+		map[string]any{"name": "beta"},
+		map[string]any{"name": "gamma"},
+	}
+	applyTree(c, data, th)
+	labels := visibleLabels(c.Tree)
+	// Expect "Resources" pane title, "Resources" root row, then 3 leaves.
+	// Pane title AND root label are both "Resources" per the fallback.
+	joined := strings.Join(labels, "|")
+	for _, want := range []string{"alpha", "beta", "gamma"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("expected %q in visible labels, got: %s", want, joined)
+		}
+	}
+}
+
+// TestApplyTreeGroupByBucketsItems covers the kubectl-shape use case:
+// a flat list gets bucketed under parent nodes named for the GroupBy
+// value; leaves land under their bucket.
+func TestApplyTreeGroupByBucketsItems(t *testing.T) {
+	th := theme.Nord()
+	c := treeComponent(t, &cfg.Component{
+		Type:         "tree",
+		Title:        "Namespace",
+		Source:       "src",
+		Label:        cfg.Path{"name"},
+		GroupBy:      cfg.Path{"kind"},
+		InitialDepth: 3,
+	})
+	data := []any{
+		map[string]any{"kind": "Pod", "name": "nginx-a"},
+		map[string]any{"kind": "Service", "name": "nginx"},
+		map[string]any{"kind": "Pod", "name": "nginx-b"},
+	}
+	applyTree(c, data, th)
+	labels := visibleLabels(c.Tree)
+	joined := strings.Join(labels, "|")
+	// Buckets in first-appearance order: Pod, then Service.
+	podIdx := strings.Index(joined, "Pod")
+	svcIdx := strings.Index(joined, "Service")
+	if podIdx < 0 || svcIdx < 0 {
+		t.Fatalf("expected both bucket labels in view; got: %s", joined)
+	}
+	if podIdx > svcIdx {
+		t.Errorf("Pod should appear before Service (first-appearance order); got: %s", joined)
+	}
+}
+
+// TestSourceTreeRootLabelFallbacks pins the fallback chain — matters
+// because the root label doubles as the identity key tuilib uses to
+// carry expand state across SetRoot swaps.
+func TestSourceTreeRootLabelFallbacks(t *testing.T) {
+	cases := []struct {
+		name string
+		in   *cfg.Component
+		want string
+	}{
+		{"explicit root_label wins", &cfg.Component{RootLabel: "R", Title: "T", Source: "S"}, "R"},
+		{"title used when no root_label", &cfg.Component{Title: "T", Source: "S"}, "T"},
+		{"source name used when both empty", &cfg.Component{Source: "S"}, "S"},
+	}
+	for _, tc := range cases {
+		if got := sourceTreeRootLabel(tc.in); got != tc.want {
+			t.Errorf("%s: want %q, got %q", tc.name, tc.want, got)
+		}
+	}
+}
+
+// TestApplyTreePreservesRootExpansionAcrossRefresh pins the live-update
+// contract: the root's expand state survives ApplyData because
+// buildTree seeds a placeholder root with the same label the apply path
+// uses, and tuilib.tree.SetRoot preserves reachable expanded entries.
+func TestApplyTreePreservesRootExpansionAcrossRefresh(t *testing.T) {
+	th := theme.Nord()
+	c := treeComponent(t, &cfg.Component{
+		Type:         "tree",
+		Title:        "Resources",
+		Source:       "src",
+		Label:        cfg.Path{"name"},
+		InitialDepth: 2,
+	})
+	// First fill.
+	applyTree(c, []any{map[string]any{"name": "alpha"}}, th)
+	if !strings.Contains(strings.Join(visibleLabels(c.Tree), "|"), "alpha") {
+		t.Fatalf("first fill: alpha should be visible (root expanded)")
+	}
+	// Second fill with swapped item — root stays expanded, new item visible.
+	applyTree(c, []any{map[string]any{"name": "beta"}}, th)
+	labels := strings.Join(visibleLabels(c.Tree), "|")
+	if strings.Contains(labels, "alpha") {
+		t.Errorf("post-refresh: alpha should be gone; got: %s", labels)
+	}
+	if !strings.Contains(labels, "beta") {
+		t.Errorf("post-refresh: beta should be visible (root still expanded); got: %s", labels)
 	}
 }
 

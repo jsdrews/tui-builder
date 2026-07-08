@@ -452,6 +452,26 @@ type Component struct {
 
 	// tree fields
 	Root *TreeNode `yaml:"root,omitempty"`
+	// Label is the dot-path (or fallback chain) picking each leaf's
+	// display label from a source-bound tree's items. Required when
+	// `type: tree` binds a `source:`; ignored for static-root trees.
+	// Same semantics as list.Item and table.Column.Value.
+	Label Path `yaml:"label,omitempty"`
+	// GroupBy is the dot-path bucketing a flat iterable into named
+	// parent nodes — useful for kubectl-shape data where a single
+	// list of resources should render categorized by kind. Buckets
+	// preserve first-appearance order; each item lands under the
+	// parent whose label equals its GroupBy value (stringified).
+	// Optional — when empty, all items become direct children of
+	// the root.
+	GroupBy Path `yaml:"group_by,omitempty"`
+	// RootLabel is the display label for the root node of a source-
+	// bound tree. Supports ${selection.*} / ${env.*} / ${prompt.*}
+	// substitution. Defaults to the component's Title when empty;
+	// falls back to the source name if both are empty. Kept stable
+	// across data refreshes so tuilib.tree.SetRoot's expanded-state
+	// preservation actually hits — the label is the key.
+	RootLabel string `yaml:"root_label,omitempty"`
 
 	// inspector fields
 	Fields []InspectorField `yaml:"fields,omitempty"`

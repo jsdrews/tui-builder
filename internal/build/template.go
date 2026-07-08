@@ -176,6 +176,7 @@ func cloneComponent(c *cfg.Component, sel Selection) *cfg.Component {
 	out.FilterPlaceholder = substitute(c.FilterPlaceholder, sel)
 	out.InitialFilter = substitute(c.InitialFilter, sel)
 	out.InitialQuery = substitute(c.InitialQuery, sel)
+	out.RootLabel = substitute(c.RootLabel, sel)
 
 	if c.Items != nil {
 		out.Items = make([]string, len(c.Items))

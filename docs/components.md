@@ -382,11 +382,23 @@ components:
     max_lines:   <int>          # 0=default 10000, -1=unbounded
     filter_mode: <bool>
 
-    # tree
+    # tree (static — declare the root inline)
     root:
       label: <string>
       children: [<TreeNode>, ...]
     initial_depth: <int>         # 0=root only, 1=root expanded, ...
+    # tree (source-bound — data-driven, live updates via SetRoot)
+    source:     <name>           # data.sources.<name>
+    label:      <dot-path>       # each leaf's display label (required when source: set)
+    group_by:   <dot-path>       # optional — bucket the flat iterable
+                                 # by this value; buckets become parent
+                                 # nodes labeled with the bucket value.
+                                 # kubectl-shape: `group_by: kind` renders
+                                 # resources categorized by type.
+    root_label: <string>         # optional — root node's display label
+                                 # (supports ${selection.*}/${env.*}/
+                                 # ${prompt.*}). Defaults to `title:`,
+                                 # then to the source name.
 
     # inspector
     fields:
@@ -479,6 +491,7 @@ initial: <screen-name>         # required when `screens:` is set
 | `examples/table_styled.yaml` | Colored cells + clickable hyperlinks, `initial_sort` |
 | `examples/logview.yaml` | Streaming-log pane, `/`-search, filter mode, `initial_query` |
 | `examples/tree.yaml` | Hierarchical view, expand/collapse, search, `initial_depth` |
+| `examples/tree_source.yaml` | Data-driven tree: a `type: file` source of people bucketed by `group_by: team`; cursor + expand state survive `refresh: 5s` polling |
 | `examples/inspector.yaml` | Two-column label/value record viewer, nested groups |
 | `examples/inspector_auto.yaml` | `auto: true` — inspector derives fields from any JSON response (GitHub repo record). Nested maps/arrays expand instead of stringifying |
 | `examples/table_wide.yaml` | Wide table demonstrating horizontal scroll (`←`/`→`, `shift+←`/`shift+→`, `0`/`$`) |

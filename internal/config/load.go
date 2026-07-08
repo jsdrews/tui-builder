@@ -292,7 +292,9 @@ func (c *Component) validate(path string) error {
 			// are split on \n; JSON []string is used as-is. No per-line
 			// mapping field needed.
 		case "tree":
-			return fmt.Errorf("%s: source binding not yet supported for %s", path, c.Type)
+			if len(c.Label) == 0 || c.Label[0] == "" {
+				return fmt.Errorf("%s: tree bound to source %q needs `label:` (dot-path to each leaf's display label)", path, c.Source)
+			}
 		}
 	}
 	return nil

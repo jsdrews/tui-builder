@@ -175,6 +175,10 @@ func ApplyData(c *Component, data any, th theme.Theme) {
 		applyInspector(c, data, th)
 	case KLogview:
 		applyLogview(c, data, th)
+	case KTree:
+		if c.Cfg.Source != "" {
+			applyTree(c, data, th)
+		}
 	}
 }
 
@@ -226,6 +230,57 @@ func applyTable(c *Component, data any, th theme.Theme) {
 		rows = append(rows, table.Row(cells))
 	}
 	c.Table.SetRows(rows)
+}
+
+// applyTree turns a source's response into a live tree via
+// tuilib.tree.SetRoot. Feature A from the tui-builder integration
+// batch — the "namespace → resource kind → resource name" pattern.
+//
+// Modes:
+//   - Cfg.GroupBy empty  → every item becomes a direct child of the
+//     root, labeled via Cfg.Label.
+//   - Cfg.GroupBy set    → items bucket by their GroupBy value; each
+//     bucket becomes a parent node whose label IS the bucket value,
+//     items land under it labeled via Cfg.Label. Bucket order is
+//     first-appearance so a stable API response yields a stable tree.
+//
+// The root's label matches sourceTreeRootLabel(cfg) — the same string
+// buildTree seeded so tuilib's expand state carries across refreshes.
+func applyTree(c *Component, data any, th theme.Theme) {
+	items := ds.Iter(data)
+	rules := c.Cfg.ColorRules
+	label := func(it any) string {
+		return applyColorRules(ds.FirstString(it, c.Cfg.Label), rules, th)
+	}
+	root := &yamlNode{label: sourceTreeRootLabel(c.Cfg)}
+	if len(c.Cfg.GroupBy) == 0 {
+		for _, it := range items {
+			root.children = append(root.children, &yamlNode{label: label(it)})
+		}
+		c.Tree.SetRoot(root)
+		return
+	}
+	// Bucket by GroupBy value. Preserve first-appearance order via a
+	// parallel slice; the map is just for lookup during the walk.
+	type bucket struct {
+		node *yamlNode
+	}
+	buckets := map[string]*bucket{}
+	var order []string
+	for _, it := range items {
+		key := ds.FirstString(it, c.Cfg.GroupBy)
+		b, ok := buckets[key]
+		if !ok {
+			b = &bucket{node: &yamlNode{label: key}}
+			buckets[key] = b
+			order = append(order, key)
+		}
+		b.node.children = append(b.node.children, &yamlNode{label: label(it)})
+	}
+	for _, k := range order {
+		root.children = append(root.children, buckets[k].node)
+	}
+	c.Tree.SetRoot(root)
 }
 
 func applyInspector(c *Component, data any, th theme.Theme) {

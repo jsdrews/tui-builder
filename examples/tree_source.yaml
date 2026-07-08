@@ -1,0 +1,63 @@
+# tree_source.yaml — data-driven tree with live updates.
+#
+# Feature A from the tui-builder integration batch: `type: tree` now
+# accepts a `source:` binding. The tree rebuilds in place on every
+# fetch via tuilib.tree.SetRoot — expand state and cursor survive
+# refreshes, so periodic polling doesn't clobber the view.
+#
+# Two shapes:
+#
+#   Flat (leaves under root):
+#     tree:
+#       source: <name>
+#       label:  <dot-path>         # each leaf's display label
+#
+#   Grouped (parents per bucket, leaves under each parent — kubectl-shape):
+#     tree:
+#       source:   <name>
+#       label:    <dot-path>       # leaf label
+#       group_by: <dot-path>       # bucket by this value
+#
+# This example uses the same fixture as `file_fixture.yaml` (a flat list
+# of people) and buckets by `team`, producing:
+#
+#   engineering
+#   ├── Platform
+#   │   ├── Ada Lovelace
+#   │   ├── Alan Turing
+#   │   └── Donald Knuth
+#   ├── Engineering
+#   │   └── Grace Hopper
+#   ├── Reliability
+#   │   └── Margaret Hamilton
+#   └── ...
+#
+# Edit examples/fixtures/people.json in another window while this is
+# running (`refresh: 5s`) — cursor + expand state survive each reload.
+app:
+  title: Team tree
+  theme: nord
+
+data:
+  sources:
+    people:
+      type:    file
+      path:    examples/fixtures/people.json
+      root:    people      # extract the list from `{"people": [...]}`
+      refresh: 5s
+
+tui:
+  components:
+    org:
+      type:          tree
+      title:         Team tree
+      searchable:    true
+      initial_depth: 2
+      source:        people
+      root_label:    engineering
+      group_by:      team    # bucket by this field
+      label:         name    # leaves show this field
+  screen:
+    title: Org
+    layout:
+      component: org

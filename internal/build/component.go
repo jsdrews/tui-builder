@@ -327,6 +327,23 @@ type yamlNode struct {
 func (n *yamlNode) Label() string      { return n.label }
 func (n *yamlNode) Children() []tree.Node { return n.children }
 
+// sourceTreeRootLabel picks the display label for a source-bound tree's
+// root node. Priority: explicit `root_label:` (templated), then Title,
+// then the source name. The label doubles as the identity key tuilib's
+// tree uses for expand-state preservation across SetRoot swaps — so it
+// must be stable across refreshes. All three inputs are static (or
+// templated once per push), which satisfies that.
+func sourceTreeRootLabel(c *cfg.Component) string {
+	switch {
+	case c.RootLabel != "":
+		return c.RootLabel
+	case c.Title != "":
+		return c.Title
+	default:
+		return c.Source
+	}
+}
+
 func convertTree(n *cfg.TreeNode) tree.Node {
 	if n == nil {
 		return nil
@@ -345,7 +362,25 @@ func buildTree(c *cfg.Component, th theme.Theme) tree.Model {
 	opts.Title = c.Title
 	opts.Searchable = c.Searchable
 	opts.InitialDepth = c.InitialDepth
-	opts.Root = convertTree(c.Root)
+	if c.Source != "" {
+		// Source-bound trees start empty until the first fetch fills
+		// them via applyTree → SetRoot. We seed a labeled root plus a
+		// single dummy child so InitialDepth's preExpand actually
+		// fires (it early-returns when kids are empty). That leaves
+		// m.expanded[<root-label>] = true. When SetRoot swaps in the
+		// real tree, pruneExpanded keeps every reachable path and drops
+		// the rest — the root's expanded entry survives because its
+		// label matches, but the dummy child's entry gets pruned. Net
+		// effect: on first data fill, the tree opens to its top level
+		// automatically instead of showing a collapsed root the user
+		// has to hit `E` to open.
+		opts.Root = &yamlNode{
+			label:    sourceTreeRootLabel(c),
+			children: []tree.Node{&yamlNode{label: "__seed__"}},
+		}
+	} else {
+		opts.Root = convertTree(c.Root)
+	}
 	if c.FilterPlaceholder != "" {
 		opts.Filter.Placeholder = c.FilterPlaceholder
 	}
