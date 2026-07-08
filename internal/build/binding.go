@@ -229,7 +229,19 @@ func applyTable(c *Component, data any, th theme.Theme) {
 }
 
 func applyInspector(c *Component, data any, th theme.Theme) {
-	c.Inspector.SetFields(buildInspectorFields(c.Cfg.Fields, data, th))
+	c.Inspector.SetFields(deriveInspectorFields(c.Cfg, data, th))
+}
+
+// deriveInspectorFields picks between the two field-generation modes.
+// Auto walks the fetched value via inspector.FromAny (feature B — dynamic
+// shape, C — nested rendering with no map[...] stringification). Declared
+// mode goes through buildInspectorFields which honors config-declared
+// labels + paths + color rules.
+func deriveInspectorFields(cfg *cfg.Component, data any, th theme.Theme) []inspector.Field {
+	if cfg.Auto {
+		return inspector.FromAny(data)
+	}
+	return buildInspectorFields(cfg.Fields, data, th)
 }
 
 // buildInspectorFields walks the config field tree, plucking each field's

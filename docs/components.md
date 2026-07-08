@@ -396,6 +396,11 @@ components:
         color_rules:               # optional — same syntax as Column.color_rules
           - {when: <string>, color: <color>}
         children: [<InspectorField>, ...]
+    auto: <bool>                   # optional — when true, skip `fields:` and derive
+                                   # the field tree from the fetched value directly.
+                                   # Requires source:. Nested maps expand into
+                                   # Children; arrays get [0], [1] labels; scalars
+                                   # render naturally. Mutually exclusive with fields:.
     initial_depth: <int>           # shared with tree
 
 # Single-screen mode:
@@ -475,6 +480,7 @@ initial: <screen-name>         # required when `screens:` is set
 | `examples/logview.yaml` | Streaming-log pane, `/`-search, filter mode, `initial_query` |
 | `examples/tree.yaml` | Hierarchical view, expand/collapse, search, `initial_depth` |
 | `examples/inspector.yaml` | Two-column label/value record viewer, nested groups |
+| `examples/inspector_auto.yaml` | `auto: true` — inspector derives fields from any JSON response (GitHub repo record). Nested maps/arrays expand instead of stringifying |
 | `examples/table_wide.yaml` | Wide table demonstrating horizontal scroll (`←`/`→`, `shift+←`/`shift+→`, `0`/`$`) |
 | `examples/layout.yaml` | Nested layouts, mixed flex weights |
 | `examples/themes.yaml` | Built-in theme picker reference |

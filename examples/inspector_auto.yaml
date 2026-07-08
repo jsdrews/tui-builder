@@ -1,0 +1,53 @@
+# inspector_auto.yaml — auto-derive fields from any JSON response.
+#
+# Instead of declaring every `{label:, path:}` up front, set `auto: true`
+# and the inspector walks the fetched value directly:
+#
+#   - map[string]any → one field per key (keys sorted alphabetically for
+#     determinism), with nested maps rendered as expandable Children
+#     rather than stringified.
+#   - []any → numbered `[0]`, `[1]`, … children.
+#   - scalars → their natural rendering (numbers without trailing `.0`,
+#     booleans as `true`/`false`, `nil` as `null`).
+#
+# This is the "show me whatever this endpoint returns" mode — handy for
+# REST responses you haven't mapped yet, k8s manifests, or any object
+# whose shape varies too much to declare statically.
+#
+# Trade-offs:
+#   - No column formatting / no ColorRules (they're per-declared-field).
+#   - Labels are the raw JSON keys — `metadata`, not `Metadata`. If you
+#     want relabeling or coloring, switch to the declared `fields:` mode.
+#
+# The example fetches a single GitHub repo record — a good stand-in
+# because the response has strings, numbers, booleans, nested objects
+# (`owner`, `license`, `permissions`), and arrays (`topics`).
+app:
+  title: Inspector auto-derive
+  theme: nord
+
+data:
+  sources:
+    repo:
+      type: http
+      url:     https://api.github.com/repos/charmbracelet/bubbletea
+      refresh: 10m
+      timeout: 15s
+      headers:
+        Accept:               application/vnd.github+json
+        X-GitHub-Api-Version: "2022-11-28"
+
+tui:
+  components:
+    repo_inspector:
+      type: inspector
+      title: charmbracelet/bubbletea
+      filterable: true
+      initial_depth: 1     # show top-level keys, hide their subtrees until expanded
+      source: repo
+      auto: true           # walk the response; no `fields:` needed
+
+  screen:
+    title: Repo (auto)
+    layout:
+      component: repo_inspector

@@ -455,6 +455,14 @@ type Component struct {
 
 	// inspector fields
 	Fields []InspectorField `yaml:"fields,omitempty"`
+	// Auto opts a source-bound inspector into deriving its field tree
+	// from the fetched data via inspector.FromAny. Fields is ignored
+	// when Auto is true — the user is either declaring the record
+	// shape or asking for whatever-comes-back, not both. Handles
+	// nested maps and arrays natively (feature C from the tui-builder
+	// integration batch), so `map[string]any` / `[]any` no longer
+	// stringify to `map[...]` under a scalar field.
+	Auto bool `yaml:"auto,omitempty"`
 
 	// shared hierarchical fields (tree, inspector). InitialDepth pre-
 	// expands every node whose depth is < InitialDepth: 0 = root only,

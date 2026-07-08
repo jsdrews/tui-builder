@@ -259,6 +259,14 @@ func (c *Component) validate(path string) error {
 	if c.Type == "tree" && c.Root == nil && c.Source == "" {
 		return fmt.Errorf("%s: tree needs root", path)
 	}
+	if c.Auto {
+		if c.Type != "inspector" {
+			return fmt.Errorf("%s: `auto: true` is only valid on inspector components (got %q)", path, c.Type)
+		}
+		if c.Source == "" {
+			return fmt.Errorf("%s: inspector `auto: true` needs a `source:` — nothing to derive fields from otherwise", path)
+		}
+	}
 	// Data-source-bound components: enforce per-shape mapping fields.
 	if c.Source != "" {
 		switch c.Type {
@@ -274,6 +282,11 @@ func (c *Component) validate(path string) error {
 			}
 		case "inspector":
 			// Path fields validated lazily — empty path keeps the static Value.
+			// Auto and Fields are mutex: user is either declaring the record
+			// shape or asking for auto-derive from whatever comes back.
+			if c.Auto && len(c.Fields) > 0 {
+				return fmt.Errorf("%s: inspector `auto: true` and declared `fields:` are mutually exclusive — pick one", path)
+			}
 		case "logview":
 			// logview takes whatever the source returns: format:text bodies
 			// are split on \n; JSON []string is used as-is. No per-line
