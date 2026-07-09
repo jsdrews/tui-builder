@@ -486,8 +486,17 @@ type Component struct {
 	// preserve first-appearance order; each item lands under the
 	// parent whose label equals its GroupBy value (stringified).
 	// Optional — when empty, all items become direct children of
-	// the root.
+	// the root. Mutually exclusive with Children.
 	GroupBy Path `yaml:"group_by,omitempty"`
+	// Children is the dot-path on each node pointing to its list of
+	// child nodes. Enables recursive walking of a nested source
+	// response — filesystem trees, org charts, k8s owner-reference
+	// graphs, any structure where each record already knows its
+	// descendants. When Children is set, GroupBy is ignored. The
+	// source's response can be either a single root node (map) or
+	// a list of top-level nodes; nodes with a missing / empty
+	// Children path are leaves.
+	Children Path `yaml:"children,omitempty"`
 	// RootLabel is the display label for the root node of a source-
 	// bound tree. Supports ${selection.*} / ${env.*} / ${prompt.*}
 	// substitution. Defaults to the component's Title when empty;

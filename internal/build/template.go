@@ -364,6 +364,14 @@ func resolveCursor(key string, cursor Selection) string {
 		return cursor.String
 	case "depth":
 		return strconv.Itoa(len(cursor.Cells))
+	case "path":
+		// Cells joined with "/" — meaningful for tree drivers where
+		// Cells is the label-based path (root → ... → focused node).
+		// A filesystem-shape tree with root="." produces "./cmd/main.go";
+		// a k8s-shape tree produces "namespace/kind/name". Table + list
+		// drivers put comma-separated cells here (useful for logging /
+		// debugging but rarely what you want in a URL).
+		return strings.Join(cursor.Cells, "/")
 	}
 	for i, col := range cursor.Columns {
 		if strings.EqualFold(col, key) {

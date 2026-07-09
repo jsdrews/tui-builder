@@ -406,7 +406,13 @@ components:
     initial_depth: <int>         # 0=root only, 1=root expanded, ...
     # tree (source-bound — data-driven, live updates via SetRoot)
     source:     <name>           # data.sources.<name>
-    label:      <dot-path>       # each leaf's display label (required when source: set)
+    label:      <dot-path>       # each node's display label (required when source: set)
+    children:   <dot-path>       # optional — recursive walk: dot-path
+                                 # on each node pointing at its list of
+                                 # children. Enables nested source shapes
+                                 # (filesystem trees, k8s owner refs,
+                                 # org charts). Mutually exclusive with
+                                 # group_by.
     group_by:   <dot-path>       # optional — bucket the flat iterable
                                  # by this value; buckets become parent
                                  # nodes labeled with the bucket value.
@@ -547,6 +553,12 @@ initial: <screen-name>         # required when `screens:` is set
 #                             1 for its children, ...) as a string.
 #                             Table/List: length of Cells (usually 1
 #                             for lists; the row width for tables).
+#   ${cursor.path}          — Tree: Cells joined with "/" — the actual
+#                             filesystem-shape path from root to the
+#                             focused node ("./cmd/wrangl/main.go"). Fed
+#                             directly to shell tools like `stat`.
+#                             Table/List: same join; usually not what
+#                             you want but handy for logging.
 #                             Unresolved lookups resolve to "" (not the
 #                             literal token) since cursor moves are
 #                             high-frequency and a broken URL would
@@ -590,7 +602,7 @@ initial: <screen-name>         # required when `screens:` is set
 | `examples/inspector.yaml` | Two-column label/value record viewer, nested groups |
 | `examples/inspector_auto.yaml` | `auto: true` — inspector derives fields from any JSON response (GitHub repo record). Nested maps/arrays expand instead of stringifying |
 | `examples/on_cursor.yaml` | On-hover detail: GitHub repos table on top, `on_cursor:`-bound inspector below. Scrolling the table refetches the detail pane via `${cursor.*}` tokens + params-aware cache. Uses a hidden `Owner` column for identity binding |
-| `examples/on_cursor_tree.yaml` | Same pattern but tree-driven: team tree on the left (bucketed by team), inspector on the right rebinds via `${cursor.label}` as you scroll through the tree nodes |
+| `examples/on_cursor_fs.yaml` | Same pattern but tree-driven on a real filesystem: `tree -J ./cmd` walks a recursive JSON tree via `children: contents`; `${cursor.path}` joins the ancestor labels into a real path and pipes it to `stat` in a textview |
 | `examples/table_wide.yaml` | Wide table demonstrating horizontal scroll (`←`/`→`, `shift+←`/`shift+→`, `0`/`$`) |
 | `examples/layout.yaml` | Nested layouts, mixed flex weights |
 | `examples/themes.yaml` | Built-in theme picker reference |

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jsdrews/tuilib/pkg/theme"
 	"github.com/jsdrews/tuilib/pkg/tree"
 
@@ -276,6 +277,50 @@ func TestBuildTextviewReadsWrapAndContent(t *testing.T) {
 	}
 	if got := c.Textview.Content(); got != "hello" {
 		t.Errorf("content: want %q, got %q", "hello", got)
+	}
+}
+
+// TestApplyTreeChildrenWalksNestedStructure covers the recursive
+// walker. Feature: a source-bound tree can consume nested data with
+// `children:` pointing at each node's descendant list — filesystem
+// trees, k8s owner-reference graphs, org charts, anything where the
+// source already carries the hierarchy.
+func TestApplyTreeChildrenWalksNestedStructure(t *testing.T) {
+	th := theme.Nord()
+	c := treeComponent(t, &cfg.Component{
+		Type:         "tree",
+		Title:        "Files",
+		Source:       "src",
+		Label:        cfg.Path{"name"},
+		Children:     cfg.Path{"contents"},
+		InitialDepth: 3,
+	})
+	data := []any{
+		map[string]any{
+			"name": "cmd",
+			"contents": []any{
+				map[string]any{
+					"name": "wrangl",
+					"contents": []any{
+						map[string]any{"name": "main.go"},
+					},
+				},
+				map[string]any{"name": "README.md"},
+			},
+		},
+	}
+	applyTree(c, data, th)
+	// Expand every node so deeper labels become visible for the
+	// assertion. buildTree's placeholder-seed only opens the root;
+	// tuilib doesn't (yet) expose ExpandAll as a Go call, so we
+	// simulate the 'E' key.
+	m, _ := c.Tree.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'E'}})
+	*c.Tree = m
+	joined := strings.Join(visibleLabels(c.Tree), "|")
+	for _, want := range []string{"Files", "cmd", "wrangl", "main.go", "README.md"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("expected %q in tree; got: %s", want, joined)
+		}
 	}
 }
 

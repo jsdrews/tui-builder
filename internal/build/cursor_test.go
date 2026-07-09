@@ -128,6 +128,27 @@ func TestSubstituteCursorTreePathIndex(t *testing.T) {
 	}
 }
 
+// TestSubstituteCursorPath joins Cells with "/". Meaningful for
+// tree drivers where the path array IS the filesystem-shape path.
+func TestSubstituteCursorPath(t *testing.T) {
+	sel := Selection{
+		String: "main.go",
+		Cells:  []string{".", "cmd", "wrangl", "main.go"},
+	}
+	got := SubstituteCursor("${cursor.path}", sel)
+	if got != "./cmd/wrangl/main.go" {
+		t.Errorf("want ./cmd/wrangl/main.go, got %q", got)
+	}
+}
+
+// TestSubstituteCursorPathEmpty confirms an empty-selection cursor
+// resolves to "" (not "/") so downstream URLs aren't malformed.
+func TestSubstituteCursorPathEmpty(t *testing.T) {
+	if got := SubstituteCursor("${cursor.path}", Selection{}); got != "" {
+		t.Errorf("want empty, got %q", got)
+	}
+}
+
 // TestSubstituteCursorListItem — for a list driver Columns is
 // ["item"], so ${cursor.item} resolves. Confirms the list wiring
 // exposes item-by-name access alongside the bare form.

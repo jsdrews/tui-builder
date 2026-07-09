@@ -361,6 +361,9 @@ func (c *Component) validate(path string) error {
 			if len(c.Label) == 0 || c.Label[0] == "" {
 				return fmt.Errorf("%s: tree bound to source %q needs `label:` (dot-path to each leaf's display label)", path, c.Source)
 			}
+			if len(c.Children) > 0 && len(c.GroupBy) > 0 {
+				return fmt.Errorf("%s: tree `children:` (recursive walk) and `group_by:` (flat + bucket) are mutually exclusive", path)
+			}
 		}
 	}
 	return nil

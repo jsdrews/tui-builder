@@ -225,9 +225,31 @@ func Build(prebuilt map[string]ds.Source, sources map[string]*cfg.Source, boundP
 
 		// Leaf branch — hand off to internal/datasource. Merge gets
 		// its children from upstreams; the other leaves ignore the
-		// map.
+		// map. A leaf that declares `parameters:` AND has boundParams
+		// supplied for its name has its templates (URL, Env, Body,
+		// Command, ...) substituted before build so callers driving
+		// pipeline.Build with boundParams (join lookups, cursor-driven
+		// refetch) actually see the resolved values in the fetch.
+		// Without this the operator branch would apply params but
+		// leaves would fall through and hit the network / filesystem
+		// with unresolved ${params.X} tokens.
+		//
+		// When boundParams doesn't carry an entry for this leaf we
+		// deliberately skip the bind — a co-located leaf that requires
+		// params but isn't the current call target (e.g. a sibling
+		// source in the same map) shouldn't fail Build just because it
+		// wasn't the caller's focus. Its params get bound at the
+		// consumer's own call site.
 		if s.IsLeaf() {
-			built, err := ds.BuildLeaf(s, upstreams)
+			def := s
+			if len(s.Parameters) > 0 && len(boundParams[name]) > 0 {
+				cloned := s.Clone()
+				if err := cloned.BindParams(boundParams[name]); err != nil {
+					return nil, fmt.Errorf("data.sources.%s: %w", name, err)
+				}
+				def = cloned
+			}
+			built, err := ds.BuildLeaf(def, upstreams)
 			if err != nil {
 				return nil, fmt.Errorf("data.sources.%s: %w", name, err)
 			}

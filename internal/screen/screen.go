@@ -137,6 +137,16 @@ type Model struct {
 	// keep swapping in different param tuples without disturbing the
 	// canonical config.
 	cursorSourceDefs map[string]*cfg.Source
+	// cursorAllSources is the full sources map for pipeline.Build.
+	// Cursor-driven fetches route through pipeline.Build (not just
+	// BuildLeaf) so both leaf-kind targets AND pipeline-operator
+	// targets (filter / project / derive / sort / join / etc.) work.
+	// pipeline.Build needs the whole sources map so `from:` upstreams
+	// resolve; constructor calls don't touch the network, so
+	// rebuilding on every cursor move is safe. The ParamCache in
+	// cursorCaches absorbs the redundant construction cost for
+	// repeated params.
+	cursorAllSources map[string]*cfg.Source
 
 	// Confirm-modal state. When confirmModal is non-nil it overlays the
 	// body via ZStack and captures all keys until ConfirmedMsg /
@@ -580,8 +590,26 @@ func (m *Model) handleFetch(msg fetchMsg) tea.Cmd {
 			return tickMsg{source: name}
 		}))
 	}
+	// After ApplyData: fan a wake msg to every component so any
+	// pending tuilib focus emit (RowFocusedMsg from SetRows,
+	// SelectedChangedMsg from SetItems / SetRoot) actually flushes.
+	// Those emits only fire from tuilib Update; the intercepted
+	// fetchMsg path never triggers Update on the bound components on
+	// its own, which is why cursor-driven detail panes wouldn't
+	// populate until the user pressed something. postApplyMsg falls
+	// through to the fanout at the bottom of Update, hits every
+	// component's Update, and any pending flushMsgs fire.
+	if msg.data != nil {
+		cmds = append(cmds, func() tea.Msg { return postApplyMsg{} })
+	}
 	return tea.Batch(cmds...)
 }
+
+// postApplyMsg fans out to every component's Update so tuilib focus
+// emits (RowFocusedMsg, SelectedChangedMsg) that were queued during
+// SetRows / SetRoot / SetItems actually flush. See handleFetch for
+// why the intercepted fetchMsg alone can't trigger those flushes.
+type postApplyMsg struct{}
 
 // setLoading toggles the pane's loading state on a component and returns
 // the spinner's kick-off command (CLAUDE rule 15).
@@ -1157,50 +1185,66 @@ func tagCursorFocused(cmd tea.Cmd, name string) tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		msg := cmd()
-		switch x := msg.(type) {
-		case table.RowFocusedMsg:
-			if x.Empty {
-				return taggedCursorMsg{driver: name, empty: true}
-			}
-			first := ""
-			if len(x.Cells) > 0 {
-				first = x.Cells[0]
-			}
-			return taggedCursorMsg{
-				driver: name,
-				sel: build.Selection{
-					String:  first,
-					Cells:   append([]string(nil), x.Cells...),
-					Columns: append([]string(nil), x.Columns...),
-				},
-			}
-		case list.SelectedChangedMsg:
-			if x.Empty {
-				return taggedCursorMsg{driver: name, empty: true}
-			}
-			return taggedCursorMsg{
-				driver: name,
-				sel: build.Selection{
-					String:  x.Item,
-					Cells:   []string{x.Item},
-					Columns: []string{"item"},
-				},
-			}
-		case tree.SelectedChangedMsg:
-			if x.Empty {
-				return taggedCursorMsg{driver: name, empty: true}
-			}
-			return taggedCursorMsg{
-				driver: name,
-				sel: build.Selection{
-					String: x.Label,
-					Cells:  append([]string(nil), x.Path...),
-				},
-			}
-		}
-		return msg
+		return translateFocusMsg(cmd(), name)
 	}
+}
+
+// translateFocusMsg maps tuilib focus emits into taggedCursorMsg and
+// leaves other messages untouched. tea.BatchMsg — the shape tuilib
+// components use to combine their own Cmd with flushMsgs() — is
+// unpacked recursively so a focus emit buried inside a batch still
+// gets tagged. Without the batch unwrap our type switch would miss
+// every emit that co-flushes with a viewport tick or spinner cmd
+// (which is virtually all of them).
+func translateFocusMsg(msg tea.Msg, name string) tea.Msg {
+	switch x := msg.(type) {
+	case tea.BatchMsg:
+		wrapped := make([]tea.Cmd, 0, len(x))
+		for _, sub := range x {
+			wrapped = append(wrapped, tagCursorFocused(sub, name))
+		}
+		return tea.BatchMsg(wrapped)
+	case table.RowFocusedMsg:
+		if x.Empty {
+			return taggedCursorMsg{driver: name, empty: true}
+		}
+		first := ""
+		if len(x.Cells) > 0 {
+			first = x.Cells[0]
+		}
+		return taggedCursorMsg{
+			driver: name,
+			sel: build.Selection{
+				String:  first,
+				Cells:   append([]string(nil), x.Cells...),
+				Columns: append([]string(nil), x.Columns...),
+			},
+		}
+	case list.SelectedChangedMsg:
+		if x.Empty {
+			return taggedCursorMsg{driver: name, empty: true}
+		}
+		return taggedCursorMsg{
+			driver: name,
+			sel: build.Selection{
+				String:  x.Item,
+				Cells:   []string{x.Item},
+				Columns: []string{"item"},
+			},
+		}
+	case tree.SelectedChangedMsg:
+		if x.Empty {
+			return taggedCursorMsg{driver: name, empty: true}
+		}
+		return taggedCursorMsg{
+			driver: name,
+			sel: build.Selection{
+				String: x.Label,
+				Cells:  append([]string(nil), x.Path...),
+			},
+		}
+	}
+	return msg
 }
 
 // initCursor collects every OnCursor binding on this screen and
@@ -1212,6 +1256,7 @@ func (m *Model) initCursor(components map[string]*cfg.Component, sources map[str
 	m.cursorState = map[string]build.Selection{}
 	m.cursorCaches = map[string]*ds.ParamCache{}
 	m.cursorSourceDefs = map[string]*cfg.Source{}
+	m.cursorAllSources = sources
 	for _, name := range m.tree.Order {
 		comp := components[name]
 		if comp == nil || comp.OnCursor == nil {
@@ -1271,10 +1316,17 @@ func (m *Model) handleCursorChange(t taggedCursorMsg) tea.Cmd {
 
 // startCursorFetch computes the current param tuple by substituting
 // the driver's cursor Selection into the binding's Bind templates,
-// then consults the shared ParamCache. Hit → apply cached value to
-// the target immediately (no goroutine hop). Miss → return a Cmd
-// that clones the source cfg, binds params, builds a fresh leaf,
-// fetches, stores. Cache single-flight collapses rapid re-triggers.
+// then consults the shared ParamCache. Miss → returns a Cmd that
+// rebuilds the target source via pipeline.Build with the fresh param
+// tuple bound at build time, fetches, stores. Cache single-flight
+// collapses rapid re-triggers.
+//
+// pipeline.Build is used instead of ds.BuildLeaf so pipeline-operator
+// targets (filter / project / derive / sort / join / etc.) work as
+// on_cursor targets, not just leaf sources. Constructors don't touch
+// the network, so rebuilding the whole registry per miss is safe;
+// the cost is redundant construction, which the cache absorbs for
+// repeats.
 func (m *Model) startCursorFetch(b cursorBinding) tea.Cmd {
 	sel := m.cursorState[b.driver]
 	params := make(map[string]string, len(b.bind))
@@ -1282,17 +1334,20 @@ func (m *Model) startCursorFetch(b cursorBinding) tea.Cmd {
 		params[k] = build.SubstituteCursor(tmpl, sel)
 	}
 	cache := m.cursorCaches[b.source]
-	srcDef := m.cursorSourceDefs[b.source]
+	sources := m.cursorAllSources
+	sourceName := b.source
 	target := b.target
 	return func() tea.Msg {
 		data, err := cache.FetchOrLoad(params, func() (any, error) {
-			cloned := srcDef.Clone()
-			if err := cloned.BindParams(params); err != nil {
-				return nil, fmt.Errorf("bind: %w", err)
-			}
-			src, err := ds.BuildLeaf(cloned, nil)
+			reg, err := pipeline.Build(nil, sources, map[string]map[string]string{
+				sourceName: params,
+			})
 			if err != nil {
 				return nil, fmt.Errorf("build: %w", err)
+			}
+			src := reg.Get(sourceName)
+			if src == nil {
+				return nil, fmt.Errorf("source %q not in registry", sourceName)
 			}
 			return src.Fetch(context.Background())
 		})
@@ -1314,6 +1369,8 @@ func (m *Model) applyCursorFetch(x cursorFetchMsg) tea.Cmd {
 	}
 	if x.data != nil {
 		build.ApplyData(c, x.data, m.th)
+		// Same wake fan-out as handleFetch — see postApplyMsg's doc.
+		return func() tea.Msg { return postApplyMsg{} }
 	}
 	return nil
 }
