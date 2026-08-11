@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jsdrews/tuilib/pkg/geom"
 	"github.com/jsdrews/tuilib/pkg/theme"
 	"github.com/jsdrews/tuilib/pkg/tree"
 
@@ -93,7 +94,7 @@ func treeComponent(t *testing.T, cfgComp *cfg.Component) *Component {
 	if err != nil {
 		t.Fatalf("build tree component: %v", err)
 	}
-	c.Tree.SetDimensions(60, 20)
+	c.Tree.SetRect(geom.New(0, 0, 60, 20))
 	return c
 }
 
@@ -237,7 +238,7 @@ func TestApplyTextviewStringSetsContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build textview: %v", err)
 	}
-	c.Textview.SetDimensions(60, 20)
+	c.Textview.SetRect(geom.New(0, 0, 60, 20))
 	applyTextview(c, "line 1\nline 2\nline 3")
 	if got := c.Textview.Content(); got != "line 1\nline 2\nline 3" {
 		t.Errorf("content: want raw string, got %q", got)
@@ -252,7 +253,7 @@ func TestApplyTextviewJoinsStringSlice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build textview: %v", err)
 	}
-	c.Textview.SetDimensions(60, 20)
+	c.Textview.SetRect(geom.New(0, 0, 60, 20))
 	applyTextview(c, []any{"a", "b", "c"})
 	if got := c.Textview.Content(); got != "a\nb\nc" {
 		t.Errorf("content: want joined string, got %q", got)

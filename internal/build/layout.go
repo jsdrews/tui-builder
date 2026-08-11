@@ -3,6 +3,7 @@ package build
 import (
 	"fmt"
 
+	"github.com/jsdrews/tuilib/pkg/geom"
 	"github.com/jsdrews/tuilib/pkg/layout"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
@@ -102,7 +103,7 @@ func (t *Tree) RenderNode() layout.Node {
 		case n.Component != "":
 			return componentNode(t.Components[n.Component])
 		}
-		return layout.RenderFunc(func(w, h int) string { return "" })
+		return layout.RenderFunc(func(geom.Rect) string { return "" })
 	}
 	return visit(t.Root)
 }
@@ -136,5 +137,5 @@ func componentNode(c *Component) layout.Node {
 	case KTextview:
 		return layout.Sized(c.Textview)
 	}
-	return layout.RenderFunc(func(w, h int) string { return "" })
+	return layout.RenderFunc(func(geom.Rect) string { return "" })
 }

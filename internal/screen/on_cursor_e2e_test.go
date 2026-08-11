@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jsdrews/tuilib/pkg/geom"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
@@ -111,11 +112,11 @@ func newTestModel(t *testing.T, c *cfg.Config) *Model {
 }
 
 // renderScreen forces every component through the layout engine at a
-// realistic terminal size. Rendering is what triggers SetDimensions
+// realistic terminal size. Rendering is what triggers SetRect
 // on each Sizer, so a component populated via ApplyData but never
 // rendered will show empty in View().
 func renderScreen(m *Model) string {
-	return m.Layout().Render(100, 40)
+	return m.Layout().Render(geom.New(0, 0, 100, 40))
 }
 
 // detailsPane extracts the portion of the rendered screen that
@@ -629,7 +630,7 @@ func TestOnCursorFsExample_YAML(t *testing.T) {
 	// render for the "path" label the stat JSON always includes. If
 	// the render doesn't carry "cmd" the leaf-param-binding path is
 	// regressed.
-	rendered := m.Layout().Render(120, 40)
+	rendered := m.Layout().Render(geom.New(0, 0, 120, 40))
 	if !strings.Contains(rendered, "cmd") {
 		t.Errorf("stat inspector render should show the queried path; got:\n%s", rendered)
 	}

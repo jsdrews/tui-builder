@@ -46,7 +46,7 @@ func NewLauncher(paths []string, th theme.Theme) *Launcher {
 	opts.Items = items
 	opts.Filterable = true
 	li := list.New(opts)
-	li.SetFocused(true)
+	li.Focus()
 	return &Launcher{
 		th:    th,
 		list:  li,
@@ -78,7 +78,7 @@ func (l *Launcher) SetTheme(t theme.Theme) {
 	opts.Items = items
 	opts.Filterable = true
 	l.list = list.New(opts)
-	l.list.SetFocused(true)
+	l.list.Focus()
 	if value != "" {
 		l.list.SetValue(value)
 	}

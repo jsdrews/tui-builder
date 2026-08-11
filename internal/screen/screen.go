@@ -23,6 +23,7 @@ import (
 	"github.com/jsdrews/tuilib/pkg/alert"
 	"github.com/jsdrews/tuilib/pkg/app"
 	"github.com/jsdrews/tuilib/pkg/confirm"
+	"github.com/jsdrews/tuilib/pkg/focus"
 	"github.com/jsdrews/tuilib/pkg/form"
 	"github.com/jsdrews/tuilib/pkg/layout"
 	"github.com/jsdrews/tuilib/pkg/runner"
@@ -156,6 +157,12 @@ type Model struct {
 	pendingArgv        []string
 	pendingNotice      string
 	pendingInteractive bool
+	// confirmW / confirmH are the fitted outer dimensions for the confirm
+	// overlay, computed in newConfirmModal from the (word-wrapped) message.
+	// The confirm component doesn't wrap or self-measure, so Layout() reads
+	// these instead of a hardcoded Center size — otherwise a long message
+	// (e.g. "Delete pod <long-name> in <ns>? This cannot be undone.") clips.
+	confirmW, confirmH int
 
 	// Alert-modal state. Shown when an action dispatch returns a non-nil
 	// error (subprocess failed to start, exited non-zero, etc.). One OK
@@ -356,7 +363,9 @@ func (m *Model) Layout() layout.Node {
 		// scrolls internally past that.
 		return layout.ZStack(body, layout.Sized(m.alertModal))
 	case m.confirmModal != nil:
-		return layout.ZStack(body, layout.Center(60, 7, layout.Sized(m.confirmModal)))
+		// Fitted size (see newConfirmModal) so long confirm messages wrap
+		// and stay fully visible instead of clipping at the 60-col edge.
+		return layout.ZStack(body, layout.Center(m.confirmW, m.confirmH, layout.Sized(m.confirmModal)))
 	case m.formModal != nil:
 		// Height scales with the field count: 3 rows per field (input
 		// is bordered) + 3 for title + submit button + breathing room.
@@ -726,20 +735,30 @@ func (m *Model) applyFocus() {
 }
 
 func setFocused(c *build.Component, on bool) {
+	var f focus.Focusable
 	switch c.Kind {
 	case build.KList:
-		c.List.SetFocused(on)
+		f = c.List
 	case build.KTable:
-		c.Table.SetFocused(on)
+		f = c.Table
 	case build.KLogview:
-		c.Logview.SetFocused(on)
+		f = c.Logview
 	case build.KTree:
-		c.Tree.SetFocused(on)
+		f = c.Tree
 	case build.KInspector:
-		c.Inspector.SetFocused(on)
+		f = c.Inspector
 	case build.KTextview:
-		c.Textview.SetFocused(on)
+		f = c.Textview
+	default:
+		return
 	}
+	// Focus returns a cursor-blink cmd for components that have one; none
+	// of the kinds above do, so there is nothing to propagate.
+	if on {
+		f.Focus()
+		return
+	}
+	f.Blur()
 }
 
 func componentCapturing(c *build.Component) bool {
@@ -953,16 +972,48 @@ func stringifyFormValues(in map[string]any) map[string]string {
 	return out
 }
 
+// confirmWrapWidth is the inner text width the confirm message is wrapped
+// to. Paired with confirmChrome it yields a modal that fits within an
+// 80-column terminal (72 + 4 border/padding cols) while word-wrapping
+// anything longer instead of clipping it. Kept below the alert's 80% cap
+// so the two modals look consistent on a standard terminal.
+const (
+	confirmWrapWidth = 72
+	confirmChrome    = 4 // border (2) + one padding col each side
+)
+
 // newConfirmModal builds a yes/no confirm dialog using the active theme.
-// The title is the action's label (or "Confirm" when blank); message is
-// already substituted.
+// The title is the action's label (or "Confirm" when blank). The message
+// is word-wrapped to confirmWrapWidth and the overlay's fitted dimensions
+// (m.confirmW / m.confirmH) are recorded for Layout() — the confirm
+// component neither wraps nor self-measures, so without this a long
+// message clips to a single hardcoded-width line.
 func (m *Model) newConfirmModal(label, message string) confirm.Model {
 	opts := m.th.Confirm()
 	if label == "" {
 		label = "Confirm"
 	}
+	wrapped := xansi.Wrap(message, confirmWrapWidth, " -")
+	lines := strings.Split(wrapped, "\n")
+	longest := 0
+	for _, ln := range lines {
+		if w := xansi.StringWidth(ln); w > longest {
+			longest = w
+		}
+	}
+	// Outer width fits the longest wrapped line; height fits the message
+	// lines + blank spacer + button row, all inside the pane border. Floor
+	// at the previous 60×7 so short prompts keep their familiar shape.
+	m.confirmW = longest + confirmChrome
+	if m.confirmW < 60 {
+		m.confirmW = 60
+	}
+	m.confirmH = len(lines) + 4 // borders (2) + spacer (1) + buttons (1)
+	if m.confirmH < 7 {
+		m.confirmH = 7
+	}
 	opts.Title = label
-	opts.Message = message
+	opts.Message = wrapped
 	opts.Confirm = "Yes"
 	opts.Cancel = "No"
 	return confirm.New(opts)

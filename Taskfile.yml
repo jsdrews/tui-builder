@@ -149,7 +149,7 @@ tasks:
   # Three kind clusters (tb-prod / tb-staging / tb-dev) seeded with
   # different workloads, joined into one TUI table via a `merge` source.
   #
-  # Workflow (each `proxy:*` task is foreground — run in its own terminal):
+  # Workflow (each `proxy:{prod,staging,dev}` task is foreground — own terminal):
   #   terminal 1:  task kube:multi:up
   #   terminal 1:  task kube:multi:proxy:prod      # leave running
   #   terminal 2:  task kube:multi:proxy:staging   # leave running
@@ -157,6 +157,12 @@ tasks:
   #   terminal 4:  task kube:multi:check           # verify the 3 are reachable
   #   terminal 4:  task kube:multi:demo            # opens the TUI
   #   When done:  ctrl+c each proxy terminal, then `task kube:multi:down`
+  #
+  # Or skip the extra terminals: start/stop all 3 proxies in the background:
+  #   task kube:multi:up
+  #   task kube:multi:proxy:up      # all 3 proxies backgrounded
+  #   task kube:multi:demo
+  #   task kube:multi:proxy:down    # stop the proxies (then task kube:multi:down)
 
   kube:multi:up:
     desc: Create 3 local kind clusters (tb-prod / tb-staging / tb-dev) + seed workloads
@@ -209,6 +215,52 @@ tasks:
     desc: Run kubectl proxy for tb-dev on :8003 (foreground — leave running)
     cmds:
       - kubectl --context kind-tb-dev proxy --port=8003
+
+  kube:multi:proxy:up:
+    desc: Start all 3 kubectl proxies in the background (prod:8001 / staging:8002 / dev:8003)
+    preconditions:
+      - sh: command -v kubectl >/dev/null
+        msg: kubectl not installed
+    cmds:
+      # Runs under the system shell via `sh -c`: Task's built-in interpreter
+      # evaluates a backgrounded (`&`) command's variables lazily in a
+      # goroutine, which races the loop and crosses the per-proxy ports. A real
+      # `sh` expands the args before forking, so each proxy binds its own port.
+      # nohup + redirect detaches each proxy so it survives this task exiting.
+      - cmd: |
+          sh -c '
+          mkdir -p .task/logs
+          for entry in "tb-prod 8001" "tb-staging 8002" "tb-dev 8003"; do
+            set -- $entry
+            ctx="$1"; port="$2"
+            if lsof -t -iTCP:${port} -sTCP:LISTEN >/dev/null 2>&1; then
+              echo "kind-$ctx :$port already bound — skipping"
+              continue
+            fi
+            nohup kubectl --context "kind-$ctx" proxy --port="$port" \
+              >".task/logs/proxy-$ctx.log" 2>&1 &
+            echo "started kind-$ctx proxy on :$port (pid $!, log .task/logs/proxy-$ctx.log)"
+          done
+          '
+        silent: true
+      - echo
+      - "echo \"Verify:  task kube:multi:proxy:status   Stop all:  task kube:multi:proxy:down\""
+
+  kube:multi:proxy:down:
+    desc: Stop all 3 background kubectl proxies (prod:8001 / staging:8002 / dev:8003)
+    cmds:
+      - cmd: |
+          for entry in "tb-prod 8001" "tb-staging 8002" "tb-dev 8003"; do
+            set -- $entry
+            ctx="$1"; port="$2"
+            pid="$(lsof -t -iTCP:${port} -sTCP:LISTEN 2>/dev/null | head -1)"
+            if [ -z "$pid" ]; then
+              echo "kind-$ctx :$port not running"
+              continue
+            fi
+            kill "$pid" 2>/dev/null && echo "stopped kind-$ctx proxy (:$port, pid $pid)"
+          done
+        silent: true
 
   kube:multi:proxy:status:
     desc: Show whether each proxy port is currently bound (regardless of who's listening)

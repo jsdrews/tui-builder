@@ -16,6 +16,7 @@ import (
 
 	"github.com/jsdrews/tuilib/pkg/app"
 	"github.com/jsdrews/tuilib/pkg/form"
+	"github.com/jsdrews/tuilib/pkg/geom"
 	tscreen "github.com/jsdrews/tuilib/pkg/screen"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
@@ -195,7 +196,10 @@ func (m *promptModel) View() string {
 	if m.w == 0 {
 		return ""
 	}
-	m.form.SetDimensions(m.w-4, m.h-2)
+	// This model is its own tea program, so it roots the frame: one
+	// generation per render, seeded at the terminal origin.
+	geom.NextGen()
+	m.form.SetRect(geom.New(0, 0, m.w-4, m.h-2))
 	return m.form.View()
 }
 
