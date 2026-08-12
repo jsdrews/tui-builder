@@ -483,7 +483,10 @@ screens:
           <param>: ${selection.*}
     actions:                   # optional — bind a key to a subprocess
                                # (kubectl exec, $EDITOR, open, ...) via pkg/runner
-      - key:         <string>  # dispatch key (avoid q/t/?/tab/esc/enter/r//j/k)
+      - key:         <string>  # dispatch key (avoid q/t/?/tab/esc/r//j/k)
+                               # `enter` is allowed — a double click on a row
+                               # fires it too. If the same source also has an
+                               # on_key enter push, the push wins.
         label:       <string>  # shown in the help strip
         source:      <component>  # which list/table's selection feeds ${selection.*}
         confirm:     <string>  # optional yes/no modal message before dispatch

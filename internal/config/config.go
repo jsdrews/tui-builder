@@ -216,7 +216,10 @@ type Screen struct {
 // against the focused list/table row at fire time) and ${env.*} (always).
 type Action struct {
 	// Key is the dispatch key. Common choices: "x", "d", "o", "e". Don't
-	// collide with reserved keys (q, t, ?, tab, esc, enter, /, j, k, r).
+	// collide with reserved keys (q, t, ?, tab, esc, /, j, k, r).
+	//
+	// "enter" is allowed and is also what a double click sends. An on_key
+	// enter push on the same source takes precedence — see Model.activate.
 	Key string `yaml:"key"`
 	// Label appears in the help strip / panel.
 	Label string `yaml:"label,omitempty"`
