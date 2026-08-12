@@ -30,61 +30,61 @@ app:
   title: Color overrides
   theme: nord
 
-components:
-  fruits:
-    type: list
-    title: List (selected = orange, active border = magenta)
-    filterable: true
-    items: [Apple, Apricot, Banana, Blueberry, Cherry, Date, Fig, Grape, Kiwi, Lemon, Mango]
-    colors:
-      border_active: magenta
-      selected: "208"           # bright orange (256-color)
+tui:
+  components:
+    fruits:
+      type: list
+      title: List (selected = orange, active border = magenta)
+      filterable: true
+      items: [Apple, Apricot, Banana, Blueberry, Cherry, Date, Fig, Grape, Kiwi, Lemon, Mango]
+      colors:
+        border_active: magenta
+        selected: "208"           # bright orange (256-color)
 
-  cities:
-    type: table
-    title: Table (red header, white-on-blue selection, cyan separators)
-    filterable: true
-    columns:
-      - {title: City,    width: 18}
-      - {title: Region,  width: 14}
-      - {title: Pop,     width: 10, align: right}
-    rows:
-      - [London,       Europe,   "9M"]
-      - [Tokyo,        Asia,     "37M"]
-      - [Lima,         Americas, "10M"]
-      - [Reykjavík,    Europe,   "130K"]
-    colors:
-      border_active: "#ff8800"
-      header: red
-      selected_fg: bright_white
-      selected_bg: blue
-      column_separator: cyan
-      header_rule: cyan
+    cities:
+      type: table
+      title: Table (red header, white-on-blue selection, cyan separators)
+      filterable: true
+      columns:
+        - {title: City,    width: 18}
+        - {title: Region,  width: 14}
+        - {title: Pop,     width: 10, align: right}
+      rows:
+        - [London,       Europe,   "9M"]
+        - [Tokyo,        Asia,     "37M"]
+        - [Lima,         Americas, "10M"]
+        - [Reykjavík,    Europe,   "130K"]
+      colors:
+        border_active: "#ff8800"
+        header: red
+        selected_fg: bright_white
+        selected_bg: blue
+        column_separator: cyan
+        header_rule: cyan
 
-  details:
-    type: inspector
-    title: Inspector (gray labels, yellow values, magenta cursor row)
-    initial_depth: 2
-    fields:
-      - {label: name,     value: nginx-7c64f5d}
-      - {label: status,   value: Running}
-      - label: spec
-        children:
-          - {label: image,    value: "nginx:1.25"}
-          - {label: replicas, value: "3"}
-    colors:
-      border_active: green
-      label: gray
-      value: bright_yellow
-      current_line_bg: magenta
-
-screen:
-  title: Colors
-  layout:
-    hstack:
-      - flex: 1
-        component: fruits
-      - flex: 2
-        vstack:
-          - {flex: 2, component: cities}
-          - {flex: 1, component: details}
+    details:
+      type: inspector
+      title: Inspector (gray labels, yellow values, magenta cursor row)
+      initial_depth: 2
+      fields:
+        - {label: name,     value: nginx-7c64f5d}
+        - {label: status,   value: Running}
+        - label: spec
+          children:
+            - {label: image,    value: "nginx:1.25"}
+            - {label: replicas, value: "3"}
+      colors:
+        border_active: green
+        label: gray
+        value: bright_yellow
+        current_line_bg: magenta
+  screen:
+    title: Colors
+    layout:
+      hstack:
+        - flex: 1
+          component: fruits
+        - flex: 2
+          vstack:
+            - {flex: 2, component: cities}
+            - {flex: 1, component: details}

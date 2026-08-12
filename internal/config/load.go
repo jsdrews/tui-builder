@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -18,111 +17,185 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(b, &c); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
+	// Desugar `pipe:` chains before validation runs.
+	if err := ExpandSourcesPipe(c.Data.Sources); err != nil {
+		return nil, fmt.Errorf("expand %s: %w", path, err)
+	}
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("validate %s: %w", path, err)
+	}
+	// Env-var check runs after Validate so schema errors surface
+	// first. Applies defaults, errors on missing required vars,
+	// warns on undeclared-and-unset references.
+	if err := checkEnv(&c); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return &c, nil
 }
 
 // Validate walks the config and returns the first structural error found.
-// Component definitions are validated; layout references are checked to
-// resolve and to be referenced exactly once per screen.
+// Per-entry checks delegate to each Source's Validate method; cross-
+// entry checks (upstream resolution, cycle detection, join-lookup
+// constraints, component bindings) walk the unified Sources map.
 func (c *Config) Validate() error {
-	for name, src := range c.DataSources {
-		if src == nil {
-			return fmt.Errorf("data_sources.%s: empty definition", name)
+	// 1. Per-entry structural validation.
+	for name, s := range c.Data.Sources {
+		if s == nil {
+			return fmt.Errorf("data.sources.%s: empty entry", name)
 		}
-		if err := src.validate("data_sources." + name); err != nil {
+		if err := s.Validate("data.sources." + name); err != nil {
 			return err
 		}
-		if src.Type == "merge" {
-			for _, child := range src.Sources {
-				if _, ok := c.DataSources[child]; !ok {
-					return fmt.Errorf("data_sources.%s: merge child %q not defined in data_sources", name, child)
-				}
-			}
-		}
 	}
-	if err := c.checkMergeCycles(); err != nil {
+	// 2. Upstream resolution + cycle detection across the source graph.
+	if err := validateSourceUpstreams(c.Data.Sources); err != nil {
 		return err
 	}
-	for name, comp := range c.Components {
+	// 3. Join lookups must reference leaf entries that declare parameters
+	//    (so per-row BindParams has something to bind to).
+	if err := validateJoinLookups(c.Data.Sources); err != nil {
+		return err
+	}
+	// 4. Component bindings: `source:` must name an entry.
+	for name, comp := range c.TUI.Components {
 		if comp == nil {
-			return fmt.Errorf("components.%s: empty definition", name)
+			return fmt.Errorf("tui.components.%s: empty definition", name)
 		}
-		if err := comp.validate("components." + name); err != nil {
+		if err := comp.validate("tui.components." + name); err != nil {
 			return err
 		}
-		if comp.Source != "" {
-			if _, ok := c.DataSources[comp.Source]; !ok {
-				return fmt.Errorf("components.%s: source %q not defined in data_sources", name, comp.Source)
+		if ref := comp.Source; ref != "" {
+			if _, ok := c.Data.Sources[ref]; !ok {
+				return fmt.Errorf("tui.components.%s: source %q not defined in data.sources", name, ref)
 			}
 		}
 	}
 
 	// Mode check: exactly one of screen / screens.
-	hasSingle := c.Screen.Layout.set() > 0
-	hasMulti := len(c.Screens) > 0
+	hasSingle := c.TUI.Screen.Layout.set() > 0
+	hasMulti := len(c.TUI.Screens) > 0
 	switch {
 	case hasSingle && hasMulti:
-		return fmt.Errorf("config: set either `screen:` (single) or `screens:` (multi) — not both")
+		return fmt.Errorf("config: set either `tui.screen:` (single) or `tui.screens:` (multi) — not both")
 	case !hasSingle && !hasMulti:
-		return fmt.Errorf("config: must set `screen:` (single) or `screens:` + `initial:` (multi)")
+		return fmt.Errorf("config: must set `tui.screen:` (single) or `tui.screens:` + `tui.initial:` (multi)")
 	}
 
 	if hasSingle {
 		refs := map[string]int{}
-		if err := c.Screen.Layout.validate("screen.layout", c.Components, refs); err != nil {
+		if err := c.TUI.Screen.Layout.validate("tui.screen.layout", c.TUI.Components, refs); err != nil {
 			return err
 		}
 		for name, n := range refs {
 			if n > 1 {
-				return fmt.Errorf("components.%s: referenced %d times in screen.layout — each component may be placed only once per screen", name, n)
+				return fmt.Errorf("tui.components.%s: referenced %d times in tui.screen.layout — each component may be placed only once per screen", name, n)
 			}
 		}
-		if err := validateActions(c.Screen.Actions, refs, c.Components, "screen"); err != nil {
+		if err := validateActions(c.TUI.Screen.Actions, refs, c.TUI.Components, "tui.screen"); err != nil {
+			return err
+		}
+		if err := validateOnCursor(refs, c.TUI.Components, "tui.screen"); err != nil {
 			return err
 		}
 		return nil
 	}
 
 	// Multi-screen.
-	if c.Initial == "" {
-		return fmt.Errorf("config: `initial:` is required when `screens:` is set")
+	if c.TUI.Initial == "" {
+		return fmt.Errorf("config: `tui.initial:` is required when `tui.screens:` is set")
 	}
-	if _, ok := c.Screens[c.Initial]; !ok {
-		return fmt.Errorf("config: initial screen %q not defined in screens map", c.Initial)
+	if _, ok := c.TUI.Screens[c.TUI.Initial]; !ok {
+		return fmt.Errorf("config: initial screen %q not defined in tui.screens map", c.TUI.Initial)
 	}
-	for name, s := range c.Screens {
+	for name, s := range c.TUI.Screens {
 		if s == nil {
-			return fmt.Errorf("screens.%s: empty definition", name)
+			return fmt.Errorf("tui.screens.%s: empty definition", name)
 		}
 		refs := map[string]int{}
-		if err := s.Layout.validate("screens."+name+".layout", c.Components, refs); err != nil {
+		if err := s.Layout.validate("tui.screens."+name+".layout", c.TUI.Components, refs); err != nil {
 			return err
 		}
 		for cname, n := range refs {
 			if n > 1 {
-				return fmt.Errorf("screens.%s: components.%s referenced %d times — each component may be placed only once per screen", name, cname, n)
+				return fmt.Errorf("tui.screens.%s: components.%s referenced %d times — each component may be placed only once per screen", name, cname, n)
 			}
 		}
-		for i, b := range s.OnEnter {
+		// Track (source, key) → binding index so a screen can't wire two
+		// different pushes onto the same keystroke — the first-match
+		// behavior of the dispatch loop would silently pick one.
+		seenKeys := map[string]int{}
+		for i, b := range s.OnKey {
 			if b.Source == "" || b.Push == "" {
-				return fmt.Errorf("screens.%s.on_enter[%d]: source and push are required", name, i)
+				return fmt.Errorf("tui.screens.%s.on_key[%d]: source and push are required", name, i)
+			}
+			if b.Key == "" {
+				return fmt.Errorf("tui.screens.%s.on_key[%d]: `key:` is required (spell out `key: enter` for the classic drilldown)", name, i)
 			}
 			if refs[b.Source] == 0 {
-				return fmt.Errorf("screens.%s.on_enter[%d]: source %q not used in this screen's layout", name, i, b.Source)
+				return fmt.Errorf("tui.screens.%s.on_key[%d]: source %q not used in this screen's layout", name, i, b.Source)
 			}
-			if _, ok := c.Screens[b.Push]; !ok {
-				return fmt.Errorf("screens.%s.on_enter[%d]: push %q not defined in screens map", name, i, b.Push)
+			if _, ok := c.TUI.Screens[b.Push]; !ok {
+				return fmt.Errorf("tui.screens.%s.on_key[%d]: push %q not defined in screens map", name, i, b.Push)
 			}
-			src := c.Components[b.Source]
+			src := c.TUI.Components[b.Source]
 			if src.Type != "list" && src.Type != "table" {
-				return fmt.Errorf("screens.%s.on_enter[%d]: source %q must be a list or table (got %s)", name, i, b.Source, src.Type)
+				return fmt.Errorf("tui.screens.%s.on_key[%d]: source %q must be a list or table (got %s)", name, i, b.Source, src.Type)
 			}
+			dedupKey := b.Source + "\x00" + b.Key
+			if prev, ok := seenKeys[dedupKey]; ok {
+				return fmt.Errorf("tui.screens.%s.on_key[%d]: source %q + key %q already bound at on_key[%d]", name, i, b.Source, b.Key, prev)
+			}
+			seenKeys[dedupKey] = i
 		}
-		if err := validateActions(s.Actions, refs, c.Components, fmt.Sprintf("screens.%s", name)); err != nil {
+		if err := validateActions(s.Actions, refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name)); err != nil {
 			return err
+		}
+		if err := validateOnCursor(refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateOnCursor checks every layout-participating component's
+// OnCursor binding. Rules:
+//   - Source names another component in the same screen's layout.
+//   - Driver must be a table, list, or tree (the three tuilib
+//     components that emit focus-change messages: RowFocusedMsg from
+//     v0.16.0 for table; SelectedChangedMsg from v0.17.0 for list
+//     and tree).
+//   - Target component must itself be source-bound: the bind: block's
+//     job is to feed the target's source's parameters, and a
+//     component with no source has nowhere for those params to land.
+//   - Target's source must declare `parameters:` covering every bind
+//     key; extraneous bind entries error so users notice typos.
+func validateOnCursor(refs map[string]int, components map[string]*Component, path string) error {
+	for name, comp := range components {
+		if comp == nil || comp.OnCursor == nil {
+			continue
+		}
+		if refs[name] == 0 {
+			// Component defined but not in this screen's layout —
+			// on_cursor doesn't apply here. Skip; each layout-relevant
+			// screen validates its own participants.
+			continue
+		}
+		oc := comp.OnCursor
+		if oc.Source == "" {
+			return fmt.Errorf("%s.components.%s.on_cursor: `source:` is required", path, name)
+		}
+		if refs[oc.Source] == 0 {
+			return fmt.Errorf("%s.components.%s.on_cursor: source %q not used in this screen's layout", path, name, oc.Source)
+		}
+		driver := components[oc.Source]
+		switch driver.Type {
+		case "table", "list", "tree":
+			// ok — all three emit tuilib focus-change messages
+		default:
+			return fmt.Errorf("%s.components.%s.on_cursor: source %q must be a table, list, or tree (got %s)", path, name, oc.Source, driver.Type)
+		}
+		if comp.Source == "" {
+			return fmt.Errorf("%s.components.%s.on_cursor: target component has no `source:` — nothing to rebind on cursor moves", path, name)
 		}
 	}
 	return nil
@@ -145,6 +218,19 @@ func validateActions(actions []Action, refs map[string]int, components map[strin
 		src := components[a.Source]
 		if src.Type != "list" && src.Type != "table" {
 			return fmt.Errorf("%s.actions[%d]: source %q must be a list or table (got %s)", path, i, a.Source, src.Type)
+		}
+		for j, p := range a.Prompts {
+			if p.Key == "" {
+				return fmt.Errorf("%s.actions[%d].prompts[%d]: key is required", path, i, j)
+			}
+			switch p.Type {
+			case "", "text", "select", "confirm":
+			default:
+				return fmt.Errorf("%s.actions[%d].prompts[%d]: unknown type %q (want text|select|confirm)", path, i, j, p.Type)
+			}
+			if p.Type == "select" && len(p.Options) == 0 {
+				return fmt.Errorf("%s.actions[%d].prompts[%d]: select prompt needs options", path, i, j)
+			}
 		}
 	}
 	return nil
@@ -209,11 +295,11 @@ func (n *Node) validate(path string, components map[string]*Component, refs map[
 
 func (c *Component) validate(path string) error {
 	switch c.Type {
-	case "list", "table", "logview", "tree", "inspector":
+	case "list", "table", "logview", "tree", "inspector", "textview":
 	case "":
 		return fmt.Errorf("%s: missing type", path)
 	default:
-		return fmt.Errorf("%s: unknown component type %q (want list|table|logview|tree|inspector)", path, c.Type)
+		return fmt.Errorf("%s: unknown component type %q (want list|table|logview|tree|inspector|textview)", path, c.Type)
 	}
 	if c.Type == "table" {
 		if len(c.Columns) == 0 {
@@ -235,6 +321,14 @@ func (c *Component) validate(path string) error {
 	if c.Type == "tree" && c.Root == nil && c.Source == "" {
 		return fmt.Errorf("%s: tree needs root", path)
 	}
+	if c.Auto {
+		if c.Type != "inspector" {
+			return fmt.Errorf("%s: `auto: true` is only valid on inspector components (got %q)", path, c.Type)
+		}
+		if c.Source == "" {
+			return fmt.Errorf("%s: inspector `auto: true` needs a `source:` — nothing to derive fields from otherwise", path)
+		}
+	}
 	// Data-source-bound components: enforce per-shape mapping fields.
 	if c.Source != "" {
 		switch c.Type {
@@ -250,41 +344,65 @@ func (c *Component) validate(path string) error {
 			}
 		case "inspector":
 			// Path fields validated lazily — empty path keeps the static Value.
+			// Auto and Fields are mutex: user is either declaring the record
+			// shape or asking for auto-derive from whatever comes back.
+			if c.Auto && len(c.Fields) > 0 {
+				return fmt.Errorf("%s: inspector `auto: true` and declared `fields:` are mutually exclusive — pick one", path)
+			}
 		case "logview":
 			// logview takes whatever the source returns: format:text bodies
 			// are split on \n; JSON []string is used as-is. No per-line
 			// mapping field needed.
+		case "textview":
+			// textview takes whatever the source returns as a single string.
+			// format:text bodies pass through verbatim; JSON values fall
+			// back to a formatted string representation. No mapping field.
 		case "tree":
-			return fmt.Errorf("%s: source binding not yet supported for %s", path, c.Type)
+			if len(c.Label) == 0 || c.Label[0] == "" {
+				return fmt.Errorf("%s: tree bound to source %q needs `label:` (dot-path to each leaf's display label)", path, c.Source)
+			}
+			if len(c.Children) > 0 && len(c.GroupBy) > 0 {
+				return fmt.Errorf("%s: tree `children:` (recursive walk) and `group_by:` (flat + bucket) are mutually exclusive", path)
+			}
 		}
 	}
 	return nil
 }
 
-// checkMergeCycles walks the merge → children graph and rejects cycles
-// (which would otherwise cause infinite recursion at Build time).
-func (c *Config) checkMergeCycles() error {
+// validateSourceUpstreams walks every source's Upstreams() and
+// checks each reference resolves to a defined entry, then runs a DFS
+// cycle detector across the unified graph. Join lookup references
+// count as edges too — they don't form a build-time dep (joinSource
+// re-fetches per row), but they DO form a name-resolution dep, and
+// since lookups must be leaves (validateJoinLookups enforces) the
+// cycle walk terminates correctly without false positives.
+func validateSourceUpstreams(sources map[string]*Source) error {
+	for name, s := range sources {
+		for _, up := range s.Upstreams() {
+			if _, ok := sources[up]; !ok {
+				return fmt.Errorf("data.sources.%s: upstream %q not defined in data.sources", name, up)
+			}
+		}
+	}
 	const (
-		white = 0 // unvisited
-		gray  = 1 // on the current DFS stack
-		black = 2 // fully explored
+		white = 0
+		gray  = 1
+		black = 2
 	)
-	color := make(map[string]int, len(c.DataSources))
+	color := make(map[string]int, len(sources))
 	var dfs func(name string, stack []string) error
 	dfs = func(name string, stack []string) error {
 		switch color[name] {
 		case gray:
-			return fmt.Errorf("data_sources: cyclic merge reference: %v -> %s",
-				stack, name)
+			return fmt.Errorf("data.sources: cyclic reference: %v -> %s", stack, name)
 		case black:
 			return nil
 		}
 		color[name] = gray
 		stack = append(stack, name)
-		def := c.DataSources[name]
-		if def != nil && def.Type == "merge" {
-			for _, child := range def.Sources {
-				if err := dfs(child, stack); err != nil {
+		if s := sources[name]; s != nil {
+			for _, up := range s.Upstreams() {
+				if err := dfs(up, stack); err != nil {
 					return err
 				}
 			}
@@ -292,7 +410,7 @@ func (c *Config) checkMergeCycles() error {
 		color[name] = black
 		return nil
 	}
-	for name := range c.DataSources {
+	for name := range sources {
 		if err := dfs(name, nil); err != nil {
 			return err
 		}
@@ -300,52 +418,141 @@ func (c *Config) checkMergeCycles() error {
 	return nil
 }
 
-func (d *DataSource) validate(path string) error {
-	switch d.Type {
-	case "http":
-		if d.URL == "" {
-			return fmt.Errorf("%s: http source needs url", path)
+// validateJoinLookups enforces the constraint that every join's
+// lookup references a leaf entry with declared parameters. Joins
+// re-invoke lookups per driver row via BindParams; that pattern only
+// works against leaf sources (operators don't carry templated
+// fields) and requires the lookup to declare what params it accepts.
+func validateJoinLookups(sources map[string]*Source) error {
+	for name, s := range sources {
+		if s.Type != "join" {
+			continue
 		}
-	case "exec":
-		if len(d.Command) == 0 {
-			return fmt.Errorf("%s: exec source needs command (non-empty argv)", path)
-		}
-	case "file":
-		if d.Path == "" {
-			return fmt.Errorf("%s: file source needs path", path)
-		}
-	case "merge":
-		if len(d.Sources) == 0 {
-			return fmt.Errorf("%s: merge source needs sources (list of names)", path)
-		}
-		switch d.OnError {
-		case "", "fail", "skip":
-		default:
-			return fmt.Errorf("%s: unknown on_error %q (want fail|skip)", path, d.OnError)
-		}
-	case "websocket":
-		if d.URL == "" {
-			return fmt.Errorf("%s: websocket source needs url (ws:// or wss://)", path)
-		}
-	case "":
-		return fmt.Errorf("%s: missing type", path)
-	default:
-		return fmt.Errorf("%s: unknown source type %q (want http|exec|file|merge|websocket)", path, d.Type)
-	}
-	switch d.Format {
-	case "", "json", "text":
-	default:
-		return fmt.Errorf("%s: unknown format %q (want json|text)", path, d.Format)
-	}
-	if d.Refresh != "" {
-		if _, err := time.ParseDuration(d.Refresh); err != nil {
-			return fmt.Errorf("%s: invalid refresh %q: %w", path, d.Refresh, err)
-		}
-	}
-	if d.Timeout != "" {
-		if _, err := time.ParseDuration(d.Timeout); err != nil {
-			return fmt.Errorf("%s: invalid timeout %q: %w", path, d.Timeout, err)
+		for lname, look := range s.Lookups {
+			target, ok := sources[look.From]
+			if !ok {
+				return fmt.Errorf("data.sources.%s.join.lookups.%s: `from: %q` is not a defined entry", name, lname, look.From)
+			}
+			if !target.IsLeaf() {
+				return fmt.Errorf("data.sources.%s.join.lookups.%s: `from: %q` is not a leaf source (pipelines aren't supported as lookups yet)", name, lname, look.From)
+			}
+			if len(target.Parameters) == 0 {
+				return fmt.Errorf("data.sources.%s.join.lookups.%s: source %q must declare `parameters:` so the join can bind per-row values to it", name, lname, look.From)
+			}
+			for paramName := range look.On {
+				if _, ok := target.Parameters[paramName]; !ok {
+					return fmt.Errorf("data.sources.%s.join.lookups.%s.on.%s: source %q has no parameter %q", name, lname, paramName, look.From, paramName)
+				}
+			}
 		}
 	}
 	return nil
+}
+
+// validateParametersMap is the shared schema validator for any
+// parameter declaration block (DataSource, Pipeline). Mutual
+// exclusion rules (required + default) and the type whitelist are
+// the same for every consumer; extracting the body keeps the rules
+// in one place.
+func validateParametersMap(params map[string]*Parameter, path string) error {
+	for name, p := range params {
+		if p == nil {
+			return fmt.Errorf("%s.parameters.%s: empty definition", path, name)
+		}
+		switch p.Type {
+		case "", "string", "int", "bool", "duration":
+		default:
+			return fmt.Errorf("%s.parameters.%s: unknown type %q (want string|int|bool|duration)", path, name, p.Type)
+		}
+		if p.Required && p.Default != "" {
+			return fmt.Errorf("%s.parameters.%s: `required: true` and `default:` are mutually exclusive — defaults imply optional", path, name)
+		}
+	}
+	return nil
+}
+
+// ResolveParams applies the standard resolution rules — declared
+// default → caller value → error if required — and returns a
+// resolved name → value map. Extra keys in `supplied` that aren't in
+// `declared` are rejected so silent typos don't hide bugs.
+//
+// Used by cfg.BindLeafParams (which then substitutes ${params.X}
+// into leaf-source URL/Command/etc. templates) and the pipeline
+// layer (which makes the resolved values available as `params.X` in
+// operator
+// expressions). One resolver, two consumers.
+func ResolveParams(declared map[string]*Parameter, supplied map[string]string) (map[string]string, error) {
+	for k := range supplied {
+		if _, ok := declared[k]; !ok {
+			return nil, fmt.Errorf("parameter %q not declared", k)
+		}
+	}
+	resolved := make(map[string]string, len(declared))
+	for name, spec := range declared {
+		if v, ok := supplied[name]; ok {
+			resolved[name] = v
+			continue
+		}
+		if spec.Default != "" {
+			resolved[name] = spec.Default
+			continue
+		}
+		if spec.Required {
+			return nil, fmt.Errorf("required parameter %q not provided", name)
+		}
+		resolved[name] = ""
+	}
+	return resolved, nil
+}
+
+// BindParams resolves caller-supplied parameter values against the
+// source's declared parameter schema (via ResolveParams) and
+// substitutes ${params.<name>} tokens in every templated string
+// field (URL, Body, Headers, Command, Env, Path, InitialMessages).
+//
+// Mutates the receiver in place; callers that want to reuse the
+// undecorated source should pass a copy.
+
+// substituteParams replaces ${params.NAME} tokens with their resolved
+// values. Tokens for params not in the map are left as-is so the
+// source author can spot the typo at fetch time (404 / connection
+// failure) rather than silently turning into an empty string.
+func substituteParams(s string, params map[string]string) string {
+	for name, val := range params {
+		s = replaceAll(s, "${params."+name+"}", val)
+	}
+	return s
+}
+
+// replaceAll is a tiny strings.ReplaceAll alias kept local so the
+// package's dependency surface stays narrow. (strings is already
+// imported via fmt; keeping this here avoids a one-shot import.)
+func replaceAll(s, old, new string) string {
+	for {
+		i := indexOf(s, old)
+		if i < 0 {
+			return s
+		}
+		s = s[:i] + new + s[i+len(old):]
+	}
+}
+
+func indexOf(s, sub string) int {
+	if len(sub) == 0 {
+		return 0
+	}
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+
+func paramKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }

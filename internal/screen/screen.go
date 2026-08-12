@@ -23,24 +23,31 @@ import (
 	"github.com/jsdrews/tuilib/pkg/alert"
 	"github.com/jsdrews/tuilib/pkg/app"
 	"github.com/jsdrews/tuilib/pkg/confirm"
+	"github.com/jsdrews/tuilib/pkg/focus"
+	"github.com/jsdrews/tuilib/pkg/form"
 	"github.com/jsdrews/tuilib/pkg/layout"
 	"github.com/jsdrews/tuilib/pkg/runner"
+	"github.com/jsdrews/tuilib/pkg/list"
 	tscreen "github.com/jsdrews/tuilib/pkg/screen"
+	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/theme"
+	"github.com/jsdrews/tuilib/pkg/tree"
 
 	"github.com/jsdrews/tui-builder/internal/build"
 	cfg "github.com/jsdrews/tui-builder/internal/config"
 	ds "github.com/jsdrews/tui-builder/internal/datasource"
+	"github.com/jsdrews/tui-builder/internal/pipeline"
 )
 
-// Multi is the shared context for a multi-screen app: every named screen,
-// the top-level components map, and the top-level data sources map.
-// Passed once to every Model so any screen can build + push its on_enter
-// targets, and so pushed screens get the same data sources.
+// Multi is the shared context for a multi-screen app: every named
+// screen, the top-level components map, and the unified data
+// sources map. Passed once to every Model so any screen can build +
+// push its on_key targets, and so pushed screens get the same
+// data layer.
 type Multi struct {
-	Screens     map[string]*cfg.Screen
-	Components  map[string]*cfg.Component
-	DataSources map[string]*cfg.DataSource
+	Screens    map[string]*cfg.Screen
+	Components map[string]*cfg.Component
+	Sources    map[string]*cfg.Source
 }
 
 // sourceEntry tracks a live data source bound to one or more components.
@@ -54,7 +61,7 @@ type Multi struct {
 type sourceEntry struct {
 	src    ds.Source
 	loaded bool
-	stream <-chan ds.Event   // non-nil for streaming sources after Subscribe
+	stream <-chan ds.Event    // non-nil for streaming sources after Subscribe
 	cancel context.CancelFunc // cancels the stream's context
 }
 
@@ -89,23 +96,58 @@ type nonInteractiveResult struct {
 }
 
 // Model is the config-driven screen. Construct with New (single-screen)
-// or NewMulti (multi-screen with on_enter push support) and pass as the
+// or NewMulti (multi-screen with on_key push support) and pass as the
 // root to app.New.
 type Model struct {
 	title    string
 	th       theme.Theme
 	tree     *build.Tree
-	focus    int               // index into tree.All(); -1 means no component focused
-	multi    *Multi            // nil for single-screen mode
-	bindings map[string]string // component name -> target screen name (this screen's on_enter)
-	actions  []cfg.Action      // per-key subprocess bindings for this screen
+	focus    int                            // index into tree.All(); -1 means no component focused
+	multi    *Multi                         // nil for single-screen mode
+	// bindings holds every on_key push for this screen. A single source
+	// may declare multiple bindings distinguished by Key, so lookups
+	// scan linearly per keystroke.
+	bindings []cfg.OnKeyBinding
+	actions  []cfg.Action                   // per-key subprocess bindings for this screen
 
 	// Data-source state. sources is keyed by source name; sourceUsers
 	// indexes the bound components per source so a single fetch can fan
 	// out to every consumer.
 	sources     map[string]*sourceEntry
 	sourceUsers map[string][]string // source name -> component names
-	started     bool                // OnEnter has fired the initial fetch wave
+	started     bool                // the initial fetch wave has fired
+
+	// cursorBindings lists every component whose `on_cursor:` block ties
+	// its source refetch to another table's focused row. Scanned when a
+	// RowFocusedMsg arrives from a driver.
+	cursorBindings []cursorBinding
+	// cursorState tracks the latest Selection emitted by each driver
+	// table — indexed by driver component name. Populated by tagged
+	// RowFocusedMsgs. Used by lifecycle events (screen re-enter) to
+	// re-drive dependent fetches without needing another cursor
+	// movement to prime the pump.
+	cursorState map[string]build.Selection
+	// cursorCaches wraps each cursor-driven source's per-params LRU.
+	// Indexed by target source name (which is unique per binding since
+	// the same source shouldn't be cursor-bound twice). Lookups here
+	// dedup rapid cursor sweeps that would otherwise hammer the
+	// upstream — the caching layer built in feature G, reused.
+	cursorCaches map[string]*ds.ParamCache
+	// cursorSourceDefs holds the *cfg.Source template for each cursor-
+	// bound target. Runtime BindParams clones this per fetch so we can
+	// keep swapping in different param tuples without disturbing the
+	// canonical config.
+	cursorSourceDefs map[string]*cfg.Source
+	// cursorAllSources is the full sources map for pipeline.Build.
+	// Cursor-driven fetches route through pipeline.Build (not just
+	// BuildLeaf) so both leaf-kind targets AND pipeline-operator
+	// targets (filter / project / derive / sort / join / etc.) work.
+	// pipeline.Build needs the whole sources map so `from:` upstreams
+	// resolve; constructor calls don't touch the network, so
+	// rebuilding on every cursor move is safe. The ParamCache in
+	// cursorCaches absorbs the redundant construction cost for
+	// repeated params.
+	cursorAllSources map[string]*cfg.Source
 
 	// Confirm-modal state. When confirmModal is non-nil it overlays the
 	// body via ZStack and captures all keys until ConfirmedMsg /
@@ -115,11 +157,26 @@ type Model struct {
 	pendingArgv        []string
 	pendingNotice      string
 	pendingInteractive bool
+	// confirmW / confirmH are the fitted outer dimensions for the confirm
+	// overlay, computed in newConfirmModal from the (word-wrapped) message.
+	// The confirm component doesn't wrap or self-measure, so Layout() reads
+	// these instead of a hardcoded Center size — otherwise a long message
+	// (e.g. "Delete pod <long-name> in <ns>? This cannot be undone.") clips.
+	confirmW, confirmH int
 
 	// Alert-modal state. Shown when an action dispatch returns a non-nil
 	// error (subprocess failed to start, exited non-zero, etc.). One OK
 	// button; dismissed on enter/space/esc/o.
 	alertModal *alert.Model
+
+	// Form-modal state. Shown when an action declares `prompts:` —
+	// each prompt becomes a field, on submit the values feed into
+	// ${prompt.*} substitution for the rest of the action's flow
+	// (confirm message + run argv). pendingAction / pendingSel carry
+	// the action context across the modal.
+	formModal     *form.Model
+	pendingAction cfg.Action
+	pendingSel    build.Selection
 
 	// inFlightStderr captures the dispatched interactive subprocess's
 	// stderr so the alert can show the actual error text. Set in
@@ -130,9 +187,21 @@ type Model struct {
 }
 
 // New builds a single-screen Model. Components are looked up by name in
-// the layout tree.
-func New(s *cfg.Screen, components map[string]*cfg.Component, dataSources map[string]*cfg.DataSource, th theme.Theme) (*Model, error) {
-	return build_(s, components, dataSources, th, nil)
+// the layout tree. SubstituteScreen with an empty selection applies
+// ${env.*} substitution to URLs / headers / argv / etc. — without this
+// step, env tokens in single-screen configs would be passed through
+// literally (multi-screen already substitutes via NewMulti).
+//
+// params is nil here — there's no push site context in single-screen
+// mode. Parameterized sources will be constructed with unresolved
+// ${params.*} templates and will surface errors at fetch time. Use
+// wrangl --param for now, or have your source declare defaults.
+func New(s *cfg.Screen, components map[string]*cfg.Component, entries map[string]*cfg.Source, th theme.Theme) (*Model, error) {
+	subS, subC, subE, err := build.SubstituteScreen(s, components, entries, build.Selection{}, nil)
+	if err != nil {
+		return nil, err
+	}
+	return build_(subS, subC, subE, th, nil)
 }
 
 // NewMulti builds a Model from one screen in a multi-screen Config. The
@@ -140,16 +209,26 @@ func New(s *cfg.Screen, components map[string]*cfg.Component, dataSources map[st
 // the screen.Stack. The selection captured at push time substitutes
 // ${selection} tokens in the pushed screen's config — and in any
 // data-source URL/headers/body referenced from that screen.
-func NewMulti(screenName string, multi *Multi, sel build.Selection, th theme.Theme) (*Model, error) {
+//
+// params carries the push-site `bind:` block's resolved values for the
+// destination screen's parameterized sources. Pass nil on the initial
+// multi-screen construction (no push has fired yet) and on screens
+// whose on_key has no Bind: map. Missing required params surface as
+// a build error so tryPush can pop an alert instead of constructing
+// a half-broken screen.
+func NewMulti(screenName string, multi *Multi, sel build.Selection, params map[string]string, th theme.Theme) (*Model, error) {
 	src, ok := multi.Screens[screenName]
 	if !ok {
 		return nil, fmt.Errorf("screen %q not defined", screenName)
 	}
-	subScreen, subComponents, subSources := build.SubstituteScreen(src, multi.Components, multi.DataSources, sel)
-	return build_(subScreen, subComponents, subSources, th, multi)
+	subScreen, subComponents, subEntries, err := build.SubstituteScreen(src, multi.Components, multi.Sources, sel, params)
+	if err != nil {
+		return nil, err
+	}
+	return build_(subScreen, subComponents, subEntries, th, multi)
 }
 
-func build_(s *cfg.Screen, components map[string]*cfg.Component, dataSources map[string]*cfg.DataSource, th theme.Theme, multi *Multi) (*Model, error) {
+func build_(s *cfg.Screen, components map[string]*cfg.Component, entries map[string]*cfg.Source, th theme.Theme, multi *Multi) (*Model, error) {
 	tree, err := build.Build(&s.Layout, components, th)
 	if err != nil {
 		return nil, err
@@ -159,17 +238,13 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, dataSources map
 		m.focus = 0
 	}
 	if multi != nil {
-		m.bindings = map[string]string{}
-		for _, b := range s.OnEnter {
-			m.bindings[b.Source] = b.Push
-		}
+		m.bindings = append([]cfg.OnKeyBinding(nil), s.OnKey...)
 	}
 	m.actions = append([]cfg.Action(nil), s.Actions...)
 
-	// Build every defined data source up front so merge sources can
-	// resolve their children. Leaves (http/exec/file) and merges all
-	// satisfy ds.Source; the screen-side wiring below is type-agnostic.
-	live, err := ds.Build(dataSources)
+	// One unified registry over the entries map. Sources and operator
+	// pipelines share the namespace — reg.Get resolves both.
+	reg, err := pipeline.Build(nil, entries, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -177,17 +252,23 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, dataSources map
 	m.sourceUsers = map[string][]string{}
 	for _, name := range tree.Order {
 		c := tree.Components[name]
-		srcName := c.Cfg.Source
-		if srcName == "" {
+		// Source references any entry in the unified registry (leaf
+		// source or operator pipeline). reg.Get resolves both kinds.
+		boundName := c.Cfg.Source
+		if boundName == "" {
 			continue
 		}
-		if _, ok := dataSources[srcName]; !ok {
-			return nil, fmt.Errorf("component %q: source %q not defined", name, srcName)
+		bound := reg.Get(boundName)
+		if bound == nil {
+			return nil, fmt.Errorf("component %q: source %q not defined", name, boundName)
 		}
-		if _, ok := m.sources[srcName]; !ok {
-			m.sources[srcName] = &sourceEntry{src: live[srcName]}
+		if _, ok := m.sources[boundName]; !ok {
+			m.sources[boundName] = &sourceEntry{src: bound}
 		}
-		m.sourceUsers[srcName] = append(m.sourceUsers[srcName], name)
+		m.sourceUsers[boundName] = append(m.sourceUsers[boundName], name)
+	}
+	if err := m.initCursor(components, entries); err != nil {
+		return nil, err
 	}
 	return m, nil
 }
@@ -215,6 +296,14 @@ func (m *Model) OnEnter(any) tea.Cmd {
 	m.started = true
 	var cmds []tea.Cmd
 	for name, entry := range m.sources {
+		// Cursor-driven sources fetch only when their driver has a
+		// focused row — kicking a fetch on OnEnter would try to hit
+		// the upstream with empty template substitutions. Skip; the
+		// first RowFocusedMsg from the driver (which tuilib fires as
+		// part of initial view) primes the pump.
+		if _, ok := m.cursorCaches[name]; ok {
+			continue
+		}
 		// Streaming sources take a different path: subscribe once and
 		// pump events into the logview as they arrive. Fetch still
 		// fires alongside so the bound logview can render an empty
@@ -260,25 +349,38 @@ func nextStreamMsg(source string, ch <-chan ds.Event) tea.Cmd {
 }
 
 // Layout returns the live layout.Node tree built from the YAML config.
-// When a modal (alert or confirm) is active it overlays a centered
-// dialog on top of the body via ZStack — base still renders behind so
-// the user sees what they're acting on. Alerts take precedence (they
-// only arise after a dispatch attempt completed; at most one modal is
-// up at a time in practice).
+// When a modal is active it overlays a centered dialog on top of the
+// body via ZStack — base still renders behind so the user sees what
+// they're acting on. Precedence (only one can be up at a time in
+// practice): alert > confirm > form.
 func (m *Model) Layout() layout.Node {
 	body := m.tree.RenderNode()
 	switch {
 	case m.alertModal != nil:
-		return layout.ZStack(body, layout.Center(70, 9, layout.Sized(m.alertModal)))
+		// Autosize is on (see newAlertModal) so the alert measures its
+		// own content and picks a centered rect within the outer bounds
+		// — no fixed-size Center wrapper. tuilib caps at 80%×60% and
+		// scrolls internally past that.
+		return layout.ZStack(body, layout.Sized(m.alertModal))
 	case m.confirmModal != nil:
-		return layout.ZStack(body, layout.Center(60, 7, layout.Sized(m.confirmModal)))
+		// Fitted size (see newConfirmModal) so long confirm messages wrap
+		// and stay fully visible instead of clipping at the 60-col edge.
+		return layout.ZStack(body, layout.Center(m.confirmW, m.confirmH, layout.Sized(m.confirmModal)))
+	case m.formModal != nil:
+		// Height scales with the field count: 3 rows per field (input
+		// is bordered) + 3 for title + submit button + breathing room.
+		h := 3 + 3*len(m.pendingAction.Prompts)
+		if h < 9 {
+			h = 9
+		}
+		return layout.ZStack(body, layout.Center(60, h, layout.Sized(m.formModal)))
 	}
 	return body
 }
 
 // Update routes KeyMsgs to the focused component (with tab/shift+tab
 // intercepted for focus cycling and enter intercepted when the focused
-// component has an on_enter binding). Non-key messages fan out so
+// component has an on_key binding). Non-key messages fan out so
 // spinner ticks reach every component.
 func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 	// Alert modal takes precedence — single OK button, dismiss is the
@@ -291,6 +393,29 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		}
 		next, cmd := m.alertModal.Update(msg)
 		m.alertModal = &next
+		return m, cmd
+	}
+	// Form modal — opened when an action declares prompts. On submit,
+	// pull values out and proceed to confirm/dispatch via
+	// actionAfterPrompts. On cancel, abort the action entirely.
+	if m.formModal != nil {
+		switch x := msg.(type) {
+		case form.SubmittedMsg:
+			prompts := stringifyFormValues(x.Values)
+			action := m.pendingAction
+			sel := m.pendingSel
+			m.formModal = nil
+			m.pendingAction = cfg.Action{}
+			m.pendingSel = build.Selection{}
+			return m, m.actionAfterPrompts(action, sel, prompts)
+		case form.CancelledMsg:
+			m.formModal = nil
+			m.pendingAction = cfg.Action{}
+			m.pendingSel = build.Selection{}
+			return m, nil
+		}
+		next, cmd := m.formModal.Update(msg)
+		m.formModal = &next
 		return m, cmd
 	}
 	// Confirm modal takes precedence — it's a real modal so every key
@@ -326,10 +451,20 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 			m.cycleFocus(-1)
 			return m, nil
 		case "enter":
-			if cmd, handled := m.tryPush(); handled {
+			if cmd, handled := m.activate(); handled {
 				return m, cmd
 			}
 		default:
+			// on_key bindings fire before actions
+			// so a screen author can bind `d → describe` (push) without
+			// colliding with an action on the same key (which would also
+			// have matched). Uniqueness is enforced at validate time on
+			// the push side; collision with an action is still possible
+			// and picks push-first (deliberate — pushes are lower risk
+			// than firing a subprocess).
+			if cmd, handled := m.tryPush(k.String()); handled {
+				return m, cmd
+			}
 			if cmd, handled := m.tryAction(k); handled {
 				return m, cmd
 			}
@@ -352,7 +487,7 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 			}
 		}
 		if cur := m.current(); cur != nil {
-			return m, updateComponent(cur, msg)
+			return m, tagCursorFocused(updateComponent(cur, msg), m.tree.Order[m.focus])
 		}
 		return m, nil
 	}
@@ -364,6 +499,10 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		return m, m.startFetch(x.source)
 	case streamMsg:
 		return m, m.handleStream(x)
+	case taggedCursorMsg:
+		return m, m.handleCursorChange(x)
+	case cursorFetchMsg:
+		return m, m.applyCursorFetch(x)
 	case runner.Result:
 		captured := ""
 		if m.inFlightStderr != nil {
@@ -373,12 +512,47 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		return m, m.actionOutcome(captured, x.Err)
 	case nonInteractiveResult:
 		return m, m.actionOutcome(strings.TrimSpace(x.stderr), x.err)
+	case list.ActivatedMsg, table.ActivatedMsg:
+		// A double click is the mouse spelling of enter. The message names
+		// its sender by token, so we activate the component that was
+		// double-clicked rather than m.focus — the focus request the same
+		// click emitted rides in the same batch, and batched cmds have no
+		// ordering guarantee.
+		for i, c := range m.tree.All() {
+			if !componentActivated(c, msg) {
+				continue
+			}
+			if i != m.focus {
+				m.focus = i
+				m.applyFocus()
+			}
+			if cmd, handled := m.activate(); handled {
+				return m, cmd
+			}
+			break
+		}
+		return m, nil
+	case focus.RequestMsg:
+		// A component emits this when a click lands inside its rect. Without
+		// honouring it the clicked pane moves its own cursor while the
+		// keyboard keeps driving the previously focused one — two panes look
+		// active at once.
+		for i, c := range m.tree.All() {
+			if focusRequested(c, x) {
+				if i != m.focus {
+					m.focus = i
+					m.applyFocus()
+				}
+				break
+			}
+		}
+		return m, nil
 	}
 
 	var cmds []tea.Cmd
-	for _, c := range m.tree.All() {
+	for i, c := range m.tree.All() {
 		if cmd := updateComponent(c, msg); cmd != nil {
-			cmds = append(cmds, cmd)
+			cmds = append(cmds, tagCursorFocused(cmd, m.tree.Order[i]))
 		}
 	}
 	return m, tea.Batch(cmds...)
@@ -460,8 +634,26 @@ func (m *Model) handleFetch(msg fetchMsg) tea.Cmd {
 			return tickMsg{source: name}
 		}))
 	}
+	// After ApplyData: fan a wake msg to every component so any
+	// pending tuilib focus emit (RowFocusedMsg from SetRows,
+	// SelectedChangedMsg from SetItems / SetRoot) actually flushes.
+	// Those emits only fire from tuilib Update; the intercepted
+	// fetchMsg path never triggers Update on the bound components on
+	// its own, which is why cursor-driven detail panes wouldn't
+	// populate until the user pressed something. postApplyMsg falls
+	// through to the fanout at the bottom of Update, hits every
+	// component's Update, and any pending flushMsgs fire.
+	if msg.data != nil {
+		cmds = append(cmds, func() tea.Msg { return postApplyMsg{} })
+	}
 	return tea.Batch(cmds...)
 }
+
+// postApplyMsg fans out to every component's Update so tuilib focus
+// emits (RowFocusedMsg, SelectedChangedMsg) that were queued during
+// SetRows / SetRoot / SetItems actually flush. See handleFetch for
+// why the intercepted fetchMsg alone can't trigger those flushes.
+type postApplyMsg struct{}
 
 // setLoading toggles the pane's loading state on a component and returns
 // the spinner's kick-off command (CLAUDE rule 15).
@@ -477,6 +669,8 @@ func setLoading(c *build.Component, on bool) tea.Cmd {
 		return c.Tree.SetLoading(on)
 	case build.KInspector:
 		return c.Inspector.SetLoading(on)
+	case build.KTextview:
+		return c.Textview.SetLoading(on)
 	}
 	return nil
 }
@@ -485,7 +679,7 @@ func setLoading(c *build.Component, on bool) tea.Cmd {
 // keystrokes (filter typing). Also true while any modal is showing so
 // q/t/esc-pop are routed to the modal, not the app shell.
 func (m *Model) IsCapturingKeys() bool {
-	if m.alertModal != nil || m.confirmModal != nil {
+	if m.alertModal != nil || m.confirmModal != nil || m.formModal != nil {
 		return true
 	}
 	c := m.current()
@@ -496,8 +690,8 @@ func (m *Model) IsCapturingKeys() bool {
 }
 
 // Help returns the bindings the focused component currently exposes,
-// plus "enter → open" when this screen has an on_enter binding for the
-// focused component, plus any action keys bound to the focused source.
+// plus one entry per on_key push binding for the focused component,
+// plus any action keys bound to the focused source.
 func (m *Model) Help() []key.Binding {
 	c := m.current()
 	if c == nil {
@@ -509,10 +703,19 @@ func (m *Model) Help() []key.Binding {
 	}
 	name := m.tree.Order[m.focus]
 	if m.multi != nil {
-		if _, ok := m.bindings[name]; ok {
-			out = append(out,
-				key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "open")),
-			)
+		for _, b := range m.bindings {
+			if b.Source != name {
+				continue
+			}
+			glyph := b.Key
+			if b.Key == "enter" {
+				glyph = "⏎"
+			}
+			label := b.Label
+			if label == "" {
+				label = "open"
+			}
+			out = append(out, key.NewBinding(key.WithKeys(b.Key), key.WithHelp(glyph, label)))
 		}
 	}
 	for _, a := range m.actions {
@@ -566,19 +769,62 @@ func (m *Model) applyFocus() {
 	}
 }
 
-func setFocused(c *build.Component, on bool) {
+// focusableOf returns the component's tuilib focus handle, or nil for
+// kinds that take no focus.
+func focusableOf(c *build.Component) focus.Focusable {
 	switch c.Kind {
 	case build.KList:
-		c.List.SetFocused(on)
+		return c.List
 	case build.KTable:
-		c.Table.SetFocused(on)
+		return c.Table
 	case build.KLogview:
-		c.Logview.SetFocused(on)
+		return c.Logview
 	case build.KTree:
-		c.Tree.SetFocused(on)
+		return c.Tree
 	case build.KInspector:
-		c.Inspector.SetFocused(on)
+		return c.Inspector
+	case build.KTextview:
+		return c.Textview
 	}
+	return nil
+}
+
+func setFocused(c *build.Component, on bool) {
+	f := focusableOf(c)
+	if f == nil {
+		return
+	}
+	// Focus returns a cursor-blink cmd for components that have one; none
+	// of the kinds above do, so there is nothing to propagate.
+	if on {
+		f.Focus()
+		return
+	}
+	f.Blur()
+}
+
+// focusRequested reports whether req names c. A clicked component asks for
+// focus by token (it can't name its own address — see focus.Token); a
+// caller holding the component names it by address.
+//
+// This mirrors focus.Group's matching. We can't use a Group directly: this
+// screen's focus index also drives on_cursor tagging, action dispatch, and
+// help text, so the index stays the source of truth and requests are
+// translated into it.
+func focusRequested(c *build.Component, req focus.RequestMsg) bool {
+	f := focusableOf(c)
+	if f == nil {
+		return false
+	}
+	if req.Target != nil && f == req.Target {
+		return true
+	}
+	if req.Token != nil {
+		if id, ok := f.(focus.Identified); ok && id.FocusToken() == req.Token {
+			return true
+		}
+	}
+	return false
 }
 
 func componentCapturing(c *build.Component) bool {
@@ -593,6 +839,8 @@ func componentCapturing(c *build.Component) bool {
 		return c.Tree.Searching()
 	case build.KInspector:
 		return c.Inspector.Searching()
+	case build.KTextview:
+		return c.Textview.Searching()
 	}
 	return false
 }
@@ -609,6 +857,8 @@ func componentHelp(c *build.Component) []key.Binding {
 		return c.Tree.Help()
 	case build.KInspector:
 		return c.Inspector.Help()
+	case build.KTextview:
+		return c.Textview.Help()
 	}
 	return nil
 }
@@ -633,24 +883,44 @@ func (m *Model) tryAction(k tea.KeyMsg) (tea.Cmd, bool) {
 			continue
 		}
 		sel := selectionFrom(cur)
-		argv := build.SubstituteAll(a.Run, sel)
-		if len(argv) == 0 {
-			return nil, true
+		// Three possible paths, top-down:
+		//   1. prompts: → form modal collects values, then continues
+		//   2. confirm: → confirm modal (with substituted message)
+		//   3. dispatch
+		// We capture the action and selection into pendingAction so
+		// the form's onSubmit can resume the flow with the same data.
+		if len(a.Prompts) > 0 {
+			form := m.newPromptForm(a.Prompts)
+			m.formModal = &form
+			m.pendingAction = a
+			m.pendingSel = sel
+			return form.Init(), true
 		}
-		// With `confirm:` set, show the modal first; otherwise dispatch
-		// immediately.
-		if a.Confirm != "" {
-			msg := build.SubstituteAll([]string{a.Confirm}, sel)[0]
-			modal := m.newConfirmModal(a.Label, msg)
-			m.confirmModal = &modal
-			m.pendingArgv = argv
-			m.pendingNotice = a.Notice
-			m.pendingInteractive = a.InteractiveDefault()
-			return nil, true
-		}
-		return m.dispatch(argv, a.Notice, a.InteractiveDefault()), true
+		return m.actionAfterPrompts(a, sel, nil), true
 	}
 	return nil, false
+}
+
+// actionAfterPrompts is the second leg of action dispatch — runs after
+// any prompts have been collected (or immediately, if there were no
+// prompts). Performs final substitution with the prompt values and
+// either pops the confirm modal or dispatches directly.
+func (m *Model) actionAfterPrompts(a cfg.Action, sel build.Selection, prompts map[string]string) tea.Cmd {
+	argv := build.SubstituteAll(a.Run, sel, prompts)
+	if len(argv) == 0 {
+		return nil
+	}
+	if a.Confirm != "" {
+		msg := build.SubstituteAll([]string{a.Confirm}, sel, prompts)[0]
+		modal := m.newConfirmModal(a.Label, msg)
+		m.confirmModal = &modal
+		m.pendingArgv = argv
+		m.pendingNotice = build.SubstituteAll([]string{a.Notice}, sel, prompts)[0]
+		m.pendingInteractive = a.InteractiveDefault()
+		return nil
+	}
+	notice := build.SubstituteAll([]string{a.Notice}, sel, prompts)[0]
+	return m.dispatch(argv, notice, a.InteractiveDefault())
 }
 
 // dispatch routes a fully-substituted argv to either pkg/runner
@@ -706,62 +976,168 @@ func (m *Model) actionOutcome(captured string, err error) tea.Cmd {
 	return app.Info("action complete")
 }
 
+// newPromptForm builds the form modal for an action's prompts. Maps
+// each cfg.Prompt to the matching tuilib form.Field constructor.
+func (m *Model) newPromptForm(prompts []cfg.Prompt) form.Model {
+	fields := make([]form.Field, len(prompts))
+	for i, p := range prompts {
+		switch p.Type {
+		case "select":
+			fields[i] = form.Select(form.SelectOptions{
+				Key:     p.Key,
+				Label:   labelOr(p.Label, p.Key),
+				Options: append([]string(nil), p.Options...),
+				Initial: p.InitialIdx,
+			})
+		case "confirm":
+			fields[i] = form.Confirm(form.ConfirmOptions{
+				Key:     p.Key,
+				Label:   labelOr(p.Label, p.Key),
+				Initial: p.InitialBool,
+			})
+		default: // text
+			fields[i] = form.Text(form.TextOptions{
+				Key:         p.Key,
+				Label:       labelOr(p.Label, p.Key),
+				Placeholder: p.Placeholder,
+				Initial:     p.Initial,
+			})
+		}
+	}
+	opts := m.th.Form().With(fields)
+	opts.SubmitText = "Run"
+	return form.New(opts)
+}
+
+func labelOr(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
+}
+
+// stringifyFormValues coerces form.SubmittedMsg.Values (any-typed) into
+// the string map ${prompt.*} substitution wants. Booleans become
+// "true"/"false"; everything else uses fmt.Sprint.
+func stringifyFormValues(in map[string]any) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		switch x := v.(type) {
+		case string:
+			out[k] = x
+		case bool:
+			if x {
+				out[k] = "true"
+			} else {
+				out[k] = "false"
+			}
+		default:
+			out[k] = fmt.Sprint(v)
+		}
+	}
+	return out
+}
+
+// confirmWrapWidth is the inner text width the confirm message is wrapped
+// to. Paired with confirmChrome it yields a modal that fits within an
+// 80-column terminal (72 + 4 border/padding cols) while word-wrapping
+// anything longer instead of clipping it. Kept below the alert's 80% cap
+// so the two modals look consistent on a standard terminal.
+const (
+	confirmWrapWidth = 72
+	confirmChrome    = 4 // border (2) + one padding col each side
+)
+
 // newConfirmModal builds a yes/no confirm dialog using the active theme.
-// The title is the action's label (or "Confirm" when blank); message is
-// already substituted.
+// The title is the action's label (or "Confirm" when blank). The message
+// is word-wrapped to confirmWrapWidth and the overlay's fitted dimensions
+// (m.confirmW / m.confirmH) are recorded for Layout() — the confirm
+// component neither wraps nor self-measures, so without this a long
+// message clips to a single hardcoded-width line.
 func (m *Model) newConfirmModal(label, message string) confirm.Model {
 	opts := m.th.Confirm()
 	if label == "" {
 		label = "Confirm"
 	}
+	wrapped := xansi.Wrap(message, confirmWrapWidth, " -")
+	lines := strings.Split(wrapped, "\n")
+	longest := 0
+	for _, ln := range lines {
+		if w := xansi.StringWidth(ln); w > longest {
+			longest = w
+		}
+	}
+	// Outer width fits the longest wrapped line; height fits the message
+	// lines + blank spacer + button row, all inside the pane border. Floor
+	// at the previous 60×7 so short prompts keep their familiar shape.
+	m.confirmW = longest + confirmChrome
+	if m.confirmW < 60 {
+		m.confirmW = 60
+	}
+	m.confirmH = len(lines) + 4 // borders (2) + spacer (1) + buttons (1)
+	if m.confirmH < 7 {
+		m.confirmH = 7
+	}
 	opts.Title = label
-	opts.Message = message
+	opts.Message = wrapped
 	opts.Confirm = "Yes"
 	opts.Cancel = "No"
 	return confirm.New(opts)
 }
 
-// newAlertModal builds an error-tinted alert dialog. The message is
-// wrapped to fit the modal width and capped at ~5 lines so very long
-// subprocess errors don't blow up the screen — alert itself does not
-// wrap text. tuilib's convention is to override ActiveColor with the
-// theme's ErrorBG to get the red-edge "something went wrong" look.
+// newAlertModal builds an error-tinted alert dialog. Autosize is on so
+// the modal caps at 80%×60% of the screen (per tuilib) and word-wraps
+// the full message with internal scroll — kubectl-describe-shape errors
+// no longer clip to five lines. tuilib's convention is to override
+// ActiveColor with the theme's ErrorBG to get the red-edge "something
+// went wrong" look. Layout() pairs this with layout.Sized(...) instead
+// of layout.Center(w, h, ...) since the alert measures itself.
 func (m *Model) newAlertModal(title, message string) alert.Model {
 	opts := m.th.Alert()
 	opts.Title = title
-	opts.Message = wrapMessage(message, 64, 5)
+	opts.Message = message
 	opts.OK = "OK"
 	opts.ActiveColor = m.th.ErrorBG
+	opts.Autosize = true
 	return alert.New(opts)
 }
 
-// wrapMessage hard-wraps s into at most maxLines lines of maxWidth cells.
-// Overflow lines are truncated with an ellipsis on the last visible line.
-// Doesn't try to be word-boundary smart — error text isn't prose.
-func wrapMessage(s string, maxWidth, maxLines int) string {
-	var lines []string
-	for _, raw := range strings.Split(s, "\n") {
-		for len(raw) > maxWidth {
-			lines = append(lines, raw[:maxWidth])
-			raw = raw[maxWidth:]
-		}
-		lines = append(lines, raw)
+// activate runs the "open the selection" verb against the focused
+// component: an on_key binding for enter first, then an action bound to
+// enter. Keyboard enter and a double click both route through here so the
+// two spellings of the same verb can't drift apart.
+//
+// Push-before-action matches the ordering the other keys use in Update.
+func (m *Model) activate() (tea.Cmd, bool) {
+	if cmd, handled := m.tryPush("enter"); handled {
+		return cmd, true
 	}
-	if len(lines) > maxLines {
-		lines = lines[:maxLines]
-		last := lines[maxLines-1]
-		if len(last) > maxWidth-1 {
-			last = last[:maxWidth-1]
-		}
-		lines[maxLines-1] = last + "…"
-	}
-	return strings.Join(lines, "\n")
+	return m.tryAction(tea.KeyMsg{Type: tea.KeyEnter})
 }
 
-// tryPush handles enter when the focused component has an on_enter binding.
-// Returns (cmd, true) when handled; (nil, false) to fall through to the
-// normal forward-to-component path.
-func (m *Model) tryPush() (tea.Cmd, bool) {
+// componentActivated reports whether msg is c's own activation. Only lists
+// and tables emit one, which is also all the validator allows as an on_key
+// or action source.
+//
+// Call this only for ActivatedMsg: tuilib's IsActivate also answers true for
+// a plain enter KeyMsg regardless of which component it belongs to, and the
+// keyboard path already resolves that through m.focus.
+func componentActivated(c *build.Component, msg tea.Msg) bool {
+	switch c.Kind {
+	case build.KList:
+		return c.List.IsActivate(msg)
+	case build.KTable:
+		return c.Table.IsActivate(msg)
+	}
+	return false
+}
+
+// tryPush handles a key that the focused component has an on_key
+// binding for. `press` is the key string as produced by tea.KeyMsg.String()
+// — "enter" for the Enter key, "d" / "l" / "ctrl+r" / etc. for arbitrary
+// bindings. Returns (cmd, true) when a matching binding fires; (nil, false)
+// to fall through to actions or normal component forwarding.
+func (m *Model) tryPush(press string) (tea.Cmd, bool) {
 	if m.multi == nil || m.focus < 0 {
 		return nil, false
 	}
@@ -770,20 +1146,37 @@ func (m *Model) tryPush() (tea.Cmd, bool) {
 		return nil, false
 	}
 	name := m.tree.Order[m.focus]
-	target, ok := m.bindings[name]
-	if !ok {
+	var binding *cfg.OnKeyBinding
+	for i := range m.bindings {
+		b := &m.bindings[i]
+		if b.Source == name && b.Key == press {
+			binding = b
+			break
+		}
+	}
+	if binding == nil {
 		return nil, false
 	}
 	sel := selectionFrom(cur)
-	child, err := NewMulti(target, m.multi, sel, m.th)
+	// Resolve the push-site bind: block against the focused row's
+	// selection. We always pass a non-nil map (possibly empty) — the
+	// push IS a binding context, even if the user forgot to declare
+	// bind:. That lets applyBindParams enforce required params with a
+	// clean "missing required" error instead of silently constructing
+	// a screen that 404s on first fetch.
+	params := make(map[string]string, len(binding.Bind))
+	for k, v := range binding.Bind {
+		params[k] = build.Substitute(v, sel)
+	}
+	child, err := NewMulti(binding.Push, m.multi, sel, params, m.th)
 	if err != nil {
-		return app.Error(fmt.Sprintf("%s: %v", target, err)), true
+		return app.Error(fmt.Sprintf("%s: %v", binding.Push, err)), true
 	}
 	return tscreen.Push(child), true
 }
 
 // selectionFrom extracts a Selection from a list or table component. The
-// validator restricts on_enter sources / action sources to lists and
+// validator restricts on_key sources / action sources to lists and
 // tables, so other kinds return a zero Selection.
 //
 // Items and cells are ANSI-stripped before being captured so that
@@ -878,6 +1271,253 @@ func updateComponent(c *build.Component, msg tea.Msg) tea.Cmd {
 		m, cmd := c.Inspector.Update(msg)
 		*c.Inspector = m
 		return cmd
+	case build.KTextview:
+		m, cmd := c.Textview.Update(msg)
+		*c.Textview = m
+		return cmd
+	}
+	return nil
+}
+
+// cursorBinding is the resolved form of a component's `on_cursor:`
+// declaration. Compared against every driver's tagged RowFocusedMsg
+// to decide which dependent source should refetch.
+type cursorBinding struct {
+	driver string            // driver component name (a table)
+	target string            // dependent component name
+	source string            // dependent source's registry name
+	bind   map[string]string // param name -> template ("${cursor.Name}", etc.)
+}
+
+// taggedCursorMsg attaches a driver component name to a
+// pre-normalized Selection built from whichever tuilib focus-change
+// message the driver emitted (table.RowFocusedMsg,
+// list.SelectedChangedMsg, or tree.SelectedChangedMsg). The fan-out
+// path wraps each component's Cmd, translates the message, and
+// re-emits this so screen.Update can route it uniformly.
+type taggedCursorMsg struct {
+	driver string
+	empty  bool
+	sel    build.Selection
+}
+
+// cursorFetchMsg carries a cursor-driven fetch result back to
+// Update. Distinct from the polled fetchMsg because it applies to a
+// specific target (one component), not all sourceUsers of the source.
+type cursorFetchMsg struct {
+	target string
+	data   any
+	err    error
+}
+
+// tagCursorFocused wraps a component's returned Cmd so any tuilib
+// focus-change message the cmd produces is normalised into a
+// taggedCursorMsg carrying the emitting component's name plus a
+// pre-built build.Selection. Non-matching messages pass through
+// untouched. Called from the broadcast fan-out — every component's
+// Update return value goes through this — so we never lose track of
+// which driver's cursor moved. Selection shape per driver kind:
+//
+//   - table.RowFocusedMsg  → String = first cell, Cells = row cells,
+//                            Columns = column titles
+//   - list.SelectedChangedMsg → String = item, Cells = [item],
+//                            Columns = ["item"] (so ${cursor.item}
+//                            reads naturally alongside bare ${cursor})
+//   - tree.SelectedChangedMsg → String = label, Cells = path,
+//                            Columns = nil (numeric ${cursor.N} indexes
+//                            into path; ${cursor.depth} is special-cased
+//                            in the resolver; bare ${cursor} = label)
+func tagCursorFocused(cmd tea.Cmd, name string) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		return translateFocusMsg(cmd(), name)
+	}
+}
+
+// translateFocusMsg maps tuilib focus emits into taggedCursorMsg and
+// leaves other messages untouched. tea.BatchMsg — the shape tuilib
+// components use to combine their own Cmd with flushMsgs() — is
+// unpacked recursively so a focus emit buried inside a batch still
+// gets tagged. Without the batch unwrap our type switch would miss
+// every emit that co-flushes with a viewport tick or spinner cmd
+// (which is virtually all of them).
+func translateFocusMsg(msg tea.Msg, name string) tea.Msg {
+	switch x := msg.(type) {
+	case tea.BatchMsg:
+		wrapped := make([]tea.Cmd, 0, len(x))
+		for _, sub := range x {
+			wrapped = append(wrapped, tagCursorFocused(sub, name))
+		}
+		return tea.BatchMsg(wrapped)
+	case table.RowFocusedMsg:
+		if x.Empty {
+			return taggedCursorMsg{driver: name, empty: true}
+		}
+		first := ""
+		if len(x.Cells) > 0 {
+			first = x.Cells[0]
+		}
+		return taggedCursorMsg{
+			driver: name,
+			sel: build.Selection{
+				String:  first,
+				Cells:   append([]string(nil), x.Cells...),
+				Columns: append([]string(nil), x.Columns...),
+			},
+		}
+	case list.SelectedChangedMsg:
+		if x.Empty {
+			return taggedCursorMsg{driver: name, empty: true}
+		}
+		return taggedCursorMsg{
+			driver: name,
+			sel: build.Selection{
+				String:  x.Item,
+				Cells:   []string{x.Item},
+				Columns: []string{"item"},
+			},
+		}
+	case tree.SelectedChangedMsg:
+		if x.Empty {
+			return taggedCursorMsg{driver: name, empty: true}
+		}
+		return taggedCursorMsg{
+			driver: name,
+			sel: build.Selection{
+				String: x.Label,
+				Cells:  append([]string(nil), x.Path...),
+			},
+		}
+	}
+	return msg
+}
+
+// initCursor collects every OnCursor binding on this screen and
+// prepares its per-source ParamCache. Called from New / NewMulti
+// after the tree + source registry are set up. Uses the same
+// caching primitive built for join lookups (feature G) so cursor
+// sweeps don't hammer parameterized sources.
+func (m *Model) initCursor(components map[string]*cfg.Component, sources map[string]*cfg.Source) error {
+	m.cursorState = map[string]build.Selection{}
+	m.cursorCaches = map[string]*ds.ParamCache{}
+	m.cursorSourceDefs = map[string]*cfg.Source{}
+	m.cursorAllSources = sources
+	for _, name := range m.tree.Order {
+		comp := components[name]
+		if comp == nil || comp.OnCursor == nil {
+			continue
+		}
+		srcName := comp.Source
+		srcDef := sources[srcName]
+		if srcDef == nil {
+			return fmt.Errorf("on_cursor target %q references undefined source %q", name, srcName)
+		}
+		spec := srcDef.Cache
+		if spec == nil {
+			// Match the join operator's lookupCacheDefaults so
+			// cursor-driven and join-lookup call sites converge on the
+			// same "reasonable default" story.
+			spec = &cfg.CacheSpec{TTL: "60s", Size: ds.ParamCacheDefaultSize}
+		}
+		cache, err := ds.NewParamCache(spec)
+		if err != nil {
+			return fmt.Errorf("on_cursor cache for %q: %w", name, err)
+		}
+		m.cursorCaches[srcName] = cache
+		m.cursorSourceDefs[srcName] = srcDef
+		m.cursorBindings = append(m.cursorBindings, cursorBinding{
+			driver: comp.OnCursor.Source,
+			target: name,
+			source: srcName,
+			bind:   comp.OnCursor.Bind,
+		})
+	}
+	return nil
+}
+
+// handleCursorChange updates cursor state for the emitting driver
+// and dispatches a cursor-driven fetch on every binding that watches
+// it. Empty focus (transition to no visible row / item / node) clears
+// the state so downstream templates resolve to "" instead of stale
+// values. The Selection is already normalised — tagCursorFocused
+// handles the per-driver-kind translation.
+func (m *Model) handleCursorChange(t taggedCursorMsg) tea.Cmd {
+	if t.empty {
+		m.cursorState[t.driver] = build.Selection{}
+	} else {
+		m.cursorState[t.driver] = t.sel
+	}
+	var cmds []tea.Cmd
+	for _, b := range m.cursorBindings {
+		if b.driver != t.driver {
+			continue
+		}
+		if cmd := m.startCursorFetch(b); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+// startCursorFetch computes the current param tuple by substituting
+// the driver's cursor Selection into the binding's Bind templates,
+// then consults the shared ParamCache. Miss → returns a Cmd that
+// rebuilds the target source via pipeline.Build with the fresh param
+// tuple bound at build time, fetches, stores. Cache single-flight
+// collapses rapid re-triggers.
+//
+// pipeline.Build is used instead of ds.BuildLeaf so pipeline-operator
+// targets (filter / project / derive / sort / join / etc.) work as
+// on_cursor targets, not just leaf sources. Constructors don't touch
+// the network, so rebuilding the whole registry per miss is safe;
+// the cost is redundant construction, which the cache absorbs for
+// repeats.
+func (m *Model) startCursorFetch(b cursorBinding) tea.Cmd {
+	sel := m.cursorState[b.driver]
+	params := make(map[string]string, len(b.bind))
+	for k, tmpl := range b.bind {
+		params[k] = build.SubstituteCursor(tmpl, sel)
+	}
+	cache := m.cursorCaches[b.source]
+	sources := m.cursorAllSources
+	sourceName := b.source
+	target := b.target
+	return func() tea.Msg {
+		data, err := cache.FetchOrLoad(params, func() (any, error) {
+			reg, err := pipeline.Build(nil, sources, map[string]map[string]string{
+				sourceName: params,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("build: %w", err)
+			}
+			src := reg.Get(sourceName)
+			if src == nil {
+				return nil, fmt.Errorf("source %q not in registry", sourceName)
+			}
+			return src.Fetch(context.Background())
+		})
+		return cursorFetchMsg{target: target, data: data, err: err}
+	}
+}
+
+// applyCursorFetch routes a cursor-driven fetch result to its single
+// target component. Errors surface in the statusbar via app.Error;
+// we don't pop an alert modal here because cursor moves are
+// high-frequency and a modal per failed hover would be miserable.
+func (m *Model) applyCursorFetch(x cursorFetchMsg) tea.Cmd {
+	c := m.tree.Components[x.target]
+	if c == nil {
+		return nil
+	}
+	if x.err != nil {
+		return app.Error(fmt.Sprintf("cursor fetch %s: %v", x.target, x.err))
+	}
+	if x.data != nil {
+		build.ApplyData(c, x.data, m.th)
+		// Same wake fan-out as handleFetch — see postApplyMsg's doc.
+		return func() tea.Msg { return postApplyMsg{} }
 	}
 	return nil
 }

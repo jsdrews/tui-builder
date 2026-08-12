@@ -10,34 +10,34 @@ app:
   title: List Demo
   theme: nord
 
-components:
-  fruits:
-    type: list
+tui:
+  components:
+    fruits:
+      type: list
+      title: Fruits
+      filterable: true
+      items:
+        - Apple
+        - Apricot
+        - Banana
+        - Blueberry
+        - Cherry
+        - Date
+        - Elderberry
+        - Fig
+        - Grape
+        - Honeydew
+        - Kiwi
+        - Lemon
+        - Mango
+        - Nectarine
+        - Orange
+        - Papaya
+        - Quince
+        - Raspberry
+        - Strawberry
+        - Tangerine
+  screen:
     title: Fruits
-    filterable: true
-    items:
-      - Apple
-      - Apricot
-      - Banana
-      - Blueberry
-      - Cherry
-      - Date
-      - Elderberry
-      - Fig
-      - Grape
-      - Honeydew
-      - Kiwi
-      - Lemon
-      - Mango
-      - Nectarine
-      - Orange
-      - Papaya
-      - Quince
-      - Raspberry
-      - Strawberry
-      - Tangerine
-
-screen:
-  title: Fruits
-  layout:
-    component: fruits
+    layout:
+      component: fruits

@@ -1,0 +1,72 @@
+# prompts_boot.yaml — boot-time parameters via app.prompts.
+#
+# At app startup, BEFORE the main screen renders, tui-builder opens a
+# form to collect any app.prompts values. Each value is set as an env
+# var (via os.Setenv) keyed by the prompt's `key`, so the existing
+# ${env.<KEY>} substitution covers BOTH OS env vars and boot-time
+# inputs — one namespace, single substitution path.
+#
+# This example: prompt for a GitHub username + sort field, then feed
+# both into a live HTTP source URL.
+#
+# Pre-populating: if the env var named by a prompt's Key is already
+# set, the text input pre-fills with that value. So:
+#
+#   USER=charmbracelet tui-builder examples/prompts_boot.yaml
+#
+# skips typing — just press enter on the pre-filled form.
+#
+# Cancelling (esc) aborts the program.
+app:
+  title: GitHub by user
+  theme: nord
+  prompts:
+    - key:   USER
+      label: GitHub username
+      placeholder: torvalds
+      initial: torvalds
+    - key:   SORT
+      label: Sort by
+      type:  select
+      options: [updated, created, pushed, full_name]
+      initial_index: 0
+    - key:   ARCHIVED
+      label: Include archived repos?
+      type:  confirm
+      initial_bool: false
+
+data:
+  sources:
+    repos:
+      type: http
+      # All three boot prompts feed into the URL. The header below could
+      # use ${env.GITHUB_TOKEN} too if you want authenticated higher rate
+      # limits (uncomment + export the token).
+      url: https://api.github.com/users/${env.USER}/repos?sort=${env.SORT}&per_page=50
+      refresh: 5m
+      timeout: 15s
+      headers:
+        Accept: application/vnd.github+json
+
+tui:
+        # Authorization: "Bearer ${env.GITHUB_TOKEN}"
+
+  components:
+    repos_table:
+      type: table
+      title: ${env.USER}'s repos — sort=${env.SORT}, archived=${env.ARCHIVED}
+      filterable: true
+      source: repos
+      initial_sort: {column: Stars, desc: true}
+      columns:
+        - {title: Repo,        width: 32, sortable: true, value: full_name}
+        - {title: Language,    width: 14, sortable: true, value: language}
+        - {title: Stars,       width: 8,  sortable: true, sort: number, align: right, value: stargazers_count}
+        - {title: Forks,       width: 8,  sortable: true, sort: number, align: right, value: forks_count}
+        - {title: Updated,     width: 22, sortable: true, value: updated_at}
+        - {title: Archived,    width: 9,  align: center,                value: archived}
+        - {title: Description, width: 60,                               value: description}
+  screen:
+    title: ${env.USER}
+    layout:
+      component: repos_table

@@ -1,0 +1,62 @@
+# params_demo.yaml — parameterized HTTP source via the new `parameters:`
+# block.
+#
+# The point of this example is the schema, not the data. Each source can
+# declare typed inputs that callers (wrangl --param, TUI push site,
+# pipeline operators) must supply before the source can run. Inputs are
+# referenced in URL / header / body templates as ${params.<name>} — same
+# substitution machinery as ${env.*}.
+#
+# Try it:
+#
+#   # required param missing → clear error
+#   task wrangl -- examples/params_demo.yaml posts_by_user
+#
+#   # required param supplied; optional `limit` falls back to default
+#   task wrangl -- examples/params_demo.yaml posts_by_user --param user_id=1
+#
+#   # both params supplied
+#   task wrangl -- examples/params_demo.yaml posts_by_user --param user_id=3 --param limit=10
+#
+# Public API: jsonplaceholder.typicode.com — no auth, stable, 10 users.
+app:
+  title: Params Demo
+data:
+  sources:
+    posts_by_user:
+      type: http
+      # parameters declares the source's required and optional inputs.
+      # Each entry is a typed slot; callers bind values, sources reference
+      # them via ${params.<name>}.
+      parameters:
+        user_id:
+          type: int
+          required: true
+          description: jsonplaceholder user id (1-10)
+        limit:
+          type: int
+          default: 5
+          description: maximum posts to return
+      url: https://jsonplaceholder.typicode.com/users/${params.user_id}/posts?_limit=${params.limit}
+      timeout: 10s
+    user_posts:
+      type: passthrough
+      from: posts_by_user
+tui:
+  # Minimal table so the YAML validates as a complete tui-builder config.
+  # wrangl ignores components / screen entirely; this only matters if you
+  # point tui-builder at the file. For TUI use, params would need to be
+  # bound from env (`from_env:`) or from a boot prompt — not part of this
+  # POC. wrangl is the focal point.
+  components:
+    posts:
+      type: table
+      title: Posts
+      columns:
+        - {title: ID, width: 6, sortable: true, value: id}
+        - {title: User, width: 6, sortable: true, value: userId}
+        - {title: Title, flex: 2, value: title}
+      source: user_posts
+  screen:
+    layout:
+      component: posts

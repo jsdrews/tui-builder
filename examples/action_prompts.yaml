@@ -1,0 +1,65 @@
+# action_prompts.yaml — actions that gather user input before running.
+#
+# Each action can declare a `prompts:` list. When the action fires, a
+# form modal opens, collects values, and exposes them as ${prompt.<key>}
+# tokens substituted into the run argv (and the confirm message, and
+# the notice). Submit → continue the action; cancel (esc) → abort.
+#
+# Prompt types map to tuilib form fields:
+#   text     single-line text — placeholder, initial value
+#   select   pick from options (Initial picks the starting index)
+#   confirm  yes/no toggle (value is the string "true" / "false")
+#
+# Flow when an action fires:
+#   1. (if prompts:) form modal opens
+#   2. user fills fields, tab between them, enter on submit
+#   3. (if confirm:) confirm modal opens, message can reference
+#      ${prompt.*} for a preview
+#   4. dispatch runs the subprocess with all substitutions baked in
+#
+# This example doesn't require any external setup — every action runs
+# `echo` so you can see the substituted argv in the alert/statusbar.
+app:
+  title: Action prompts demo
+  theme: nord
+
+tui:
+  components:
+    fruits:
+      type: list
+      title: Pick a fruit, then press a key for an action
+      filterable: true
+      items:
+        - Apple
+        - Banana
+        - Cherry
+        - Date
+  screen:
+    title: Prompts
+    layout:
+      component: fruits
+    actions:
+      # Single text prompt — ask for a quantity then echo it.
+      - key: q
+        label: quantity
+        source: fruits
+        interactive: false
+        prompts:
+          - {key: amount, label: "How many?", placeholder: "1", initial: "1"}
+        run: [echo, "${prompt.amount} ${selection}(s) requested"]
+
+      # Multiple fields — text + select. The submit button confirms
+      # everything atomically; cancel aborts without running.
+      - key: enter
+        label: order
+        source: fruits
+        interactive: false
+        confirm: "Order ${prompt.amount} ${selection}(s) as ${prompt.priority} priority?"
+        prompts:
+          - {key: amount,   label: "Quantity",        placeholder: "1", initial: "1"}
+          - {key: priority, label: "Priority",        type: select, options: [low, normal, high], initial_index: 1}
+          - {key: gift,     label: "Gift wrap?",      type: confirm, initial_bool: false}
+        run:
+          - sh
+          - -c
+          - 'echo "ordered: ${prompt.amount} × ${selection}, priority=${prompt.priority}, gift=${prompt.gift}"'

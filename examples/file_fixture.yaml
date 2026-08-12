@@ -8,27 +8,28 @@ app:
   title: Fixture file
   theme: nord
 
-data_sources:
-  fixture:
-    type: file
-    path: ./examples/fixtures/people.json
-    root: people
-    refresh: 5s
+data:
+  sources:
+    fixture:
+      type: file
+      path: ./examples/fixtures/people.json
+      root: people
+      refresh: 5s
 
-components:
-  people_table:
-    type: table
+tui:
+  components:
+    people_table:
+      type: table
+      title: People
+      filterable: true
+      source: fixture
+      initial_sort: {column: Name, desc: false}
+      columns:
+        - {title: Name,    width: 18, sortable: true, value: name}
+        - {title: Role,    width: 16, sortable: true, value: role}
+        - {title: Team,    width: 14, sortable: true, value: team}
+        - {title: Joined,  width: 12, sortable: true, value: joined}
+  screen:
     title: People
-    filterable: true
-    source: fixture
-    initial_sort: {column: Name, desc: false}
-    columns:
-      - {title: Name,    width: 18, sortable: true, value: name}
-      - {title: Role,    width: 16, sortable: true, value: role}
-      - {title: Team,    width: 14, sortable: true, value: team}
-      - {title: Joined,  width: 12, sortable: true, value: joined}
-
-screen:
-  title: People
-  layout:
-    component: people_table
+    layout:
+      component: people_table

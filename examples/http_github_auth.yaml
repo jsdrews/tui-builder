@@ -17,83 +17,87 @@
 app:
   title: GitHub (auth)
   theme: nord
+  env:
+    - name:        GITHUB_TOKEN
+      required:    true
+      description: "Classic PAT or fine-grained token with repo:read scope. https://github.com/settings/tokens"
 
-data_sources:
-  starred:
-    type: http
-    url: https://api.github.com/user/starred?per_page=50&sort=updated
-    refresh: 10m
-    timeout: 15s
-    headers:
-      Accept: application/vnd.github+json
-      X-GitHub-Api-Version: "2022-11-28"
-      Authorization: "Bearer ${env.GITHUB_TOKEN}"
+data:
+  sources:
+    starred:
+      type: http
+      url: https://api.github.com/user/starred?per_page=50&sort=updated
+      refresh: 10m
+      timeout: 15s
+      headers:
+        Accept: application/vnd.github+json
+        X-GitHub-Api-Version: "2022-11-28"
+        Authorization: "Bearer ${env.GITHUB_TOKEN}"
 
-  repo_detail:
-    type: http
-    url: https://api.github.com/repos/${selection.Repo}
-    refresh: 10m
-    timeout: 15s
-    headers:
-      Accept: application/vnd.github+json
-      X-GitHub-Api-Version: "2022-11-28"
-      Authorization: "Bearer ${env.GITHUB_TOKEN}"
+    repo_detail:
+      type: http
+      url: https://api.github.com/repos/${selection.Repo}
+      refresh: 10m
+      timeout: 15s
+      headers:
+        Accept: application/vnd.github+json
+        X-GitHub-Api-Version: "2022-11-28"
+        Authorization: "Bearer ${env.GITHUB_TOKEN}"
 
-components:
-  starred_table:
-    type: table
-    title: ${env.USER}'s starred repos
-    filterable: true
-    source: starred
-    initial_sort: {column: Stars, desc: true}
-    columns:
-      - {title: Repo,        width: 32, sortable: true,                       value: full_name}
-      - {title: Language,    width: 14, sortable: true,                       value: language}
-      - {title: Stars,       width: 8,  sortable: true, sort: number, align: right, value: stargazers_count}
-      - {title: Updated,     width: 22, sortable: true,                       value: updated_at}
-      - {title: Description, width: 40,                                       value: description}
+tui:
+  components:
+    starred_table:
+      type: table
+      title: ${env.USER}'s starred repos
+      filterable: true
+      source: starred
+      initial_sort: {column: Stars, desc: true}
+      columns:
+        - {title: Repo,        width: 32, sortable: true,                       value: full_name}
+        - {title: Language,    width: 14, sortable: true,                       value: language}
+        - {title: Stars,       width: 8,  sortable: true, sort: number, align: right, value: stargazers_count}
+        - {title: Updated,     width: 22, sortable: true,                       value: updated_at}
+        - {title: Description, width: 40,                                       value: description}
 
-  repo_inspector:
-    type: inspector
-    title: ${selection.Repo}
-    filterable: true
-    initial_depth: 2
-    source: repo_detail
-    fields:
-      - {label: Full name,      path: full_name}
-      - {label: Description,    path: description}
-      - {label: Homepage,       path: homepage}
-      - {label: Default branch, path: default_branch}
-      - {label: License,        path: "license.spdx_id"}
-      - {label: Language,       path: language}
-      - {label: Visibility,     path: visibility}
-      - label: Stats
-        children:
-          - {label: Stars,       path: stargazers_count}
-          - {label: Watchers,    path: subscribers_count}
-          - {label: Forks,       path: forks_count}
-          - {label: Open issues, path: open_issues_count}
-          - {label: Size (KB),   path: size}
-      - label: Timestamps
-        children:
-          - {label: Created, path: created_at}
-          - {label: Updated, path: updated_at}
-          - {label: Pushed,  path: pushed_at}
-      - label: Owner
-        children:
-          - {label: Login,     path: "owner.login"}
-          - {label: Type,      path: "owner.type"}
-          - {label: HTML URL,  path: "owner.html_url"}
+    repo_inspector:
+      type: inspector
+      title: ${selection.Repo}
+      filterable: true
+      initial_depth: 2
+      source: repo_detail
+      fields:
+        - {label: Full name,      path: full_name}
+        - {label: Description,    path: description}
+        - {label: Homepage,       path: homepage}
+        - {label: Default branch, path: default_branch}
+        - {label: License,        path: "license.spdx_id"}
+        - {label: Language,       path: language}
+        - {label: Visibility,     path: visibility}
+        - label: Stats
+          children:
+            - {label: Stars,       path: stargazers_count}
+            - {label: Watchers,    path: subscribers_count}
+            - {label: Forks,       path: forks_count}
+            - {label: Open issues, path: open_issues_count}
+            - {label: Size (KB),   path: size}
+        - label: Timestamps
+          children:
+            - {label: Created, path: created_at}
+            - {label: Updated, path: updated_at}
+            - {label: Pushed,  path: pushed_at}
+        - label: Owner
+          children:
+            - {label: Login,     path: "owner.login"}
+            - {label: Type,      path: "owner.type"}
+            - {label: HTML URL,  path: "owner.html_url"}
+  screens:
+    starred:
+      title: Starred
+      layout: {component: starred_table}
+      on_key:
+        - {source: starred_table, push: detail, key: enter}
 
-screens:
-  starred:
-    title: Starred
-    layout: {component: starred_table}
-    on_enter:
-      - {source: starred_table, push: detail}
-
-  detail:
-    title: ${selection.Repo}
-    layout: {component: repo_inspector}
-
-initial: starred
+    detail:
+      title: ${selection.Repo}
+      layout: {component: repo_inspector}
+  initial: starred

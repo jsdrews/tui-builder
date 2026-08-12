@@ -9,6 +9,26 @@ Built on top of [tuilib](https://github.com/jsdrews/tuilib): the
 component library does the rendering and theming; tui-builder turns
 declarative config into a live composition.
 
+**Two binaries, one config.** Data wrangling is a first-class concern,
+not a TUI implementation detail:
+
+- **`wrangl`** — runs the data layer only and dumps JSON / NDJSON to
+  stdout. Pipe it into `jq`, `duckdb`, `miller`, a notebook, or another
+  pipeline. Zero terminal-UI dependencies.
+- **`tui-builder`** — uses the same data layer, then renders it
+  through tuilib components. The TUI is one sink, not the product.
+
+The `data.sources:` block holds every named, addressable producer of
+data — both leaf sources (http / exec / file / websocket / static /
+merge) and operator pipelines (`filter`, `project`, `derive`, `sort`,
+`union`, `compose`, `join`, `cache`, `passthrough`). Every entry
+carries a `type:` discriminator that picks its kind. Operator
+expressions use an embedded expression language (`expr-lang`). Any
+entry can declare its own typed `parameters:` block, bindable via
+wrangl `--param`.
+
+See [`docs/data-layer.md`](docs/data-layer.md) for the full reference.
+
 ```
 ┌ All pods (3 clusters merged) ────────────────────────────────────┐
 │ Cluster      │ Namespace │ Name                    │ Status      │
@@ -26,9 +46,9 @@ declarative config into a live composition.
 
 | Capability | What it looks like |
 |---|---|
-| **Declarative TUIs** | One YAML file per app: `components:` + `screen:`/`screens:` + (optional) `data_sources:`. No Go to write for the common case. |
+| **Declarative TUIs** | One YAML file per app: `data.sources:` + `tui.components:` + `tui.screen:` / `tui.screens:`. No Go to write for the common case. |
 | **Components** | `list`, `table`, `inspector`, `tree`, `logview` — every tuilib component except those that don't fit a config model |
-| **Data sources** | `http`, `exec`, `file`, `websocket`, and `merge` (compose any of the above) |
+| **Data sources** | `http`, `exec`, `file`, `websocket`, `static`, `merge` — plus operator kinds (`filter`, `project`, `derive`, `sort`, `union`, `compose`, `join`, `cache`, `passthrough`) layered on top |
 | **Multi-screen** | Push/pop with breadcrumbs; `${selection.*}` substitutes parent row into child config (URL, title, fields) |
 | **Streaming** | Long-running `exec` + `websocket` push events into a logview as they arrive |
 | **Live data** | Per-source `refresh: <duration>` polling with in-place updates — cursor / filter / sort survive every refresh |
@@ -42,7 +62,7 @@ declarative config into a live composition.
 ```sh
 git clone git@github.com:jsdrews/tui-builder.git
 cd tui-builder
-task build            # → bin/tui-builder, bin/example-launcher
+task build            # → bin/tui-builder, bin/example-launcher, bin/wrangl
 
 # Browse every example in a launcher TUI:
 task examples
@@ -51,9 +71,46 @@ task examples
 task example NAME=table
 task example NAME=http_countries        # live REST API
 task example NAME=merge_sources         # local merge of file + 2 exec sources
+
+# Or skip the TUI entirely and pipe data:
+go run ./cmd/wrangl --list examples/http_countries.yaml
+go run ./cmd/wrangl examples/http_countries.yaml all_countries | jq '.[0].name.common'
 ```
 
 `task --list` shows the full menu.
+
+## Two ways to consume a config
+
+Once you've written a YAML config with `data.sources:` + (optionally)
+`tui.components:` + `tui.screen:`, you can either render it as a TUI
+or just dump the data:
+
+```sh
+# Render the TUI:
+bin/tui-builder examples/http_countries.yaml
+
+# Or dump every defined entry:
+bin/wrangl --list examples/http_countries.yaml
+# NAME            KIND                     LIFECYCLE              UPSTREAM
+# all_countries   pipeline / passthrough   polled (refresh: 5m)   countries
+# countries       source / http            polled (refresh: 5m)
+
+# Or pipe one pipeline's output downstream:
+bin/wrangl examples/http_countries.yaml all_countries | jq '.[0]'
+bin/wrangl --limit 50 examples/stream_l1.yaml l1 | jq '.data.s'
+
+# Or run a parameterized pipeline (operator expressions get
+# `params.X` access alongside item fields):
+bin/wrangl examples/filter_demo.yaml long_usernames --param min=12
+
+# Or describe a pipeline's schema (operator kind, lifecycle, params):
+bin/wrangl examples/filter_demo.yaml users_with_posts --describe
+```
+
+`wrangl` is the same data layer the TUI uses — the architecture
+guarantees there's no second pipeline implementation drifting out of
+sync. A CI check enforces that `cmd/wrangl` and the data-layer packages
+never import any TUI code.
 
 ## A first config
 
@@ -63,22 +120,23 @@ app:
   title: Cities
   theme: nord
 
-components:
-  cities:
-    type: table
-    filterable: true
-    columns:
-      - {title: City,   width: 16, sortable: true}
-      - {title: Region, width: 14, sortable: true}
-      - {title: Pop,    width: 8,  sortable: true, sort: si, align: right}
-    rows:
-      - [London,    Europe,   "9M"]
-      - [Tokyo,     Asia,     "37M"]
-      - [Reykjavík, Europe,   "130K"]
+tui:
+  components:
+    cities:
+      type: table
+      filterable: true
+      columns:
+        - {title: City,   width: 16, sortable: true}
+        - {title: Region, width: 14, sortable: true}
+        - {title: Pop,    width: 8,  sortable: true, sort: si, align: right}
+      rows:
+        - [London,    Europe,   "9M"]
+        - [Tokyo,     Asia,     "37M"]
+        - [Reykjavík, Europe,   "130K"]
 
-screen:
-  layout:
-    component: cities
+  screen:
+    layout:
+      component: cities
 ```
 
 ```sh
@@ -87,6 +145,12 @@ bin/tui-builder hello.yaml
 
 That's it — `tab` cycles focus, `/` filters, `[`/`]`/`s` step the sort
 column, `q` quits, `t` cycles themes.
+
+The mouse works too: click a pane to focus it, click a row to move its
+cursor, scroll with the wheel, and double-click a row for `enter` — the
+same `on_key: {key: enter}` push or `enter` action the keyboard fires.
+Mouse reporting takes over the terminal's own click-drag text selection —
+hold `shift` (or `alt` in iTerm2) while dragging to select text for a copy.
 
 ## Tour by feature
 
@@ -97,23 +161,25 @@ across all source types; the same `color_rules` syntax works against
 any pluckable value.
 
 ```yaml
-data_sources:
-  countries:
-    type: http
-    url: https://restcountries.com/v3.1/all?fields=name,region,population
-    refresh: 5m
+data:
+  sources:
+    countries:
+      type: http
+      url: https://restcountries.com/v3.1/all?fields=name,region,population
+      refresh: 5m
 
-components:
-  countries:
-    type: table
-    source: countries
-    columns:
-      - {title: Name,       value: name.common}
-      - {title: Region,     value: region}
-      - {title: Population, value: population, sort: si, align: right}
+tui:
+  components:
+    countries:
+      type: table
+      source: countries
+      columns:
+        - {title: Name,       value: name.common}
+        - {title: Region,     value: region}
+        - {title: Population, value: population, sort: si, align: right}
 ```
 
-Source kinds:
+Source kinds (leaf — fetch externally):
 
 | Type | When | Notes |
 |---|---|---|
@@ -121,7 +187,22 @@ Source kinds:
 | `exec` | Anything that prints JSON: `kubectl get -o json`, `gh api`, `terraform output -json`, custom scripts | Per-source `env:` adds to inherited env |
 | `file` | Fixtures, generated dumps, lab notebook output | `refresh: <duration>` re-reads; omit for once |
 | `websocket` | Live event streams: chat, custom buses | Headers pass through on the upgrade request |
+| `static` | Inline data, fixtures, lookup tables | `data:` carries the value directly — list, object, scalar |
 | `merge` | Compose N children, union the rows, tag each item by source — cross-cluster / cross-account / cross-anything | `tag_field:` writes child name into each item; `on_error: skip` returns survivors + a partial-error notice |
+
+Operator kinds (transform an upstream entry):
+
+| Type | What it does |
+|---|---|
+| `passthrough` | Stable addressable alias over an upstream (`from:`); no transformation |
+| `filter` | Drop items whose `where:` predicate doesn't match |
+| `project` | Rebuild each item from declared output keys (`keep:`) |
+| `derive` | Copy each item and add computed fields (`compute:`) |
+| `sort` | Reorder by key expression (`by:`, `order: asc\|desc`) |
+| `union` | Flatten N homogeneous upstreams into one list (same shape as `merge` but children can be operators too) |
+| `compose` | Bundle N heterogeneous upstreams into one object (`parts: {key: upstream-name}`) |
+| `join` | Per-row enrichment: driver iterable + per-row lookup fetches |
+| `cache` | TTL-memoise an upstream's Fetch |
 
 See [`docs/components.md`](docs/components.md) for the full schema.
 
@@ -134,19 +215,21 @@ without resetting cursor / filter / scroll.
 **Into a logview** — lines append as-is:
 
 ```yaml
-data_sources:
-  logs:
-    type: exec
-    follow: true
-    command: [kubectl, logs, -f, "-n", default, my-pod]
+data:
+  sources:
+    logs:
+      type: exec
+      follow: true
+      command: [kubectl, logs, -f, "-n", default, my-pod]
 
-components:
-  log:
-    type: logview
-    source: logs
-    color_rules:
-      - {when: "~\\b(ERROR|FATAL)\\b", color: red}
-      - {when: "~\\bWARN\\b",          color: yellow}
+tui:
+  components:
+    log:
+      type: logview
+      source: logs
+      color_rules:
+        - {when: "~\\b(ERROR|FATAL)\\b", color: red}
+        - {when: "~\\bWARN\\b",          color: yellow}
 ```
 
 **Into a table — two modes**:
@@ -190,20 +273,22 @@ table. The selected row's values flow into the child's config via
 `${selection.col}` (table) or `${selection}` (list).
 
 ```yaml
-screens:
-  pods:
-    layout: {component: pods_table}
-    on_enter:
-      - {source: pods_table, push: detail}
-  detail:
-    title: ${selection.Name}
-    layout: {component: pod_inspector}
-initial: pods
+data:
+  sources:
+    pod_detail:
+      type: http
+      url: http://localhost:8001/api/v1/namespaces/${selection.Namespace}/pods/${selection.Name}
 
-data_sources:
-  pod_detail:
-    type: http
-    url: http://localhost:8001/api/v1/namespaces/${selection.Namespace}/pods/${selection.Name}
+tui:
+  screens:
+    pods:
+      layout: {component: pods_table}
+      on_key:
+        - {source: pods_table, push: detail, key: enter}
+    detail:
+      title: ${selection.Name}
+      layout: {component: pod_inspector}
+  initial: pods
 ```
 
 `esc` pops; breadcrumbs accumulate at the top of the screen.
@@ -214,21 +299,22 @@ Bind a key to a subprocess. Confirms can be required; errors land in a
 modal with the captured stderr.
 
 ```yaml
-screens:
-  pods:
-    layout: {component: pods_table}
-    actions:
-      - key: x
-        label: exec
-        source: pods_table
-        confirm: "Open shell in ${selection.Name}?"
-        run: [kubectl, exec, -it, -n, "${selection.Namespace}", "${selection.Name}", --, sh]
-      - key: D
-        label: delete
-        source: pods_table
-        confirm: "Delete pod ${selection.Name}? Cannot be undone."
-        interactive: false
-        run: [kubectl, delete, -n, "${selection.Namespace}", pod, "${selection.Name}"]
+tui:
+  screens:
+    pods:
+      layout: {component: pods_table}
+      actions:
+        - key: x
+          label: exec
+          source: pods_table
+          confirm: "Open shell in ${selection.Name}?"
+          run: [kubectl, exec, -it, -n, "${selection.Namespace}", "${selection.Name}", --, sh]
+        - key: D
+          label: delete
+          source: pods_table
+          confirm: "Delete pod ${selection.Name}? Cannot be undone."
+          interactive: false
+          run: [kubectl, delete, -n, "${selection.Namespace}", pod, "${selection.Name}"]
 ```
 
 ### Color rules
@@ -277,6 +363,8 @@ via `task examples`.
 | `examples/stream_websocket.yaml` | `websocket` source → logview |
 | `examples/stream_trades_table.yaml` | `websocket` source → live table (`max_rows: 100` ring buffer of bitstamp BTC/USD trades) |
 | `examples/stream_l1.yaml` | L1 ticker JOINED from two Binance.us streams (`bookTicker` for fast bid/ask + `@ticker` for last price + 24h stats), merged by symbol via `row_key: data.s`. Deep-merge composes both sources' fields onto each row |
+| `examples/prompts_boot.yaml` | Boot-time form modal collects params (`app.prompts`) before the main screen renders; values become env vars, feed into the source URL via `${env.USER}` |
+| `examples/action_prompts.yaml` | Per-action form modal collects input (`action.prompts`); `${prompt.<key>}` substitutes into run argv + confirm message at fire time |
 | `examples/kube.yaml` | Single-cluster kube: namespaces → pods → pod detail + logs |
 | `examples/kube_multi.yaml` | Multi-cluster kube: 3 clusters merged into one table |
 
@@ -328,19 +416,32 @@ endpoint and counts the pods.
 
 ```
 cmd/
-  tui-builder/        # CLI: tui-builder <config.yaml>
+  tui-builder/        # CLI: tui-builder <config.yaml>      (TUI sink)
+  wrangl/             # CLI: wrangl [flags] <config.yaml>    (data sink: JSON / NDJSON)
   example-launcher/   # TUI for browsing every example
 internal/
-  config/             # YAML schema (one Go struct per shape) + validator
-  build/              # cfg → live tuilib components + binding layer
-  datasource/         # Source interface + http / exec / file / websocket / merge
-  screen/             # screen.Screen impl: focus, push/pop, modals, lifecycle
+  config/             # YAML schema: cfg.Source bag-of-fields + Type-discriminator dispatch
+  datasource/         # ds.Source interface + http / exec / file / websocket / static / merge builders
+  pipeline/           # operator builders: filter / project / derive / sort / union / compose / join / cache / passthrough
+  expr/               # embedded expression language adapter (expr-lang/expr); used by every operator
+  output/             # JSON / NDJSON stdout sink used by wrangl
+  build/              # cfg → live tuilib components + binding layer       [TUI side]
+  screen/             # screen.Screen impl: focus, push/pop, modals, lifecycle [TUI side]
 examples/             # one YAML per feature, plus the kube demos
+scripts/
+  check-data-layer-boundary.sh   # enforces no-TUI-imports in the data layer
 docs/
   components.md       # full schema cheat sheet + per-component reference
 AGENTS.md             # rules for AI agents working in this repo
 Taskfile.yml          # go-task entry points (`task --list`)
 ```
+
+The horizontal split — `config / datasource / pipeline / output / cmd/wrangl`
+above; `build / screen / cmd/tui-builder` below — is enforced by a CI
+check (`scripts/check-data-layer-boundary.sh`). The data layer must
+stay buildable, testable, and runnable without dragging in Bubble Tea
+or tuilib. If you ever need a TUI helper from the data layer, that's a
+sign the boundary is wrong, not that you need an exception.
 
 ## Where to go next
 

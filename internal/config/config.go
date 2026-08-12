@@ -6,12 +6,46 @@
 // same node fields.
 package config
 
-// Config is the top-level document. Either Screen (single-screen) or
-// Screens + Initial (multi-screen) must be set, not both.
+// Config is the top-level document. Layered into three blocks that
+// match the architectural boundary enforced in code:
+//
+//   - `app:`  — config-wide metadata (title, etc.).
+//   - `data:` — the data layer. Sources + pipelines live here. This
+//     block is completely independent of any TUI — wrangl
+//     reads only `app:` + `data:` and never touches `tui:`.
+//   - `tui:`  — the presentation layer. Components and screens live
+//     here. References data by name but doesn't define it.
+//
+// Either Tui.Screen (single-screen) or Tui.Screens + Tui.Initial
+// (multi-screen) must be set, not both.
 type Config struct {
-	App         App                    `yaml:"app"`
-	DataSources map[string]*DataSource `yaml:"data_sources,omitempty"`
-	Components  map[string]*Component  `yaml:"components"`
+	App  App       `yaml:"app"`
+	Data DataBlock `yaml:"data,omitempty"`
+	TUI  TUIBlock  `yaml:"tui,omitempty"`
+}
+
+// DataBlock holds the data-layer definitions. Every entry under
+// `data.sources:` is a *Source whose `type:` field picks its kind.
+// Both leaf kinds (http / exec / file / websocket / static / merge)
+// and operator kinds (passthrough / filter / project / derive / sort
+// / union / compose / join / cache) share the single map and are
+// addressable by name from `tui.components` and from wrangl.
+type DataBlock struct {
+	// Sources is the unified data map. Every entry is a *Source
+	// whose `type:` field discriminates its kind (one of the leaf
+	// kinds — http / exec / file / websocket / static / merge — or
+	// operator kinds — passthrough / filter / project / derive / sort
+	// / union / compose / join / cache). Each kind reads only the
+	// fields it cares about; the others are silently ignored.
+	Sources map[string]*Source `yaml:"sources,omitempty"`
+}
+
+// TUIBlock holds the presentation-layer definitions: components and
+// screens. Components reference data by name (source or pipeline)
+// but never define data themselves — this is the data-layer / TUI-
+// layer boundary expressed in the YAML schema.
+type TUIBlock struct {
+	Components map[string]*Component `yaml:"components,omitempty"`
 	// Screen is the single-screen shorthand. Mutually exclusive with Screens.
 	Screen Screen `yaml:"screen,omitempty"`
 	// Screens is the multi-screen map keyed by name. Mutually exclusive
@@ -22,88 +56,70 @@ type Config struct {
 	Initial string `yaml:"initial,omitempty"`
 }
 
-// DataSource fetches data that one or more components bind to. Supported
-// `type:` values: http, exec, file, merge. ${selection.*} and ${env.*}
-// tokens substitute at push time across most string fields.
+
+
+
+
+
+// JoinDriver names the iterable whose rows seed the join.
+type JoinDriver struct {
+	// From references a source or pipeline that returns an iterable.
+	From string `yaml:"from"`
+}
+
+// JoinLookup names a per-row fetch and how to derive its params from
+// the driver row.
+type JoinLookup struct {
+	// From references a data source (NOT a pipeline) whose
+	// `parameters:` block enumerates what it needs to run.
+	From string `yaml:"from"`
+	// On maps the lookup source's parameter names → expressions
+	// evaluated against the driver row. Expressions use the same
+	// language as filter / derive / sort / project. Common forms:
+	//
+	//   on:
+	//     namespace: metadata.namespace
+	//     name:      metadata.name
+	//     port:      "1000 + spec.containerPort"
+	On map[string]string `yaml:"on"`
+}
+
+
+
+
+// PaginateConfig controls multi-page walking on an http source. Only
+// meaningful when the source's `type:` is `http` and Format is JSON
+// (not text). Set via `paginate:` in YAML.
 //
-// Per-type field reference:
+// Strategy semantics:
 //
-//	http   url, method, headers, body, format, root, refresh, timeout
-//	exec   command, env, format, root, refresh, timeout
-//	file   path, format, root, refresh
-//	merge  sources, tag_field, on_error, refresh
-type DataSource struct {
-	// Type selects the fetch mechanism.
-	Type string `yaml:"type"`
-
-	// Shared by http / exec / file / merge.
-	// Root is a dot-path into the response selecting the iterable root
-	// for list/table bindings. Empty = response itself.
-	Root string `yaml:"root,omitempty"`
-	// Refresh is the polling interval (e.g. "30s", "1m"). Empty = fetch
-	// once on screen activate. Driven by tea.Tick.
-	Refresh string `yaml:"refresh,omitempty"`
-	// Timeout caps per-fetch latency. Default 10s for http/exec, n/a
-	// for file (synchronous read) and merge (defers to children).
-	Timeout string `yaml:"timeout,omitempty"`
-	// Format selects how the response body is parsed:
-	//   "" / "json"   parse as JSON, hand the typed value to bindings (default)
-	//   "text"        keep the body as a raw string — required for logview
-	//                 bindings against plain-text endpoints (e.g. kube pod logs)
-	Format string `yaml:"format,omitempty"`
-
-	// http fields.
-	URL     string            `yaml:"url,omitempty"`
-	Method  string            `yaml:"method,omitempty"`
-	Headers map[string]string `yaml:"headers,omitempty"`
-	Body    string            `yaml:"body,omitempty"`
-
-	// websocket fields.
-	// InitialMessages are text frames sent immediately after the
-	// connection upgrades — useful for protocols (bitstamp, Kraken,
-	// Coinbase, many custom buses) that require a subscribe handshake
-	// before the server starts emitting. ${selection.*} / ${env.*}
-	// substitute per entry. Sent in order, fire-and-forget; failures
-	// don't terminate the stream but do appear as one error event.
-	InitialMessages []string `yaml:"initial_messages,omitempty"`
-
-	// exec fields.
-	// Command is the argv ([cmd, arg, arg, ...]). The first element is
-	// looked up in $PATH; subsequent elements are passed as-is.
-	// ${selection.*} and ${env.*} substitute per element.
-	Command []string `yaml:"command,omitempty"`
-	// Env adds (or overrides) environment variables on top of the
-	// process's own environment. ${env.*} can reference outer env;
-	// ${selection.*} substitutes in values.
-	Env map[string]string `yaml:"env,omitempty"`
-	// Follow turns exec into a streaming source: the subprocess is
-	// started (not waited on), its stdout is read line-by-line, and
-	// each line is delivered as an Event to a bound logview. Use for
-	// `kubectl logs -f`, `tail -f`, `journalctl -f`, anything that
-	// emits a continuous line stream. Refresh is ignored when Follow
-	// is true (the stream is the refresh).
-	Follow bool `yaml:"follow,omitempty"`
-
-	// file fields.
-	// Path is the file to read. ${selection.*} / ${env.*} substitute.
-	Path string `yaml:"path,omitempty"`
-
-	// merge fields.
-	// Sources is the list of source names whose results are unioned. The
-	// referenced sources are built independently; merge resolves and
-	// fetches them concurrently each refresh.
-	Sources []string `yaml:"sources,omitempty"`
-	// TagField, when set, injects {<TagField>: <child-source-name>}
-	// into every map-shaped item from each child so a downstream column
-	// or list_item path can identify which source the item came from.
-	// Non-map items pass through untouched.
-	TagField string `yaml:"tag_field,omitempty"`
-	// OnError chooses what happens when a child source errors during a
-	// merge fetch:
-	//   "" / "fail" (default) — any child error aborts the merge
-	//   "skip"                — drop the failed child, return the rest
-	//                            (only errors if EVERY child fails)
-	OnError string `yaml:"on_error,omitempty"`
+//   - "link": the response body carries a URL for the next page at
+//     dot-path NextPath. Django REST Framework does this — every
+//     response has `{next: "https://...?page=2", ...}`. AWX, GitLab
+//     (some endpoints), and many other REST APIs use this shape.
+//     Walk: fetch → apply Root: to get items → follow NextPath →
+//     repeat until next is null / missing / empty string.
+//
+// Additional strategies (link_header for GitHub, cursor for Stripe,
+// offset for manual paging) can layer on later behind the same
+// discriminator without breaking configs.
+type PaginateConfig struct {
+	// Strategy picks the page-walking method. Required; must be one
+	// of the values enumerated above.
+	Strategy string `yaml:"strategy"`
+	// NextPath is the dot-path into the RAW response (pre-Root
+	// slicing) that carries the next page's URL. Required for
+	// strategy "link". Common values: "next", "links.next",
+	// "meta.pagination.next".
+	NextPath string `yaml:"next_path,omitempty"`
+	// MaxPages caps the walk. Default 20. Zero means unlimited (not
+	// recommended — one runaway API can OOM the process).
+	MaxPages int `yaml:"max_pages,omitempty"`
+	// OnPageError chooses what happens when a mid-walk page fails:
+	//   "" / "fail" (default) — abort, return the error
+	//   "skip"                — return the accumulated pages so far
+	//                            (subsequent pages simply omitted)
+	OnPageError string `yaml:"on_page_error,omitempty"`
 }
 
 // App configures the surrounding tuilib app shell.
@@ -119,19 +135,75 @@ type App struct {
 	// inline. Default (false) is minimal mode — the footer shows "? help"
 	// and `?` opens the expanded panel.
 	HelpVerbose bool `yaml:"help_verbose,omitempty"`
+	// Prompts collected at boot, before any screen renders. Each
+	// prompt's Key becomes an env var (set via os.Setenv) whose value
+	// is whatever the user typed / picked, so the existing
+	// ${env.<KEY>} substitution covers BOTH OS env vars and these
+	// boot-time params. Cancel from the form aborts the program.
+	//
+	// Use for: which symbols to watch (URL param), which cluster to
+	// hit (URL host), which flags to pass to a CLI source (exec
+	// argv). Anything that's "configure at startup, then constant."
+	//
+	// Pre-populating: if the env var named by a prompt's Key is
+	// already set, the prompt's input is pre-filled with that value —
+	// so `SYMBOLS=btcusdt,ethusdt tui-builder ...` lets you skip the
+	// modal entirely.
+	Prompts []Prompt `yaml:"prompts,omitempty"`
+
+	// Env declares environment variables the config depends on.
+	// Load-time behavior:
+	//   - `required: true` + unset (and no default) → hard error at
+	//     Load with a message naming every missing var at once so
+	//     the user fixes them in one edit rather than one-at-a-time.
+	//   - `default:` + unset → os.Setenv applied so downstream
+	//     ${env.X} substitution picks up the default value. Same
+	//     semantics as app.prompts defaults.
+	//   - Referenced-but-undeclared `${env.X}` in a URL / Command /
+	//     Header / Body / Action.Run / etc. → stderr warning at
+	//     Load. Not a hard error because empty-string substitution
+	//     is a legitimate pattern for some fields (optional
+	//     headers, feature-flag env vars).
+	//
+	// Purpose: catch "I forgot to export AWX_TOKEN" at load time
+	// with a clear message, rather than at first fetch with a
+	// cryptic 401 or a double-slash URL.
+	Env []EnvSpec `yaml:"env,omitempty"`
+}
+
+// EnvSpec declares one environment variable dependency. Same shape
+// as Parameter (required + default + description) but scoped to
+// process-level env rather than per-source parameters.
+type EnvSpec struct {
+	// Name is the env var name (e.g. AWX_TOKEN). Required.
+	Name string `yaml:"name"`
+	// Required, when true, makes Load fail hard if the var is unset
+	// in the environment AND no default is given. Mutually exclusive
+	// with Default (default implies optional).
+	Required bool `yaml:"required,omitempty"`
+	// Default is applied via os.Setenv when the var is unset in the
+	// environment at Load time. Mutually exclusive with Required.
+	Default string `yaml:"default,omitempty"`
+	// Description surfaces in the missing-required error message so
+	// the user knows what to set the var to. Optional but strongly
+	// recommended — a good description turns a cryptic failure into
+	// a self-serve fix.
+	Description string `yaml:"description,omitempty"`
 }
 
 // Screen describes one screen — its breadcrumb title, its layout tree,
-// and any on_enter bindings that push other screens.
+// and any on_key bindings that push other screens.
 type Screen struct {
 	// Title shows in the breadcrumb. May contain ${selection} tokens
-	// when this screen is reachable via an on_enter push.
+	// when this screen is reachable via an on_key push.
 	Title string `yaml:"title,omitempty"`
 	// Layout is the root of the layout tree. Required.
 	Layout Node `yaml:"layout"`
-	// OnEnter declares which components, when enter is pressed on them
-	// (and they're focused), push another screen. Multi-screen only.
-	OnEnter []OnEnterBinding `yaml:"on_enter,omitempty"`
+	// OnKey declares which components — when the given key is pressed
+	// on them and they're focused — push another screen. Multi-screen
+	// only. Each binding must spell out its key explicitly (`key:
+	// enter`, `key: d`, `key: ctrl+r`); there is no implicit default.
+	OnKey []OnKeyBinding `yaml:"on_key,omitempty"`
 	// Actions hand a key off to a subprocess (kubectl exec, $EDITOR, open,
 	// etc.) with the focused row's selection substituted into the argv.
 	Actions []Action `yaml:"actions,omitempty"`
@@ -173,6 +245,73 @@ type Action struct {
 	//          one-shot scripts). Subprocess output appears in an alert
 	//          on error, statusbar on success.
 	Interactive *bool `yaml:"interactive,omitempty"`
+	// Prompts collects user input before the action dispatches. Each
+	// prompt becomes a form field; on submit, values are exposed as
+	// ${prompt.<key>} tokens substituted into Run argv, Confirm
+	// message, and Notice. Order: prompts → confirm (with substituted
+	// preview) → dispatch. Cancel from the form aborts the action.
+	Prompts []Prompt `yaml:"prompts,omitempty"`
+}
+
+// MergeChild names a child source plus the tags merge should inject
+// into every row that originated from that child. Tags are key/value
+// strings written at the top level of each map-shaped item — same
+// substrate as the legacy TagField but with arbitrary keys and values
+// instead of one literal source-name.
+//
+// Order in the parent `children:` list determines child fetch order
+// (mirrors the legacy `sources:` order), so deterministic UIs that
+// depend on row order get the same shape under both forms.
+type MergeChild struct {
+	// Source is the name of a data source defined elsewhere in
+	// the config. Required.
+	Source string `yaml:"source"`
+	// Tags are injected into every map-shaped row produced by this
+	// child. Existing keys on the row survive — tagging is purely
+	// additive. Non-map rows (scalars, arrays) pass through
+	// untouched, same as TagField.
+	Tags map[string]string `yaml:"tags,omitempty"`
+}
+
+// Parameter declares one typed input slot on a data source. Callers
+// bind values; the source references them with ${params.<name>}.
+//
+// Today's POC schema is minimal — `type` is informational (`string`
+// covers all current uses); `required` + `default` are mutually
+// exclusive (a default makes a param effectively optional). Validation
+// rules, complex types, and computed defaults are deferred until a
+// concrete need surfaces.
+type Parameter struct {
+	// Type is informational today: string (default), int, bool, duration.
+	// Future use: form widget selection at TUI binding sites, basic
+	// validation in wrangl (--param port=abc against type:int rejects).
+	Type string `yaml:"type,omitempty"`
+	// Required means callers MUST bind a value before the source can
+	// run. Mutually exclusive with Default.
+	Required bool `yaml:"required,omitempty"`
+	// Default is the value used when no caller supplies one. Setting
+	// Default implies the param is optional.
+	Default string `yaml:"default,omitempty"`
+	// Description shows up in --list / launcher prompts / future
+	// --help output. One-line summary.
+	Description string `yaml:"description,omitempty"`
+}
+
+// Prompt is one field in an action's input form. Types map 1:1 to
+// tuilib pkg/form field kinds:
+//
+//	text    (default) — single-line text input
+//	select  — pick one of `options`
+//	confirm — yes/no toggle (value is "true" / "false")
+type Prompt struct {
+	Key         string   `yaml:"key"`
+	Label       string   `yaml:"label,omitempty"`
+	Type        string   `yaml:"type,omitempty"`          // text | select | confirm
+	Placeholder string   `yaml:"placeholder,omitempty"`   // text only
+	Initial     string   `yaml:"initial,omitempty"`       // text default value
+	Options     []string `yaml:"options,omitempty"`       // select choices
+	InitialIdx  int      `yaml:"initial_index,omitempty"` // select default
+	InitialBool bool     `yaml:"initial_bool,omitempty"`  // confirm default
 }
 
 // InteractiveDefault reports whether an action with no explicit
@@ -185,13 +324,39 @@ func (a Action) InteractiveDefault() bool {
 	return *a.Interactive
 }
 
-// OnEnterBinding wires "enter on Source pushes Push." The source must be
-// a list or table component referenced in this screen's layout; Push
-// names a screen in Config.Screens. The source component's current
+// OnKeyBinding wires "pressing Key on Source pushes Push." The source
+// must be a list or table component referenced in this screen's layout;
+// Push names a screen in Config.Screens. The source component's current
 // selection becomes the ${selection} token in the pushed screen.
-type OnEnterBinding struct {
-	Source string `yaml:"source"`
-	Push   string `yaml:"push"`
+//
+// Bind maps destination-screen parameter names to templates evaluated
+// against the focused row's Selection. Use this when the destination
+// screen has data sources that declare `parameters:` — the values
+// resolve at push time and feed into each parameterized source's
+// BindParams call. Without Bind, parameterized sources on the
+// destination won't have their required params filled and will error
+// at fetch (or push, depending on how strict we make it).
+//
+//	bind:
+//	  namespace: ${selection.Namespace}
+//	  name:      ${selection.Name}
+//
+// Values support the same ${selection.*} / ${env.*} / ${prompt.*}
+// substitutions as everywhere else.
+type OnKeyBinding struct {
+	Source string            `yaml:"source"`
+	Push   string            `yaml:"push"`
+	Bind   map[string]string `yaml:"bind,omitempty"`
+	// Key is the trigger. Required — spell out `key: enter` for the
+	// classic drilldown, `key: d` for describe, `key: l` for logs,
+	// `key: ctrl+r` for a resource reload push. Any tea.KeyMsg.String()
+	// name works. Multiple bindings on the same source are allowed as
+	// long as their (source, key) pairs are distinct.
+	Key string `yaml:"key"`
+	// Label is an optional custom label for the help strip. When empty,
+	// the strip shows the key + "open". Handy for kubectl-shape UIs
+	// that want "d → describe", "l → logs", etc.
+	Label string `yaml:"label,omitempty"`
 }
 
 // Node is a tagged-union layout node. Exactly one of VStack / HStack /
@@ -238,11 +403,15 @@ type Component struct {
 	// InitialCursor places the cursor at a specific row index on startup.
 	InitialCursor int `yaml:"initial_cursor,omitempty"`
 
-	// Source names a data source this component is bound to. When set,
-	// the static Items/Rows/Fields are ignored and the component is
-	// populated by the source's response after each fetch. Use Item
-	// (list), per-column Value (table), or per-field Path (inspector) to
-	// map from response shape to component shape.
+	// Source names the data entry this component is bound to. The
+	// entry can be any kind (leaf source or pipeline operator) —
+	// after the sources/pipelines unification, components don't
+	// distinguish between them at the schema level. When Source is
+	// set, the static Items/Rows/Fields are ignored and the
+	// component is populated by the entry's response after each
+	// fetch. Use Item (list), per-column Value (table), or per-field
+	// Path (inspector) to map from response shape to component
+	// shape.
 	Source string `yaml:"source,omitempty"`
 	// Item is the dot-path used by a list bound to a data source to pluck
 	// the display string for each element of the iterable root.
@@ -290,19 +459,108 @@ type Component struct {
 	Searchable bool     `yaml:"searchable,omitempty"`
 	MaxLines   int      `yaml:"max_lines,omitempty"`
 	FilterMode bool     `yaml:"filter_mode,omitempty"`
-	// InitialQuery pre-populates the search query on logview / tree.
+	// InitialQuery pre-populates the search query on logview / tree /
+	// textview.
 	InitialQuery string `yaml:"initial_query,omitempty"`
+
+	// textview fields
+	// Content seeds the initial body. Overridden by SetContent when the
+	// component is source-bound. Static-content mode is handy for help
+	// panes, licence text, or any doc you want available in-app without
+	// a fetch.
+	Content string `yaml:"content,omitempty"`
+	// Wrap toggles word-wrap for textview. Default off matches tuilib's
+	// zero-value default; wrap is also runtime-toggleable via `w`.
+	Wrap bool `yaml:"wrap,omitempty"`
 
 	// tree fields
 	Root *TreeNode `yaml:"root,omitempty"`
+	// Label is the dot-path (or fallback chain) picking each leaf's
+	// display label from a source-bound tree's items. Required when
+	// `type: tree` binds a `source:`; ignored for static-root trees.
+	// Same semantics as list.Item and table.Column.Value.
+	Label Path `yaml:"label,omitempty"`
+	// GroupBy is the dot-path bucketing a flat iterable into named
+	// parent nodes — useful for kubectl-shape data where a single
+	// list of resources should render categorized by kind. Buckets
+	// preserve first-appearance order; each item lands under the
+	// parent whose label equals its GroupBy value (stringified).
+	// Optional — when empty, all items become direct children of
+	// the root. Mutually exclusive with Children.
+	GroupBy Path `yaml:"group_by,omitempty"`
+	// Children is the dot-path on each node pointing to its list of
+	// child nodes. Enables recursive walking of a nested source
+	// response — filesystem trees, org charts, k8s owner-reference
+	// graphs, any structure where each record already knows its
+	// descendants. When Children is set, GroupBy is ignored. The
+	// source's response can be either a single root node (map) or
+	// a list of top-level nodes; nodes with a missing / empty
+	// Children path are leaves.
+	Children Path `yaml:"children,omitempty"`
+	// RootLabel is the display label for the root node of a source-
+	// bound tree. Supports ${selection.*} / ${env.*} / ${prompt.*}
+	// substitution. Defaults to the component's Title when empty;
+	// falls back to the source name if both are empty. Kept stable
+	// across data refreshes so tuilib.tree.SetRoot's expanded-state
+	// preservation actually hits — the label is the key.
+	RootLabel string `yaml:"root_label,omitempty"`
 
 	// inspector fields
 	Fields []InspectorField `yaml:"fields,omitempty"`
+	// Auto opts a source-bound inspector into deriving its field tree
+	// from the fetched data via inspector.FromAny. Fields is ignored
+	// when Auto is true — the user is either declaring the record
+	// shape or asking for whatever-comes-back, not both. Handles
+	// nested maps and arrays natively (feature C from the tui-builder
+	// integration batch), so `map[string]any` / `[]any` no longer
+	// stringify to `map[...]` under a scalar field.
+	Auto bool `yaml:"auto,omitempty"`
 
 	// shared hierarchical fields (tree, inspector). InitialDepth pre-
 	// expands every node whose depth is < InitialDepth: 0 = root only,
 	// 1 = root expanded, 2 = root + first level, …
 	InitialDepth int `yaml:"initial_depth,omitempty"`
+
+	// OnCursor makes this component reactive to another component's
+	// cursor. The driver's RowFocusedMsg triggers a re-bind of the
+	// target's source parameters via the Bind map (templates evaluated
+	// against the driver's current focused row via ${cursor.*}), then
+	// a re-fetch through the source's param cache. Used to build
+	// "table on top, detail below" interfaces where scrolling the top
+	// pane refreshes the bottom.
+	OnCursor *OnCursor `yaml:"on_cursor,omitempty"`
+}
+
+// OnCursor wires a component to another component's cursor state.
+// Driver may be a table, list, or tree — all three emit tuilib
+// focus-change messages (table.RowFocusedMsg from v0.16.0;
+// list.SelectedChangedMsg and tree.SelectedChangedMsg from v0.17.0).
+// The pattern:
+//
+//	inspector:
+//	  type: inspector
+//	  source: pod_detail
+//	  auto: true
+//	  on_cursor:
+//	    source: pods_table            # driver component name
+//	    bind:
+//	      name:      ${cursor.Name}   # driver row cells feed the target
+//	      namespace: ${cursor.Namespace} # source's params
+//
+// Bind templates can reference ${cursor.*} (the driver's current row)
+// alongside ${env.*} — same substitution as everywhere else, minus
+// selection/prompt which don't apply mid-screen.
+type OnCursor struct {
+	// Source names the driver component in the same screen's layout.
+	Source string `yaml:"source"`
+	// Bind maps destination-source parameter names to templates
+	// evaluated against the driver's current cursor. Values support
+	// ${cursor.*} and ${env.*}. Every declared param in the target
+	// source's Parameters map should have an entry; the fetcher
+	// substitutes an empty string for unresolved cells so the URL
+	// stays well-formed even when the cursor lands on a row missing
+	// a referenced column.
+	Bind map[string]string `yaml:"bind,omitempty"`
 }
 
 // Sort declares an initial table sort. Column may be a column title
@@ -342,6 +600,14 @@ type Column struct {
 	// no rule matches the cell is rendered plain. See ColorRule for the
 	// `when:` syntax.
 	ColorRules []ColorRule `yaml:"color_rules,omitempty"`
+	// Hidden opts the column out of rendering while keeping it in the
+	// row payload — it still participates in filter matching AND still
+	// shows up in Selected() / RowFocusedMsg cells. This is the
+	// "identity column" pattern: bind ${cursor.Namespace} against a
+	// hidden Namespace column so a drilldown gets the value without
+	// giving up screen real estate. Passed through to tuilib's
+	// table.Column.Hidden (shipped in v0.16.0).
+	Hidden bool `yaml:"hidden,omitempty"`
 }
 
 // ColorRule pairs a `when:` matcher with a `color:`. Recognised `when:`

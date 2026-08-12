@@ -1,0 +1,69 @@
+app:
+  title: Kubernetes
+  theme: nord
+data:
+  sources:
+    clusters:
+      type: exec
+      command:
+        - kubectl
+        - config
+        - view
+        - --output=json
+      root: clusters
+      pipe:
+        - type: filter
+          where: "hasPrefix(name, 'kind-')"
+        - type: project
+          keep:
+            name: name
+    namespaces:
+      type: exec
+      parameters:
+        cluster:
+          type: string
+          required: true
+          description: Cluster context
+      command:
+        - kubectl
+        - --context=${params.cluster}
+        - get
+        - namespace
+        - --output=json
+      root: items
+      refresh: 30s
+tui:
+  components:
+    namespaces_list:
+      type: list
+      title: Namespaces
+      filterable: true
+      source: namespaces
+      item: "metadata.name"
+      colors:
+        border_active: theme:accent
+        selected: theme:accent
+      color_rules:
+        - {when: "~^kube-", color: gray}
+        - {when: default, color: 'theme:accent'}
+        - {when: demo, color: green}
+    clusters_list:
+      type: list
+      title: Clusters
+      source: clusters
+      item: name
+  screens:
+    namespaces:
+      title: Namespaces
+      layout: {component: namespaces_list}
+    clusters:
+      title: Clusters
+      layout: {component: clusters_list}
+      #on_key:
+      #  - source: namespaces_list
+      #    push:   pods
+      #    key:    enter
+      #    bind:
+      #      namespace: ${selection}
+  #initial: namespaces
+  initial: clusters

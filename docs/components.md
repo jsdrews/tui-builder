@@ -197,16 +197,39 @@ Unchanged from round 1. `layout.Center` lands when modal components
 
 ## Schema cheat sheet (current)
 
+> **Note**: this cheat sheet is grouped by field category for
+> readability. In the actual config, the `sources:` map lives under
+> `data:` and `components:` / `screen[s]:` / `initial:` live under
+> `tui:`. Every entry in `data.sources:` carries a `type:` that
+> picks its kind — leaf sources (http / exec / file / websocket /
+> static / merge) and operator pipelines (filter / project / derive
+> / sort / union / compose / join / cache / passthrough) share the
+> single map. See [data-layer.md](data-layer.md#top-level-config-shape)
+> for the top-level shape.
+
 ```yaml
 app:
   title: <string>             # breadcrumb prefix
   version: <string>           # statusbar right
   theme: <name>               # one of theme.All() names
   help_verbose: <bool>        # true = legacy inline footer, false (default) = minimal "? help"
+  prompts:                    # optional — boot-time params collected via a form modal
+                              # BEFORE the main screen renders. Each value is set as
+                              # an env var keyed by `key`, so ${env.<KEY>} works
+                              # downstream. Pre-fills from any existing env var of
+                              # the same name. Cancel (esc) aborts the program.
+    - key:   <string>         # env var name + token key
+      label: <string>         # field label shown in the form
+      type:  text | select | confirm   # default text
+      placeholder:   <string> # text only
+      initial:       <string> # text default (overridden by current env if set)
+      options:       [<string>, ...]   # select choices
+      initial_index: <int>    # select default index
+      initial_bool:  <bool>   # confirm default
 
-data_sources:                 # optional — components bind to these via `source:`
+sources:                      # optional — components bind to these via `source:`
   <name>:
-    type: http | exec | file | merge | websocket
+    type: http | exec | file | websocket | static | merge | passthrough | filter | project | derive | sort | union | compose | join | cache
     # ---- shared by every type ----
     root: <dot-path>          # slice into the response (empty = use whole result)
     format: json | text       # default json; use text for plain-text endpoints
@@ -271,7 +294,7 @@ data_sources:                 # optional — components bind to these via `sourc
 
 components:
   <name>:
-    type: list | table | logview | tree | inspector
+    type: list | table | logview | tree | inspector | textview
     title: <string>
     source: <data-source-name>  # optional — populates the component dynamically;
                                 # static items/rows/fields are ignored when set
@@ -337,6 +360,15 @@ components:
         sortable: <bool>
         sort: string | number | si
         value: <dot-path>      # when source: is set — pluck this cell from each item
+        hidden: <bool>         # optional — omit from render + width computation.
+                               # Row payload still carries the cell so
+                               # RowFocusedMsg.Cells / SelectedRow expose it —
+                               # `${cursor.<Title>}` and `${selection.<Title>}`
+                               # still resolve. Filter matching still hits it
+                               # (both bare terms and `key:value` scopes).
+                               # Use for identity columns you need for
+                               # drilldown/reactive binding but don't want
+                               # to consume screen real estate.
         color_rules:           # optional — data-driven cell coloring; rules eval in order,
                                # first match wraps the cell with ansi.CellColor.
                                # `when:` syntax:
@@ -359,11 +391,37 @@ components:
     max_lines:   <int>          # 0=default 10000, -1=unbounded
     filter_mode: <bool>
 
-    # tree
+    # textview (static-text viewer — SetContent on refresh, no follow)
+    content:     <string>        # optional — initial buffer for static
+                                 # mode; overridden by SetContent when
+                                 # source: is set.
+    wrap:        <bool>          # optional — default false; runtime
+                                 # toggle via `w`.
+    searchable:  <bool>          # optional — /-search, n/N navigate
+
+    # tree (static — declare the root inline)
     root:
       label: <string>
       children: [<TreeNode>, ...]
     initial_depth: <int>         # 0=root only, 1=root expanded, ...
+    # tree (source-bound — data-driven, live updates via SetRoot)
+    source:     <name>           # data.sources.<name>
+    label:      <dot-path>       # each node's display label (required when source: set)
+    children:   <dot-path>       # optional — recursive walk: dot-path
+                                 # on each node pointing at its list of
+                                 # children. Enables nested source shapes
+                                 # (filesystem trees, k8s owner refs,
+                                 # org charts). Mutually exclusive with
+                                 # group_by.
+    group_by:   <dot-path>       # optional — bucket the flat iterable
+                                 # by this value; buckets become parent
+                                 # nodes labeled with the bucket value.
+                                 # kubectl-shape: `group_by: kind` renders
+                                 # resources categorized by type.
+    root_label: <string>         # optional — root node's display label
+                                 # (supports ${selection.*}/${env.*}/
+                                 # ${prompt.*}). Defaults to `title:`,
+                                 # then to the source name.
 
     # inspector
     fields:
@@ -373,7 +431,28 @@ components:
         color_rules:               # optional — same syntax as Column.color_rules
           - {when: <string>, color: <color>}
         children: [<InspectorField>, ...]
+    auto: <bool>                   # optional — when true, skip `fields:` and derive
+                                   # the field tree from the fetched value directly.
+                                   # Requires source:. Nested maps expand into
+                                   # Children; arrays get [0], [1] labels; scalars
+                                   # render naturally. Mutually exclusive with fields:.
     initial_depth: <int>           # shared with tree
+
+    # ── Reactive binding (any source-bound component) ─────────────────
+    # Wire a driver's cursor state to another component's source. Every
+    # focus-change message from the driver rebinds the target's
+    # parameterized source via the Bind map and refetches through a
+    # params-aware LRU (feature G's ParamCache). Enables the
+    # "kubectl describe on hover" pattern without pushing a new screen.
+    #
+    # Valid driver kinds: `table`, `list`, `tree`. All three emit
+    # tuilib focus-change messages (RowFocusedMsg / SelectedChangedMsg).
+    on_cursor:
+      source: <driver-component>   # table / list / tree in the same layout
+      bind:                        # target source's params <- driver cursor
+        <param>: <template>        # ${cursor.*} + ${env.*} substituted;
+                                   # ${selection.*} passes through literal
+                                   # (this fires mid-screen, not at push time).
 
 # Single-screen mode:
 screen:
@@ -385,15 +464,30 @@ screens:
   <name>:
     title: <string>            # may contain ${selection} when pushed
     layout: <Node>
-    on_enter:                  # optional — enter on Source pushes Push
-      - {source: <component>, push: <screen-name>}
+    on_key:                    # optional — a keypress on Source pushes Push
+      - source: <component>    # list or table
+        push:   <screen-name>  # destination screen name
+        key:    <string>       # REQUIRED — spell out the trigger key.
+                               # `enter` for the classic drilldown; any
+                               # tea.KeyMsg string works (`d`, `l`,
+                               # `ctrl+r`, ...). Multiple bindings on
+                               # the same source are allowed if their
+                               # (source, key) pairs differ.
+                               # A double click on a row is the mouse
+                               # spelling of `enter`, so an `enter`
+                               # binding is reachable both ways.
+        label:  <string>       # optional — custom help-strip label.
+                               # Defaults to "open".
+        bind:                  # optional — templated params forwarded to
+                               # the pushed screen's parameterized sources.
+          <param>: ${selection.*}
     actions:                   # optional — bind a key to a subprocess
                                # (kubectl exec, $EDITOR, open, ...) via pkg/runner
       - key:         <string>  # dispatch key (avoid q/t/?/tab/esc/enter/r//j/k)
         label:       <string>  # shown in the help strip
         source:      <component>  # which list/table's selection feeds ${selection.*}
         confirm:     <string>  # optional yes/no modal message before dispatch
-                               # (${selection.*}/${env.*} substituted in here too)
+                               # (${selection.*}/${env.*}/${prompt.*} substituted)
         notice:      <string>  # optional banner during slow handoffs (interactive only)
         interactive: <bool>    # default true (uses pkg/runner — TTY handoff, brief
                                # flicker, right for vim/ssh/kubectl exec).
@@ -401,7 +495,36 @@ screens:
                                # stdout/stderr, never suspends — right for one-shot
                                # commands (delete/scale/open). Errors surface in
                                # the alert; success goes to the statusbar.
-        run:         [<argv...>] # ${selection.*} + ${env.*} substituted at fire time
+        prompts:               # optional — collect input via a form modal BEFORE
+                               # dispatch. Values feed ${prompt.<key>} into run argv
+                               # AND confirm message AND notice. Same field shapes
+                               # as app.prompts. Cancel from the form aborts the
+                               # action. Field shapes per `type:`:
+                               #
+                               # text (default):
+                               #   - {key: <string>, label: <string>,
+                               #      placeholder: <string>, initial: <string>}
+                               #
+                               # select (selection popup — good for "pick a target
+                               # before running" or gating destructive commands
+                               # behind an explicit choice; scope, environment,
+                               # container, replica-count, etc.):
+                               #   - {key: <string>, label: <string>, type: select,
+                               #      options: [<string>, ...],
+                               #      initial_index: <int>}
+                               #
+                               # confirm (yes/no toggle — value is "true" or
+                               # "false" when substituted):
+                               #   - {key: <string>, label: <string>, type: confirm,
+                               #      initial_bool: <bool>}
+        run:         [<argv...>] # ${selection.*} + ${env.*} + ${prompt.*} substituted
+                               # at fire time (after any prompts have been collected)
+                               #
+                               # Confirming destructive actions: `confirm:` is a
+                               # yes/no modal shown AFTER prompts and BEFORE run.
+                               # Reference ${prompt.*} in the message to include
+                               # the collected values in the preview — e.g.
+                               # "Delete pod ${selection.Name} in ${prompt.namespace}?"
 initial: <screen-name>         # required when `screens:` is set
 
 # Template tokens (substituted in titles, URLs, headers, body, items,
@@ -411,12 +534,50 @@ initial: <screen-name>         # required when `screens:` is set
 #                             table source: first cell
 #   ${selection.N}          — table source: 1-based cell index
 #   ${selection.COLNAME}    — table source: cell by column-title prefix
+#   ${cursor}               — LIVE: the driver's current focus.
+#                             Table:  first cell of the focused row
+#                             List:   the focused item's string
+#                             Tree:   the focused node's label
+#                             Refetches when the driver's cursor moves.
+#                             Only meaningful on components that declare
+#                             `on_cursor:` (the driver names which
+#                             component's cursor to follow).
+#   ${cursor.N}             — 1-based index into the driver's cells.
+#                             Table:  cell by column position
+#                             List:   `${cursor.1}` = the item
+#                             Tree:   path[N-1] (root at .1)
+#   ${cursor.COLNAME}       — Table:  cell by column title (case-
+#                             insensitive exact match).
+#                             List:   `${cursor.item}` (Columns=["item"]).
+#                             Tree:   n/a — trees have no columns; use
+#                             .N indexing or the special-cased keys.
+#   ${cursor.label}         — Tree/List: explicit alias for bare ${cursor}.
+#   ${cursor.depth}         — Tree: number of path elements (0 for root,
+#                             1 for its children, ...) as a string.
+#                             Table/List: length of Cells (usually 1
+#                             for lists; the row width for tables).
+#   ${cursor.path}          — Tree: Cells joined with "/" — the actual
+#                             filesystem-shape path from root to the
+#                             focused node ("./cmd/wrangl/main.go"). Fed
+#                             directly to shell tools like `stat`.
+#                             Table/List: same join; usually not what
+#                             you want but handy for logging.
+#                             Unresolved lookups resolve to "" (not the
+#                             literal token) since cursor moves are
+#                             high-frequency and a broken URL would
+#                             404 storm.
 #   ${env.NAME}             — os.Getenv("NAME") (empty when unset).
-#                             Use for tokens / API keys so they stay out of
-#                             YAML, e.g. "Bearer ${env.GITHUB_TOKEN}".
+#                             Use for tokens / API keys / boot-time params
+#                             (app.prompts values are written to env, so
+#                             they share this namespace).
+#   ${prompt.KEY}           — value collected from an action's `prompts:`
+#                             form. Substituted at action-fire time, after
+#                             the form submits.
 #
-# Selection tokens substitute at push time; env tokens also substitute at
-# push time (env vars are usually stable for the run).
+# Selection tokens substitute at push time; env tokens substitute at push
+# time too (boot params already in env by that point); prompt tokens
+# substitute at action-fire time; cursor tokens substitute at every
+# RowFocusedMsg from the declared driver — the reactive path.
 
 # Node is one of:
 #   {vstack: [<Item>, ...]}
@@ -438,12 +599,18 @@ initial: <screen-name>         # required when `screens:` is set
 | `examples/table_columns.yaml` | Column sizing (fixed / auto / flex / max_width) + alignment |
 | `examples/table_styled.yaml` | Colored cells + clickable hyperlinks, `initial_sort` |
 | `examples/logview.yaml` | Streaming-log pane, `/`-search, filter mode, `initial_query` |
+| `examples/textview.yaml` | Static-text viewer (`type: textview`): a help pane using inline `content:` + a source-bound `date` clock refreshing every 3s. `/`-search, `w` wrap toggle |
 | `examples/tree.yaml` | Hierarchical view, expand/collapse, search, `initial_depth` |
+| `examples/tree_source.yaml` | Data-driven tree: a `type: file` source of people bucketed by `group_by: team`; cursor + expand state survive `refresh: 5s` polling |
 | `examples/inspector.yaml` | Two-column label/value record viewer, nested groups |
+| `examples/inspector_auto.yaml` | `auto: true` — inspector derives fields from any JSON response (GitHub repo record). Nested maps/arrays expand instead of stringifying |
+| `examples/on_cursor.yaml` | On-hover detail: GitHub repos table on top, `on_cursor:`-bound inspector below. Scrolling the table refetches the detail pane via `${cursor.*}` tokens + params-aware cache. Uses a hidden `Owner` column for identity binding |
+| `examples/on_cursor_fs.yaml` | Same pattern but tree-driven on a real filesystem: `tree -J ./cmd` walks a recursive JSON tree via `children: contents`; `${cursor.path}` joins the ancestor labels into a real path and pipes it to `stat` in a textview |
 | `examples/table_wide.yaml` | Wide table demonstrating horizontal scroll (`←`/`→`, `shift+←`/`shift+→`, `0`/`$`) |
 | `examples/layout.yaml` | Nested layouts, mixed flex weights |
 | `examples/themes.yaml` | Built-in theme picker reference |
 | `examples/multi.yaml` | Multi-screen drilldown (Regions → Cities → Detail) with breadcrumbing and `${selection}` substitution |
+| `examples/on_key_push.yaml` | `on_key:` block — GitHub users list where `key: enter` pushes to repos and `key: s` pushes to starred, both binding `${selection}`; the repos table then pushes a repo-detail inspector, binding `${selection.Repo}` |
 | `examples/http_countries.yaml` | Table backed by restcountries.com REST API; `refresh: 5m` polling; per-column `value:` dot-paths |
 | `examples/http_github.yaml` | Multi-screen drilldown over the GitHub API: users → repos (via `/users/${selection}/repos`) → repo inspector (via `/repos/${selection.Repo}`). Shows URL templating from list and table selections |
 | `examples/http_github_auth.yaml` | Authenticated GitHub: `/user/starred` → repo inspector. Uses `${env.GITHUB_TOKEN}` in the Authorization header — token stays out of YAML |
@@ -457,5 +624,7 @@ initial: <screen-name>         # required when `screens:` is set
 | `examples/stream_websocket.yaml` | `type: websocket` — connects on activate; each text frame appends to a logview. Headers handle auth on the upgrade request |
 | `examples/stream_trades_table.yaml` | Same websocket stream as above, but feeding a **live table** with `max_rows: 100`. Each JSON frame projects into a row via column `value:` paths and prepends to a ring buffer. Plus a side-by-side logview showing raw frames + connection state |
 | `examples/stream_l1.yaml` | **L1 ticker JOINED from two streams**: Binance.us bookTicker (fast bid/ask) + @ticker (slower last-price + 24h stats) merged by symbol via `row_key: data.s`. Deep-merge keeps both sources' fields alive on each row. Demonstrates streaming + merge + keyed upsert together |
+| `examples/prompts_boot.yaml` | **Boot-time params via `app.prompts`**: form modal collects GitHub username + sort field + an archived-repos toggle before the main screen renders. Values become env vars and feed `${env.USER}` into the URL, the title, and a column |
+| `examples/action_prompts.yaml` | **Action prompts**: keys fire a form modal that collects values before the action's subprocess dispatches. `${prompt.<key>}` substitutes into run argv + confirm message + notice |
 | `examples/kube_multi.yaml` | Multi-cluster: 3 kube clusters merged into one pods table via `type: merge`. Tagged + colored by cluster. Use `task kube:multi:up && task kube:multi:proxy:all && task kube:multi:demo` |
 | `examples/demo.yaml` | Kitchen-sink: list + table side-by-side |

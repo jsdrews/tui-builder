@@ -16,6 +16,7 @@ import (
 	"github.com/jsdrews/tuilib/pkg/list"
 	"github.com/jsdrews/tuilib/pkg/logview"
 	"github.com/jsdrews/tuilib/pkg/table"
+	"github.com/jsdrews/tuilib/pkg/textview"
 	"github.com/jsdrews/tuilib/pkg/theme"
 	"github.com/jsdrews/tuilib/pkg/tree"
 
@@ -31,6 +32,7 @@ const (
 	KLogview
 	KTree
 	KInspector
+	KTextview
 )
 
 // Component is a live, themed component pointer plus the originating config
@@ -45,6 +47,7 @@ type Component struct {
 	Logview   *logview.Model
 	Tree      *tree.Model
 	Inspector *inspector.Model
+	Textview  *textview.Model
 
 	// StreamRows is the ring buffer used by KTable components bound to
 	// a streaming source. Newest events first; trimmed to Cfg.MaxRows
@@ -71,6 +74,9 @@ func NewComponent(c *cfg.Component, th theme.Theme) (*Component, error) {
 	case "inspector":
 		m := buildInspector(c, th)
 		return &Component{Cfg: c, Kind: KInspector, Inspector: &m}, nil
+	case "textview":
+		m := buildTextview(c, th)
+		return &Component{Cfg: c, Kind: KTextview, Textview: &m}, nil
 	}
 	return nil, fmt.Errorf("unknown component type %q", c.Type)
 }
@@ -130,6 +136,17 @@ func (c *Component) Rebuild(th theme.Theme) {
 		m.SetFilterMode(filterMode)
 		m.SetCursor(cursor)
 		*c.Inspector = m
+	case KTextview:
+		content := c.Textview.Content()
+		wrap := c.Textview.Wrap()
+		query := c.Textview.Query()
+		m := buildTextview(c.Cfg, th)
+		m.SetContent(content)
+		m.SetWrap(wrap)
+		if query != "" {
+			m.SetQuery(query)
+		}
+		*c.Textview = m
 	}
 }
 
@@ -220,6 +237,7 @@ func buildTable(c *cfg.Component, th theme.Theme) table.Model {
 			Align:    parseAlign(col.Align),
 			Sortable: col.Sortable,
 			Less:     parseLess(col.Sort),
+			Hidden:   col.Hidden,
 		}
 	}
 	if c.Source == "" {
@@ -316,6 +334,33 @@ func buildLogview(c *cfg.Component, th theme.Theme) logview.Model {
 	return m
 }
 
+// ------------------------------------------------------------ textview ---
+
+func buildTextview(c *cfg.Component, th theme.Theme) textview.Model {
+	opts := th.TextView()
+	opts.Title = c.Title
+	opts.Content = c.Content
+	opts.Wrap = c.Wrap
+	opts.Searchable = c.Searchable
+	if c.FilterPlaceholder != "" {
+		opts.Filter.Placeholder = c.FilterPlaceholder
+	}
+	applyPaneColors(&opts.ActiveColor, &opts.InactiveColor, &opts.SpinnerStyle, c.Colors, th)
+	if cs := c.Colors; cs != nil {
+		if v := parseColor(cs.Match, th); v != nil {
+			opts.MatchStyle = opts.MatchStyle.Foreground(v)
+		}
+		if v := parseColor(cs.CurrentLineBG, th); v != nil {
+			opts.CurrentLineStyle = opts.CurrentLineStyle.Background(v)
+		}
+	}
+	m := textview.New(opts)
+	if c.InitialQuery != "" {
+		m.SetQuery(c.InitialQuery)
+	}
+	return m
+}
+
 // ---------------------------------------------------------------- tree ---
 
 // yamlNode adapts a config.TreeNode into tuilib's tree.Node interface.
@@ -326,6 +371,23 @@ type yamlNode struct {
 
 func (n *yamlNode) Label() string      { return n.label }
 func (n *yamlNode) Children() []tree.Node { return n.children }
+
+// sourceTreeRootLabel picks the display label for a source-bound tree's
+// root node. Priority: explicit `root_label:` (templated), then Title,
+// then the source name. The label doubles as the identity key tuilib's
+// tree uses for expand-state preservation across SetRoot swaps — so it
+// must be stable across refreshes. All three inputs are static (or
+// templated once per push), which satisfies that.
+func sourceTreeRootLabel(c *cfg.Component) string {
+	switch {
+	case c.RootLabel != "":
+		return c.RootLabel
+	case c.Title != "":
+		return c.Title
+	default:
+		return c.Source
+	}
+}
 
 func convertTree(n *cfg.TreeNode) tree.Node {
 	if n == nil {
@@ -345,7 +407,25 @@ func buildTree(c *cfg.Component, th theme.Theme) tree.Model {
 	opts.Title = c.Title
 	opts.Searchable = c.Searchable
 	opts.InitialDepth = c.InitialDepth
-	opts.Root = convertTree(c.Root)
+	if c.Source != "" {
+		// Source-bound trees start empty until the first fetch fills
+		// them via applyTree → SetRoot. We seed a labeled root plus a
+		// single dummy child so InitialDepth's preExpand actually
+		// fires (it early-returns when kids are empty). That leaves
+		// m.expanded[<root-label>] = true. When SetRoot swaps in the
+		// real tree, pruneExpanded keeps every reachable path and drops
+		// the rest — the root's expanded entry survives because its
+		// label matches, but the dummy child's entry gets pruned. Net
+		// effect: on first data fill, the tree opens to its top level
+		// automatically instead of showing a collapsed root the user
+		// has to hit `E` to open.
+		opts.Root = &yamlNode{
+			label:    sourceTreeRootLabel(c),
+			children: []tree.Node{&yamlNode{label: "__seed__"}},
+		}
+	} else {
+		opts.Root = convertTree(c.Root)
+	}
 	if c.FilterPlaceholder != "" {
 		opts.Filter.Placeholder = c.FilterPlaceholder
 	}

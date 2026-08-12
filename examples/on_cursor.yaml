@@ -1,0 +1,111 @@
+# on_cursor.yaml — reactive detail-on-hover pattern.
+#
+# The on-hover stack from the tui-builder integration batch:
+#
+#   #41 RowFocusedMsg    (tuilib) — tables emit when the cursor lands
+#                        on a different row
+#   #42 hidden columns   (tuilib) — cells stay in the row payload +
+#                        Selected() output but don't render on screen
+#   ${cursor.*} tokens   (this)   — templates resolved against the
+#                        driving component's live cursor
+#   on_cursor: block     (this)   — declares which table drives which
+#                        dependent source, and how row cells feed the
+#                        target's parameters
+#   ParamCache           (this)   — reused from feature G. Cursor
+#                        sweeps that revisit rows within the TTL don't
+#                        re-hit the upstream.
+#
+# The demo:
+#
+#   Top pane:    GitHub repo table (name / language / star count).
+#                Owner is a HIDDEN column — it stays in the row payload
+#                so ${cursor.Owner} resolves, but it doesn't take up
+#                screen real estate. Fine-grained detail bindings
+#                without visual noise.
+#   Bottom pane: inspector, source-bound to a parameterized repo-
+#                detail endpoint. `auto: true` derives the field tree
+#                from whatever GitHub returns (feature B).
+#                `on_cursor:` binds the two — scroll the top pane and
+#                the bottom pane refreshes with the currently-focused
+#                repo, no Enter required.
+#
+# Try it:
+#   task tui-builder -- examples/on_cursor.yaml
+#
+# Then scroll through the top table with j/k. Each new row swaps the
+# bottom pane's content. Revisit a row you've already viewed and the
+# ParamCache serves it instantly (no network).
+app:
+  title: Repos (on-hover detail)
+  theme: nord
+
+data:
+  sources:
+    repos:
+      type: http
+      # A well-known org with a manageable page size — no auth
+      # needed for public repos at this rate.
+      url:     https://api.github.com/orgs/charmbracelet/repos?per_page=30&sort=updated
+      refresh: 30m
+      timeout: 15s
+      headers:
+        Accept: application/vnd.github+json
+
+    repo_detail:
+      type: http
+      parameters:
+        owner: {type: string, required: true, description: repo owner (login)}
+        name:  {type: string, required: true, description: repo name}
+      url:     https://api.github.com/repos/${params.owner}/${params.name}
+      timeout: 15s
+      headers:
+        Accept: application/vnd.github+json
+      # Bounded LRU with per-entry TTL, single-flight — the primitive
+      # shipped with feature G. Every cursor move consults this cache
+      # before hitting the upstream. Revisiting a row you already
+      # focused within 5m returns the memoised value instantly.
+      cache:
+        ttl:  5m
+        size: 200
+
+tui:
+  components:
+    repo_table:
+      type: table
+      title: Repos
+      filterable: true
+      source: repos
+      initial_sort: {column: Stars, desc: true}
+      columns:
+        # Hidden column — the row still carries `owner.login` so
+        # ${cursor.Owner} resolves, but the column is invisible.
+        # Feature #42.
+        - {title: Owner,    hidden: true,           value: "owner.login"}
+        - {title: Name,     width: 30, sortable: true, value: name}
+        - {title: Language, width: 14, sortable: true, value: language}
+        - {title: Stars,    width: 8,  sortable: true, sort: number, align: right, value: stargazers_count}
+        - {title: Updated,  width: 22, sortable: true, value: updated_at}
+
+    repo_inspector:
+      type: inspector
+      title: ${cursor.Name}
+      filterable: true
+      initial_depth: 1
+      source: repo_detail
+      auto: true       # feature B — derive fields from response shape
+      # The reactive binding. Whenever repo_table's cursor lands on a
+      # different row, the inspector's `repo_detail` source rebinds
+      # its params from the driver's row cells (via ${cursor.*}) and
+      # refetches through the ParamCache.
+      on_cursor:
+        source: repo_table
+        bind:
+          owner: ${cursor.Owner}
+          name:  ${cursor.Name}
+
+  screen:
+    title: Repos
+    layout:
+      vstack:
+        - {flex: 1, component: repo_table}
+        - {flex: 2, component: repo_inspector}

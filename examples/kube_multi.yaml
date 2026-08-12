@@ -1,133 +1,255 @@
 # kube_multi.yaml — pods across 3 local kube clusters merged into one
-# searchable table.
+# searchable table, with cross-cluster drilldown into pod detail + logs.
 #
 # Prereq (one terminal each — see Taskfile.yml `kube:multi:*` tasks):
 #   kubectl --context kind-tb-prod    proxy --port=8001
 #   kubectl --context kind-tb-staging proxy --port=8002
 #   kubectl --context kind-tb-dev     proxy --port=8003
 #
-# Or run `task kube:multi:up` to create the 3 kind clusters + seed
-# workloads, then `task kube:multi:proxy:all` to background all three
-# kubectl proxies, then `task kube:multi:demo`.
+# How the multi-cluster shape works:
 #
-# How it works:
-#   - Three http data sources, one per cluster, each hitting the
-#     proxy port for that cluster.
-#   - A `merge` source named `pods_all` fans out to all three children
-#     concurrently every 5s. Each pod dict gets `{cluster: <name>}`
-#     injected via `tag_field: cluster`, so a single table column
-#     surfaces which cluster a row came from.
-#   - `on_error: skip` keeps the table populated when one cluster is
-#     down (only errors when EVERY cluster is unreachable).
-#   - All the normal table features compose: filter (`/`), sort, color
-#     rules per column, etc.
+#   - Three http sources, one per cluster, each hitting its own proxy.
+#   - `pods_all` merges them. Each row is tagged with the cluster's
+#     human name AND its proxy base URL via per-child tags (see
+#     `children:` below). The URL tag is what makes cross-cluster
+#     drilldown possible — the detail source pulls it back out of
+#     the selected row to know which proxy to hit.
+#   - On enter, the focused row's selection feeds bind: → params on
+#     `pod_detail` + `pod_logs`. Same source definitions work for
+#     every cluster because the proxy URL is just another param.
+#   - `pod_logs` uses http follow (kube `?follow=true`) so the logview
+#     tails live, no polling.
 #
-# Add a cluster: drop a new http source + add its name to
-# pods_all.sources. Remove one: delete the source + remove from the
-# merge list. The same pattern scales across any number of clusters /
-# regions / accounts / environments.
+# Add a cluster: drop a new http source + add a `children:` entry with
+# its `cluster` / `cluster_url` tags. Detail/logs sources need no
+# changes — they're cluster-agnostic.
 app:
   title: Pods across clusters
   theme: nord
 
-data_sources:
-  pods_prod:
-    type: http
-    url: http://localhost:8001/api/v1/pods
-    root: items
-    refresh: 5s
-    timeout: 10s
+data:
+  sources:
+    # ── per-cluster pod listings ──────────────────────────────────────
+    pods_prod:
+      type: http
+      url: http://localhost:8001/api/v1/pods
+      root: items
+      refresh: 5s
+      timeout: 10s
 
-  pods_staging:
-    type: http
-    url: http://localhost:8002/api/v1/pods
-    root: items
-    refresh: 5s
-    timeout: 10s
+    pods_staging:
+      type: http
+      url: http://localhost:8002/api/v1/pods
+      root: items
+      refresh: 5s
+      timeout: 10s
 
-  pods_dev:
-    type: http
-    url: http://localhost:8003/api/v1/pods
-    root: items
-    refresh: 5s
-    timeout: 10s
+    pods_dev:
+      type: http
+      url: http://localhost:8003/api/v1/pods
+      root: items
+      refresh: 5s
+      timeout: 10s
 
-  pods_all:
-    type: merge
-    sources: [pods_prod, pods_staging, pods_dev]
-    tag_field: cluster
-    on_error: skip
-    refresh: 5s
+    # ── merged view with per-child tags ───────────────────────────────
+    # The `children:` form (vs. `sources:` shorthand) lets each child
+    # inject an arbitrary tags map into every row it produces. We tag
+    # with both a human-readable `cluster` name and the proxy `cluster_url`
+    # so the destination drilldown source can derive its URL purely from
+    # the selected row's data.
+    pods_all:
+      type: merge
+      children:
+        - source: pods_prod
+          tags:
+            cluster:     prod
+            cluster_url: http://localhost:8001
+        - source: pods_staging
+          tags:
+            cluster:     staging
+            cluster_url: http://localhost:8002
+        - source: pods_dev
+          tags:
+            cluster:     dev
+            cluster_url: http://localhost:8003
+      on_error: skip
+      refresh: 5s
 
-components:
-  all_pods:
-    type: table
-    title: All pods (3 clusters merged)
-    filterable: true
-    source: pods_all
-    initial_sort: {column: Cluster, desc: false}
-    colors:
-      border_active:    theme:accent
-      header:           theme:accent
-      selected_fg:      theme:bar-fg
-      selected_bg:      theme:current
-      column_separator: theme:subtle
-      header_rule:      theme:accent
-    columns:
-      # The tag_field arrives as `cluster` on every row; the merge
-      # composer wrote it. Color it so each cluster pops visually.
-      - title: Cluster
-        width: 14
-        sortable: true
-        value: cluster
-        color_rules:
-          - {when: pods_prod,    color: red}
-          - {when: pods_staging, color: yellow}
-          - {when: pods_dev,     color: green}
-      - {title: Namespace, width: 18, sortable: true, value: "metadata.namespace"}
-      - {title: Name,      width: 38, sortable: true, value: "metadata.name"}
-      # kubectl-style STATUS fallback chain — container waiting reason
-      # beats terminated reason beats pod phase.
-      - title: Status
-        width: 18
-        sortable: true
-        value:
-          - "status.containerStatuses.0.state.waiting.reason"
-          - "status.containerStatuses.0.state.terminated.reason"
-          - "status.phase"
-        color_rules:
-          - {when: Running,           color: green}
-          - {when: Pending,           color: yellow}
-          - {when: Succeeded,         color: theme:accent}
-          - {when: Completed,         color: theme:accent}
-          - {when: Failed,            color: red}
-          - {when: Error,             color: red}
-          - {when: CrashLoopBackOff,  color: red}
-          - {when: ImagePullBackOff,  color: red}
-          - {when: ErrImagePull,      color: red}
-          - {when: ContainerCreating, color: yellow}
-          - {when: Unknown,           color: gray}
-      - title: Ready
-        width: 6
-        align: right
-        value: "status.containerStatuses.0.ready"
-        color_rules:
-          - {when: "true",  color: green}
-          - {when: "false", color: red}
-      - title: Restarts
-        width: 8
-        sortable: true
-        sort: number
-        align: right
-        value: "status.containerStatuses.0.restartCount"
-        color_rules:
-          - {when: "0",  color: gray}
-          - {when: ">5", color: red}
-          - {when: ">0", color: yellow}
-      - {title: Node,    width: 24, value: "spec.nodeName"}
-      - {title: Started, width: 22, sortable: true, value: "status.startTime"}
+    # ── cross-cluster drilldown destinations ──────────────────────────
+    # One source serves all three clusters because cluster_url is a
+    # parameter. The bind: block at the push site (screens.pods.on_key)
+    # pulls cluster_url, namespace, name from the selected row.
+    pod_detail:
+      type: http
+      parameters:
+        cluster_url: { type: string, required: true, description: kube proxy base URL }
+        namespace:   { type: string, required: true, description: pod namespace }
+        name:        { type: string, required: true, description: pod name }
+      url: ${params.cluster_url}/api/v1/namespaces/${params.namespace}/pods/${params.name}
+      refresh: 5s
+      timeout: 10s
 
-screen:
-  title: All clusters
-  layout:
-    component: all_pods
+    pod_logs:
+      type: http
+      parameters:
+        cluster_url: { type: string, required: true }
+        namespace:   { type: string, required: true }
+        name:        { type: string, required: true }
+      # follow: true → streaming log lines, one Event per line. Pair
+      # with --raw from wrangl for plain text; the logview component
+      # in this config consumes the Event stream natively.
+      url: ${params.cluster_url}/api/v1/namespaces/${params.namespace}/pods/${params.name}/log?follow=true&tailLines=200
+      follow: true
+      format: text
+
+tui:
+  components:
+    all_pods:
+      type: table
+      title: All pods (3 clusters merged)
+      filterable: true
+      source: pods_all
+      initial_sort: {column: Cluster, desc: false}
+      colors:
+        border_active:    theme:accent
+        header:           theme:accent
+        selected_fg:      theme:bar-fg
+        selected_bg:      theme:current
+        column_separator: theme:subtle
+        header_rule:      theme:accent
+      columns:
+        # Tags from merge land under the default `_meta` key, segregated
+        # from the upstream pod fields so framework metadata doesn't
+        # collide with kube data. Bind / column / inspector paths reach
+        # them via dot-path (`_meta.cluster`, `_meta.cluster_url`).
+        #
+        # Both columns must be present so ${selection.Cluster} and
+        # ${selection.ClusterURL} resolve at push time — Selection
+        # substitution reads from column titles, not from underlying
+        # JSON.
+        - title: Cluster
+          width: 10
+          sortable: true
+          value: _meta.cluster
+          color_rules:
+            - {when: prod,    color: red}
+            - {when: staging, color: yellow}
+            - {when: dev,     color: green}
+        # ClusterURL kept narrow so it doesn't dominate the view. Could
+        # be hidden in a future schema iteration (no "hidden column"
+        # primitive today — Selection currently mirrors visible columns).
+        - {title: ClusterURL, width: 22, value: _meta.cluster_url}
+        - {title: Namespace,  width: 18, sortable: true, value: "metadata.namespace"}
+        - {title: Name,       width: 38, sortable: true, value: "metadata.name"}
+        # kubectl-style STATUS fallback chain — container waiting reason
+        # beats terminated reason beats pod phase.
+        - title: Status
+          width: 18
+          sortable: true
+          value:
+            - "status.containerStatuses.0.state.waiting.reason"
+            - "status.containerStatuses.0.state.terminated.reason"
+            - "status.phase"
+          color_rules:
+            - {when: Running,           color: green}
+            - {when: Pending,           color: yellow}
+            - {when: Succeeded,         color: theme:accent}
+            - {when: Completed,         color: theme:accent}
+            - {when: Failed,            color: red}
+            - {when: Error,             color: red}
+            - {when: CrashLoopBackOff,  color: red}
+            - {when: ImagePullBackOff,  color: red}
+            - {when: ErrImagePull,      color: red}
+            - {when: ContainerCreating, color: yellow}
+            - {when: Unknown,           color: gray}
+        - title: Ready
+          width: 6
+          align: right
+          value: "status.containerStatuses.0.ready"
+          color_rules:
+            - {when: "true",  color: green}
+            - {when: "false", color: red}
+        - title: Restarts
+          width: 8
+          sortable: true
+          sort: number
+          align: right
+          value: "status.containerStatuses.0.restartCount"
+          color_rules:
+            - {when: "0",  color: gray}
+            - {when: ">5", color: red}
+            - {when: ">0", color: yellow}
+        - {title: Node,    width: 24, value: "spec.nodeName"}
+        - {title: Started, width: 22, sortable: true, value: "status.startTime"}
+
+    pod_inspector:
+      type: inspector
+      title: ${selection.Name} — ${selection.Cluster}
+      filterable: true
+      initial_depth: 0
+      source: pod_detail
+      colors:
+        border_active:   theme:accent
+        label:           theme:muted
+        value:           theme:bar-fg
+        current_line_bg: theme:subtle
+      fields:
+        - {label: name,      path: "metadata.name"}
+        - {label: namespace, path: "metadata.namespace"}
+        - {label: nodeName,  path: "spec.nodeName"}
+        - label: phase
+          path: "status.phase"
+          color_rules:
+            - {when: Running,   color: green}
+            - {when: Pending,   color: yellow}
+            - {when: Succeeded, color: theme:accent}
+            - {when: Failed,    color: red}
+        - {label: podIP,  path: "status.podIP"}
+        - {label: hostIP, path: "status.hostIP"}
+        - label: metadata
+          children:
+            - {label: uid,               path: "metadata.uid"}
+            - {label: creationTimestamp, path: "metadata.creationTimestamp"}
+        - label: container[0]
+          children:
+            - {label: name,  path: "spec.containers.0.name"}
+            - {label: image, path: "spec.containers.0.image"}
+
+    pod_logs_view:
+      type: logview
+      title: ${selection.Name} — logs (live tail)
+      searchable: true
+      source: pod_logs
+      color_rules:
+        - {when: "~\\b(ERROR|FATAL|PANIC)\\b", color: red}
+        - {when: "~\\bWARN(ING)?\\b",          color: yellow}
+        - {when: "~\\bINFO\\b",                color: theme:accent}
+        - {when: "~\\b(DEBUG|TRACE)\\b",       color: gray}
+      colors:
+        border_active:   theme:accent
+        match:           theme:accent
+        current_line_bg: theme:subtle
+  screens:
+    pods:
+      title: All clusters
+      layout: {component: all_pods}
+      # On enter: push the detail screen with the focused row's cluster
+      # URL, namespace, and name fed into the destination's params. The
+      # same `pod_detail` / `pod_logs` source definitions handle every
+      # cluster because cluster_url is just another bound param.
+      on_key:
+        - source: all_pods
+          push:   detail
+          key:    enter
+          bind:
+            cluster_url: ${selection.ClusterURL}
+            namespace:   ${selection.Namespace}
+            name:        ${selection.Name}
+
+    detail:
+      title: ${selection.Cluster} / ${selection.Namespace} / ${selection.Name}
+      layout:
+        vstack:
+          - {flex: 2, component: pod_inspector}
+          - {flex: 3, component: pod_logs_view}
+  initial: pods

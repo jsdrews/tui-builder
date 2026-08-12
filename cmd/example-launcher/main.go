@@ -19,8 +19,6 @@ import (
 
 	"github.com/jsdrews/tuilib/pkg/app"
 	"github.com/jsdrews/tuilib/pkg/theme"
-
-	tqscreen "github.com/jsdrews/tui-builder/internal/screen"
 )
 
 func main() {
@@ -48,12 +46,16 @@ func run() error {
 	themes := theme.All()
 	initial := themes[0]
 
-	root := tqscreen.NewLauncher(paths, initial)
+	root := NewLauncher(paths, initial)
 
 	prog := tea.NewProgram(
 		app.New(app.Options{
 			Root:   root,
 			Themes: themes,
+			// Match tui-builder: the launcher pushes the same screens, so
+			// mouse must be on here too or clicking would work only for
+			// configs opened directly.
+			Mouse: app.MouseClick,
 		}),
 		tea.WithAltScreen(),
 	)

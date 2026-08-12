@@ -1,0 +1,113 @@
+# on_cursor_fs.yaml — filesystem tree with structured `stat` details on hover.
+#
+# Demonstrates on_cursor + tree-driver pattern. Cursor on any tree
+# node (directory or file) → the right pane refetches `stat` for that
+# path and renders each field label → value via an auto-inspector.
+#
+# Pieces on display:
+#
+#   #38 tree SetRoot            → applyTree rebuilds in place; expand
+#                                 state + cursor survive polling.
+#   nested tree walking          → `children: contents` recurses through
+#                                 whatever depth the source returns.
+#   #45 tree.SelectedChangedMsg → drives the reactive refetch.
+#   ${cursor.path}               → joins the driver's cell chain into
+#                                 "cmd/wrangl/main.go", fed straight to
+#                                 `stat` as its argument.
+#   feature B (inspector auto)   → the exec emits JSON; the inspector
+#                                 renders each key label → value with
+#                                 no field declaration needed.
+#   feature G ParamCache         → cursor sweeps that revisit paths
+#                                 within the TTL don't re-exec stat.
+#
+# Requires the `tree` CLI (JSON output flag). If missing:
+#   brew install tree     # macOS
+#   apt install tree      # Debian/Ubuntu
+#
+# Runs on macOS and Linux: the stat command below picks its format flag
+# from `uname`, because BSD and GNU stat disagree about what `-f` means.
+#
+# Try it:
+#   task tui-builder -- examples/on_cursor_fs.yaml
+#
+# Scroll with j/k, expand with space. The right pane updates continuously.
+app:
+  title: Filesystem browser
+  theme: nord
+
+data:
+  sources:
+    walk:
+      type:    exec
+      command: [tree, -J, -L, "4", "cmd"]
+      root:    "[0]"
+      refresh: 30s
+      timeout: 10s
+
+    stat_detail:
+      type: exec
+      parameters:
+        path: {type: string, default: ".", description: filesystem path from the tree cursor}
+      # stat with a printf-style format that assembles a valid JSON
+      # object on stdout. format: json parses that into a map so the
+      # bound inspector renders each key as a labeled row.
+      #
+      # The sh wrapper is here for one reason: BSD and GNU stat share no
+      # format flag. `-f` is "use this format" on macOS and
+      # "--file-system" on Linux, where the format string is then read as
+      # a filename — the command fails with output that isn't JSON, and
+      # the inspector silently renders empty. One argv cannot serve both,
+      # so branch on uname.
+      #
+      # ${params.path} is substituted into the argv AT PIPELINE.BUILD
+      # TIME (see pipeline.Build's leaf branch), so it arrives as $0 —
+      # still no env plumbing, and no quoting of the path into the script.
+      command:
+        - sh
+        - -c
+        - |
+          if [ "$(uname)" = Darwin ]; then
+            stat -f '{"path":"%N","size":%z,"mode":"%Sp","owner":"%Su","group":"%Sg","modified":"%Sm","kind":"%HT"}' "$0"
+          else
+            stat --printf='{"path":"%n","size":%s,"mode":"%A","owner":"%U","group":"%G","modified":"%y","kind":"%F"}' "$0"
+          fi
+        - ${params.path}
+      format: json
+      cache:
+        ttl:  60s
+        size: 500
+
+tui:
+  components:
+    files:
+      type:          tree
+      title:         cmd
+      searchable:    true
+      initial_depth: 3
+      source:        walk
+      # root_label matches the response's own top-level name ("cmd"
+      # from `tree -J cmd`) so tuilib's expand-state seed carries
+      # across the first SetRoot swap.
+      root_label:    cmd
+      label:    name
+      children: contents
+
+    stat_pane:
+      type:       inspector
+      title:      ${cursor.path}
+      filterable: true
+      auto:       true       # feature B — derive fields from the JSON
+      source:     stat_detail
+      # Refetch on every cursor move. ${cursor.path} joins the driver
+      # tree's ancestor labels with "/" into a real filesystem path.
+      on_cursor:
+        source: files
+        bind:
+          path: ${cursor.path}
+
+  screen:
+    title: Filesystem
+    layout:
+      hstack:
+        - {flex: 1, component: files}
+        - {flex: 1, component: stat_pane}

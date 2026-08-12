@@ -1,4 +1,10 @@
-package screen
+package main
+
+// launcher.go: the example-launcher's filterable-list screen. This
+// type used to live in internal/screen but it's a convenience for this
+// one binary, not a primitive other code consumes — so it belongs
+// next to its caller. internal/screen stays focused on the
+// config-driven screen impls that the main tui-builder binary uses.
 
 import (
 	"fmt"
@@ -16,6 +22,7 @@ import (
 
 	"github.com/jsdrews/tui-builder/internal/build"
 	cfg "github.com/jsdrews/tui-builder/internal/config"
+	tqscreen "github.com/jsdrews/tui-builder/internal/screen"
 )
 
 // Launcher is a filterable list of YAML configs. Enter loads the selected
@@ -39,7 +46,7 @@ func NewLauncher(paths []string, th theme.Theme) *Launcher {
 	opts.Items = items
 	opts.Filterable = true
 	li := list.New(opts)
-	li.SetFocused(true)
+	li.Focus()
 	return &Launcher{
 		th:    th,
 		list:  li,
@@ -47,24 +54,12 @@ func NewLauncher(paths []string, th theme.Theme) *Launcher {
 	}
 }
 
-// Title satisfies screen.Screen — labels the breadcrumb root.
-func (l *Launcher) Title() string { return "Examples" }
-
-// Init kicks off the textinput cursor blink for the filter.
-func (l *Launcher) Init() tea.Cmd { return nil }
-
-// OnEnter fires on the initial push and each time the launcher becomes the
-// active top of the stack (after a child screen pops).
-func (l *Launcher) OnEnter(any) tea.Cmd { return nil }
-
-// Layout — the launcher is just the list filling the body rect.
-func (l *Launcher) Layout() layout.Node { return layout.Sized(&l.list) }
-
-// IsCapturingKeys is true while the list's filter is engaged so the shell
-// suppresses q/t.
+func (l *Launcher) Title() string         { return "Examples" }
+func (l *Launcher) Init() tea.Cmd         { return nil }
+func (l *Launcher) OnEnter(any) tea.Cmd   { return nil }
+func (l *Launcher) Layout() layout.Node   { return layout.Sized(&l.list) }
 func (l *Launcher) IsCapturingKeys() bool { return l.list.Filtering() }
 
-// Help exposes the list's bindings plus the launcher's own "enter to run".
 func (l *Launcher) Help() []key.Binding {
 	return append(l.list.Help(),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "run")),
@@ -83,7 +78,7 @@ func (l *Launcher) SetTheme(t theme.Theme) {
 	opts.Items = items
 	opts.Filterable = true
 	l.list = list.New(opts)
-	l.list.SetFocused(true)
+	l.list.Focus()
 	if value != "" {
 		l.list.SetValue(value)
 	}
@@ -119,13 +114,13 @@ func loadScreen(path string, th theme.Theme) (tscreen.Screen, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(c.Screens) > 0 {
-		multi := &Multi{
-			Screens:     c.Screens,
-			Components:  c.Components,
-			DataSources: c.DataSources,
+	if len(c.TUI.Screens) > 0 {
+		multi := &tqscreen.Multi{
+			Screens:    c.TUI.Screens,
+			Components: c.TUI.Components,
+			Sources:    c.Data.Sources,
 		}
-		return NewMulti(c.Initial, multi, build.Selection{}, th)
+		return tqscreen.NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, th)
 	}
-	return New(&c.Screen, c.Components, c.DataSources, th)
+	return tqscreen.New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, th)
 }

@@ -11,28 +11,28 @@ app:
   title: Styled Cells
   theme: nord
 
-components:
-  jobs:
-    type: table
-    title: Jobs
-    filterable: true
-    initial_sort: {column: When, desc: true}
-    columns:
-      - {title: ID,     width: 6,  sortable: true, sort: number, align: right}
-      - {title: Job,    width: 22, sortable: true}
-      - {title: Status, width: 12, sortable: true, align: center}
-      - {title: When,   width: 12, sortable: true, sort: si, align: right}
-      - {title: Link,   width: 14}
-    rows:
-      - [1, "build-frontend",  {value: PASS,    color: green},       "2m",  {label: logs, url: "https://ci.example.com/1"}]
-      - [2, "build-backend",   {value: PASS,    color: green},       "3m",  {label: logs, url: "https://ci.example.com/2"}]
-      - [3, "lint",            {value: WARN,    color: yellow},      "8m",  {label: logs, url: "https://ci.example.com/3"}]
-      - [4, "test-integration", {value: FAIL,    color: red},        "15m", {label: logs, url: "https://ci.example.com/4"}]
-      - [5, "deploy-staging",  {value: SKIPPED, color: gray},        "30m", {label: logs, url: "https://ci.example.com/5"}]
-      - [6, "smoke-test",      {value: PASS,    color: bright_green}, "1h", {label: logs, url: "https://ci.example.com/6"}]
-      - [7, "rollback",        {value: ERROR,   color: bright_red},   "2h", {label: logs, url: "https://ci.example.com/7"}]
-
-screen:
-  title: Pipeline
-  layout:
-    component: jobs
+tui:
+  components:
+    jobs:
+      type: table
+      title: Jobs
+      filterable: true
+      initial_sort: {column: When, desc: true}
+      columns:
+        - {title: ID,     width: 6,  sortable: true, sort: number, align: right}
+        - {title: Job,    width: 22, sortable: true}
+        - {title: Status, width: 12, sortable: true, align: center}
+        - {title: When,   width: 12, sortable: true, sort: si, align: right}
+        - {title: Link,   width: 14}
+      rows:
+        - [1, "build-frontend",  {value: PASS,    color: green},       "2m",  {label: logs, url: "https://ci.example.com/1"}]
+        - [2, "build-backend",   {value: PASS,    color: green},       "3m",  {label: logs, url: "https://ci.example.com/2"}]
+        - [3, "lint",            {value: WARN,    color: yellow},      "8m",  {label: logs, url: "https://ci.example.com/3"}]
+        - [4, "test-integration", {value: FAIL,    color: red},        "15m", {label: logs, url: "https://ci.example.com/4"}]
+        - [5, "deploy-staging",  {value: SKIPPED, color: gray},        "30m", {label: logs, url: "https://ci.example.com/5"}]
+        - [6, "smoke-test",      {value: PASS,    color: bright_green}, "1h", {label: logs, url: "https://ci.example.com/6"}]
+        - [7, "rollback",        {value: ERROR,   color: bright_red},   "2h", {label: logs, url: "https://ci.example.com/7"}]
+  screen:
+    title: Pipeline
+    layout:
+      component: jobs

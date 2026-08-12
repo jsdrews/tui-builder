@@ -2,6 +2,7 @@ package build
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/jsdrews/tuilib/pkg/inspector"
@@ -175,7 +176,81 @@ func ApplyData(c *Component, data any, th theme.Theme) {
 		applyInspector(c, data, th)
 	case KLogview:
 		applyLogview(c, data, th)
+	case KTree:
+		if c.Cfg.Source != "" {
+			applyTree(c, data, th)
+		}
+	case KTextview:
+		applyTextview(c, data)
 	}
+}
+
+// applyTextview coerces a source's response into a single string and
+// replaces the textview buffer via SetContent. Handles the shapes tui-
+// builder sources emit:
+//
+//   - string       — format:text bodies (kubectl describe / help pages
+//                    / raw markdown) pass through verbatim.
+//   - []byte       — same as string.
+//   - []any strings — joined with '\n' (matches logview's []any-of-string
+//                    convention so a source can back either).
+//   - anything else — fmt.Sprint fallback (rare; declared JSON should
+//                    prefer type: inspector auto).
+//
+// tuilib's textview handles its own word-wrap + search + scroll, so we
+// don't preprocess the string beyond turning it into a stringified
+// form. JSON marshalling with an indent falls out cleanly for maps
+// and mixed slices; string/[]byte sources short-circuit past that
+// path so a `format: text` exec keeps its raw output.
+func applyTextview(c *Component, data any) {
+	var s string
+	switch x := data.(type) {
+	case string:
+		s = x
+	case []byte:
+		s = string(x)
+	case []any:
+		if allStrings := allStringSlice(x); allStrings != nil {
+			// Matches logview's []any-of-strings convention so a source
+			// can back either component. Each element becomes a line.
+			s = strings.Join(allStrings, "\n")
+			break
+		}
+		s = jsonPretty(data)
+	default:
+		if data != nil {
+			s = jsonPretty(data)
+		}
+	}
+	c.Textview.SetContent(s)
+}
+
+// allStringSlice returns items as []string when every element is
+// already a string, or nil otherwise. Lets applyTextview keep the
+// "each string is a line" fast path without falsely stringifying
+// mixed-type slices.
+func allStringSlice(items []any) []string {
+	out := make([]string, len(items))
+	for i, v := range items {
+		s, ok := v.(string)
+		if !ok {
+			return nil
+		}
+		out[i] = s
+	}
+	return out
+}
+
+// jsonPretty marshals a value with 2-space indent for readable text-
+// view rendering. Falls back to fmt.Sprint on marshal failure (rare —
+// map[string]any / []any are always marshalable in practice). Used
+// for pipeline results whose shape is inherently structured.
+func jsonPretty(v any) string {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Sprint(v)
+	}
+	return string(b)
 }
 
 // applyLogview replaces the logview buffer with the data. Plain strings
@@ -228,8 +303,126 @@ func applyTable(c *Component, data any, th theme.Theme) {
 	c.Table.SetRows(rows)
 }
 
+// applyTree turns a source's response into a live tree via
+// tuilib.tree.SetRoot. Feature A from the tui-builder integration
+// batch — the "namespace → resource kind → resource name" pattern.
+//
+// Modes:
+//   - Cfg.Children set  → recursively walk each node's children by
+//     dot-path; produces a nested tree matching the source's own
+//     shape (filesystem walks, org charts, k8s ownerReferences).
+//   - Cfg.GroupBy empty → every item becomes a direct child of the
+//     root, labeled via Cfg.Label.
+//   - Cfg.GroupBy set   → items bucket by their GroupBy value; each
+//     bucket becomes a parent node whose label IS the bucket value,
+//     items land under it labeled via Cfg.Label. Bucket order is
+//     first-appearance so a stable API response yields a stable tree.
+//
+// The root's label matches sourceTreeRootLabel(cfg) — the same string
+// buildTree seeded so tuilib's expand state carries across refreshes.
+func applyTree(c *Component, data any, th theme.Theme) {
+	rules := c.Cfg.ColorRules
+	label := func(it any) string {
+		return applyColorRules(ds.FirstString(it, c.Cfg.Label), rules, th)
+	}
+	root := &yamlNode{label: sourceTreeRootLabel(c.Cfg)}
+	// Recursive-children mode. Two shapes:
+	//   - single map (one top-level node)  → use it AS root; the
+	//     synthetic wrapper would double up on the path (root "./" +
+	//     response "./cmd" → "././cmd"). ${cursor.path} needs the
+	//     labels to concatenate to a real string.
+	//   - []any of nodes (a forest)        → wrap in a synthetic root
+	//     labeled sourceTreeRootLabel(cfg) because a tree Node can't
+	//     have multiple roots.
+	if len(c.Cfg.Children) != 0 {
+		switch d := data.(type) {
+		case []any:
+			for _, top := range d {
+				if child := walkTreeNode(top, c.Cfg.Label, c.Cfg.Children, label); child != nil {
+					root.children = append(root.children, child)
+				}
+			}
+			c.Tree.SetRoot(root)
+		default:
+			single := walkTreeNode(data, c.Cfg.Label, c.Cfg.Children, label)
+			if single == nil {
+				single = root
+			}
+			c.Tree.SetRoot(single)
+		}
+		return
+	}
+	items := ds.Iter(data)
+	if len(c.Cfg.GroupBy) == 0 {
+		for _, it := range items {
+			root.children = append(root.children, &yamlNode{label: label(it)})
+		}
+		c.Tree.SetRoot(root)
+		return
+	}
+	// Bucket by GroupBy value. Preserve first-appearance order via a
+	// parallel slice; the map is just for lookup during the walk.
+	type bucket struct {
+		node *yamlNode
+	}
+	buckets := map[string]*bucket{}
+	var order []string
+	for _, it := range items {
+		key := ds.FirstString(it, c.Cfg.GroupBy)
+		b, ok := buckets[key]
+		if !ok {
+			b = &bucket{node: &yamlNode{label: key}}
+			buckets[key] = b
+			order = append(order, key)
+		}
+		b.node.children = append(b.node.children, &yamlNode{label: label(it)})
+	}
+	for _, k := range order {
+		root.children = append(root.children, buckets[k].node)
+	}
+	c.Tree.SetRoot(root)
+}
+
+// walkTreeNode recurses through a source-supplied nested structure,
+// building a yamlNode tree. label pulls the visible label off each
+// node (already color-wrapped by the caller); childrenPath picks the
+// child slice via the standard fallback-chain semantics. A node with
+// a missing or empty children value is a leaf. Returns nil on
+// nil / non-map input so callers can safely accumulate.
+func walkTreeNode(v any, labelPath, childrenPath cfg.Path, label func(any) string) *yamlNode {
+	if v == nil {
+		return nil
+	}
+	node := &yamlNode{label: label(v)}
+	var kids any
+	for _, p := range childrenPath {
+		if got := ds.Get(v, p); got != nil {
+			kids = got
+			break
+		}
+	}
+	for _, ch := range ds.Iter(kids) {
+		if sub := walkTreeNode(ch, labelPath, childrenPath, label); sub != nil {
+			node.children = append(node.children, sub)
+		}
+	}
+	return node
+}
+
 func applyInspector(c *Component, data any, th theme.Theme) {
-	c.Inspector.SetFields(buildInspectorFields(c.Cfg.Fields, data, th))
+	c.Inspector.SetFields(deriveInspectorFields(c.Cfg, data, th))
+}
+
+// deriveInspectorFields picks between the two field-generation modes.
+// Auto walks the fetched value via inspector.FromAny (feature B — dynamic
+// shape, C — nested rendering with no map[...] stringification). Declared
+// mode goes through buildInspectorFields which honors config-declared
+// labels + paths + color rules.
+func deriveInspectorFields(cfg *cfg.Component, data any, th theme.Theme) []inspector.Field {
+	if cfg.Auto {
+		return inspector.FromAny(data)
+	}
+	return buildInspectorFields(cfg.Fields, data, th)
 }
 
 // buildInspectorFields walks the config field tree, plucking each field's

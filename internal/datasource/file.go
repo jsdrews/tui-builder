@@ -26,7 +26,7 @@ type fileSource struct {
 	refresh time.Duration
 }
 
-func newFile(d *cfg.DataSource) (Source, error) {
+func newFile(d *cfg.Source) (Source, error) {
 	var refresh time.Duration
 	if d.Refresh != "" {
 		r, err := time.ParseDuration(d.Refresh)

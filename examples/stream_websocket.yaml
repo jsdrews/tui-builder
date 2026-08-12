@@ -31,34 +31,35 @@ app:
   title: Streaming websocket demo (live BTC trades)
   theme: nord
 
-data_sources:
-  trades:
-    type: websocket
-    url: wss://ws.bitstamp.net
-    timeout: 10s
-    initial_messages:
-      # bitstamp protocol: send a JSON subscribe frame to start the
-      # data flow. The server begins emitting trade events on the
-      # named channel immediately after.
-      - '{"event":"bts:subscribe","data":{"channel":"live_trades_btcusd"}}'
+data:
+  sources:
+    trades:
+      type: websocket
+      url: wss://ws.bitstamp.net
+      timeout: 10s
+      initial_messages:
+        # bitstamp protocol: send a JSON subscribe frame to start the
+        # data flow. The server begins emitting trade events on the
+        # named channel immediately after.
+        - '{"event":"bts:subscribe","data":{"channel":"live_trades_btcusd"}}'
 
-components:
-  feed:
-    type: logview
-    title: Live BTC/USD trades
-    searchable: true
-    source: trades
-    color_rules:
-      # The synthetic "(connecting…)" / "(connected…)" diagnostic lines
-      # in a calm color so they don't visually compete with real data.
-      - {when: "~^\\(",                       color: theme:muted}
-      # Buy-side / sell-side coloring via regex on the JSON payload.
-      # bitstamp emits `"type":0` for buys and `"type":1` for sells.
-      - {when: '~"type":\s*0',                color: green}
-      - {when: '~"type":\s*1',                color: red}
-      - {when: "~bts:subscription_succeeded", color: theme:accent}
-
-screen:
-  title: Feed
-  layout:
-    component: feed
+tui:
+  components:
+    feed:
+      type: logview
+      title: Live BTC/USD trades
+      searchable: true
+      source: trades
+      color_rules:
+        # The synthetic "(connecting…)" / "(connected…)" diagnostic lines
+        # in a calm color so they don't visually compete with real data.
+        - {when: "~^\\(",                       color: theme:muted}
+        # Buy-side / sell-side coloring via regex on the JSON payload.
+        # bitstamp emits `"type":0` for buys and `"type":1` for sells.
+        - {when: '~"type":\s*0',                color: green}
+        - {when: '~"type":\s*1',                color: red}
+        - {when: "~bts:subscription_succeeded", color: theme:accent}
+  screen:
+    title: Feed
+    layout:
+      component: feed

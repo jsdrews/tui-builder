@@ -15,95 +15,95 @@ app:
   title: GitHub Explorer
   theme: nord
 
-data_sources:
-  repos:
-    type: http
-    url: https://api.github.com/users/${selection}/repos?sort=updated&per_page=50
-    refresh: 5m
-    timeout: 15s
-    headers:
-      Accept: application/vnd.github+json
-  repo_detail:
-    type: http
-    url: https://api.github.com/repos/${selection.Repo}
-    refresh: 5m
-    timeout: 15s
-    headers:
-      Accept: application/vnd.github+json
+data:
+  sources:
+    repos:
+      type: http
+      url: https://api.github.com/users/${selection}/repos?sort=updated&per_page=50
+      refresh: 5m
+      timeout: 15s
+      headers:
+        Accept: application/vnd.github+json
+    repo_detail:
+      type: http
+      url: https://api.github.com/repos/${selection.Repo}
+      refresh: 5m
+      timeout: 15s
+      headers:
+        Accept: application/vnd.github+json
 
-components:
-  users:
-    type: list
-    title: GitHub users
-    filterable: true
-    items:
-      - torvalds
-      - golang
-      - charmbracelet
-      - jsdrews
-      - kubernetes
-      - hashicorp
+tui:
+  components:
+    users:
+      type: list
+      title: GitHub users
+      filterable: true
+      items:
+        - torvalds
+        - golang
+        - charmbracelet
+        - jsdrews
+        - kubernetes
+        - hashicorp
 
-  repos_table:
-    type: table
-    title: ${selection}'s repos
-    filterable: true
-    source: repos
-    initial_sort: {column: Stars, desc: true}
-    columns:
-      - {title: Repo,        width: 32, sortable: true, value: full_name}
-      - {title: Language,    width: 14, sortable: true, value: language}
-      - {title: Stars,       width: 8,  sortable: true, sort: number, align: right, value: stargazers_count}
-      - {title: Forks,       width: 8,  sortable: true, sort: number, align: right, value: forks_count}
-      - {title: Updated,     width: 22, sortable: true, value: updated_at}
-      - {title: Description, width: 40, value: description}
+    repos_table:
+      type: table
+      title: ${selection}'s repos
+      filterable: true
+      source: repos
+      initial_sort: {column: Stars, desc: true}
+      columns:
+        - {title: Repo,        width: 32, sortable: true, value: full_name}
+        - {title: Language,    width: 14, sortable: true, value: language}
+        - {title: Stars,       width: 8,  sortable: true, sort: number, align: right, value: stargazers_count}
+        - {title: Forks,       width: 8,  sortable: true, sort: number, align: right, value: forks_count}
+        - {title: Updated,     width: 22, sortable: true, value: updated_at}
+        - {title: Description, width: 40, value: description}
 
-  repo_inspector:
-    type: inspector
-    title: ${selection.Repo}
-    filterable: true
-    initial_depth: 2
-    source: repo_detail
-    fields:
-      - {label: Full name,  path: full_name}
-      - {label: Description, path: description}
-      - {label: Homepage,   path: homepage}
-      - {label: Language,   path: language}
-      - {label: License,    path: "license.spdx_id"}
-      - {label: Default branch, path: default_branch}
-      - label: Stats
-        children:
-          - {label: Stars,       path: stargazers_count}
-          - {label: Watchers,    path: subscribers_count}
-          - {label: Forks,       path: forks_count}
-          - {label: Open issues, path: open_issues_count}
-          - {label: Size (KB),   path: size}
-      - label: Timestamps
-        children:
-          - {label: Created,  path: created_at}
-          - {label: Updated,  path: updated_at}
-          - {label: Pushed,   path: pushed_at}
-      - label: Owner
-        children:
-          - {label: Login,    path: "owner.login"}
-          - {label: Type,     path: "owner.type"}
-          - {label: HTML URL, path: "owner.html_url"}
+    repo_inspector:
+      type: inspector
+      title: ${selection.Repo}
+      filterable: true
+      initial_depth: 2
+      source: repo_detail
+      fields:
+        - {label: Full name,  path: full_name}
+        - {label: Description, path: description}
+        - {label: Homepage,   path: homepage}
+        - {label: Language,   path: language}
+        - {label: License,    path: "license.spdx_id"}
+        - {label: Default branch, path: default_branch}
+        - label: Stats
+          children:
+            - {label: Stars,       path: stargazers_count}
+            - {label: Watchers,    path: subscribers_count}
+            - {label: Forks,       path: forks_count}
+            - {label: Open issues, path: open_issues_count}
+            - {label: Size (KB),   path: size}
+        - label: Timestamps
+          children:
+            - {label: Created,  path: created_at}
+            - {label: Updated,  path: updated_at}
+            - {label: Pushed,   path: pushed_at}
+        - label: Owner
+          children:
+            - {label: Login,    path: "owner.login"}
+            - {label: Type,     path: "owner.type"}
+            - {label: HTML URL, path: "owner.html_url"}
+  screens:
+    users:
+      title: Users
+      layout: {component: users}
+      on_key:
+        - {source: users, push: repos, key: enter}
 
-screens:
-  users:
-    title: Users
-    layout: {component: users}
-    on_enter:
-      - {source: users, push: repos}
+    repos:
+      title: ${selection}
+      layout: {component: repos_table}
+      on_key:
+        - {source: repos_table, push: detail, key: enter}
 
-  repos:
-    title: ${selection}
-    layout: {component: repos_table}
-    on_enter:
-      - {source: repos_table, push: detail}
-
-  detail:
-    title: ${selection.Repo}
-    layout: {component: repo_inspector}
-
-initial: users
+    detail:
+      title: ${selection.Repo}
+      layout: {component: repo_inspector}
+  initial: users
