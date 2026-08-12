@@ -24,10 +24,8 @@
 #   brew install tree     # macOS
 #   apt install tree      # Debian/Ubuntu
 #
-# stat format is BSD-flavoured (macOS default). Linux `stat` uses a
-# different format-string flag — swap the command below for GNU:
-#   stat --printf='{"path":"%n","size":%s,"mode":"%A","owner":"%U",
-#                   "group":"%G","modified":"%y","kind":""}'
+# Runs on macOS and Linux: the stat command below picks its format flag
+# from `uname`, because BSD and GNU stat disagree about what `-f` means.
 #
 # Try it:
 #   task tui-builder -- examples/on_cursor_fs.yaml
@@ -50,17 +48,29 @@ data:
       type: exec
       parameters:
         path: {type: string, default: ".", description: filesystem path from the tree cursor}
-      # stat -f with a printf-style format that assembles a valid JSON
+      # stat with a printf-style format that assembles a valid JSON
       # object on stdout. format: json parses that into a map so the
       # bound inspector renders each key as a labeled row.
       #
+      # The sh wrapper is here for one reason: BSD and GNU stat share no
+      # format flag. `-f` is "use this format" on macOS and
+      # "--file-system" on Linux, where the format string is then read as
+      # a filename — the command fails with output that isn't JSON, and
+      # the inspector silently renders empty. One argv cannot serve both,
+      # so branch on uname.
+      #
       # ${params.path} is substituted into the argv AT PIPELINE.BUILD
-      # TIME (see pipeline.Build's leaf branch) — no shell wrapper
-      # needed, no env plumbing.
+      # TIME (see pipeline.Build's leaf branch), so it arrives as $0 —
+      # still no env plumbing, and no quoting of the path into the script.
       command:
-        - stat
-        - -f
-        - '{"path":"%N","size":%z,"mode":"%Sp","owner":"%Su","group":"%Sg","modified":"%Sm","kind":"%HT"}'
+        - sh
+        - -c
+        - |
+          if [ "$(uname)" = Darwin ]; then
+            stat -f '{"path":"%N","size":%z,"mode":"%Sp","owner":"%Su","group":"%Sg","modified":"%Sm","kind":"%HT"}' "$0"
+          else
+            stat --printf='{"path":"%n","size":%s,"mode":"%A","owner":"%U","group":"%G","modified":"%y","kind":"%F"}' "$0"
+          fi
         - ${params.path}
       format: json
       cache:
