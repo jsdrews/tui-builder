@@ -10,6 +10,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,6 +18,7 @@ import (
 	"github.com/jsdrews/tuilib/pkg/app"
 	"github.com/jsdrews/tuilib/pkg/form"
 	"github.com/jsdrews/tuilib/pkg/geom"
+	"github.com/jsdrews/tuilib/pkg/mouse"
 	tscreen "github.com/jsdrews/tuilib/pkg/screen"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
@@ -84,6 +86,13 @@ func run() error {
 			Themes:      themes,
 			Version:     c.App.Version,
 			HelpVerbose: c.App.HelpVerbose,
+			// Every component we build (list / table / tree / logview /
+			// inspector / textview) hit-tests mouse events against its
+			// own rect, so clicking is uniformly useful. The cost is the
+			// terminal's native click-drag text selection, which mouse
+			// reporting takes over — hold shift (or alt on iTerm2) to get
+			// it back for a copy.
+			Mouse: app.MouseClick,
 		}),
 		tea.WithAltScreen(),
 	)
@@ -134,8 +143,11 @@ func collectAppPrompts(prompts []cfg.Prompt, th theme.Theme) error {
 		}
 	}
 
-	m := &promptModel{form: form.New(th.Form().With(fields))}
-	prog := tea.NewProgram(m, tea.WithAltScreen())
+	m := &promptModel{
+		form:  form.New(th.Form().With(fields)),
+		mouse: mouse.NewTracker(0),
+	}
+	prog := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := prog.Run(); err != nil {
 		return err
 	}
@@ -167,8 +179,13 @@ func stringify(v any) string {
 // It exists only long enough to render the form, capture submit /
 // cancel, and exit.
 type promptModel struct {
-	form      form.Model
-	w, h      int
+	form form.Model
+	w, h int
+	// This form is its own tea program rather than a screen in the app
+	// shell, so nothing upstream resolves raw events into mouse.Msg —
+	// it keeps its own tracker to do the click-count bookkeeping the
+	// shell would otherwise do.
+	mouse     mouse.Tracker
 	values    map[string]any
 	cancelled bool
 }
@@ -186,6 +203,8 @@ func (m *promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case form.CancelledMsg:
 		m.cancelled = true
 		return m, tea.Quit
+	case tea.MouseMsg:
+		msg = m.mouse.Track(x, time.Now())
 	}
 	next, cmd := m.form.Update(msg)
 	m.form = next

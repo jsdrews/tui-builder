@@ -381,9 +381,11 @@ sub-screens behind one tab strip). Steps in order:
    `NewComponent`, the case in `Rebuild`.
 3. **Layout wrapper.** Add the case in `componentNode` in
    `internal/build/layout.go`.
-4. **Screen fanout.** Add cases in `screen.setFocused`,
+4. **Screen fanout.** Add cases in `screen.focusableOf`,
    `componentCapturing`, `componentHelp`, `updateComponent`. These are
-   the four places that mention every component Kind.
+   the four places that mention every component Kind. (`focusableOf`
+   feeds both `setFocused` and the click-to-focus matching, so the
+   new kind gets keyboard focus and mouse focus from the one case.)
 5. **Data binding (if applicable).** If the new component takes data,
    add a case in `build.ApplyData` and a matching apply function.
 6. **Example.** `examples/<kind>.yaml` demonstrating the smallest

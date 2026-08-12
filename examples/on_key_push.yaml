@@ -18,11 +18,21 @@
 # This demo uses the same GitHub users → repo drilldown as the vanilla
 # http example but exposes TWO push targets on the same list:
 #
-#   enter → repo table (all this user's public repos)
-#   s     → starred (what THIS user has starred)
+#   users  enter → repo table (all this user's public repos)
+#          s     → starred (what THIS user has starred)
+#   repos  enter → repo detail (inspector over one repo)
 #
 # Both destinations bind `${selection}` = the focused login into their
 # parameterized source, so the same list feeds two different views.
+#
+# The third level shows how far a binding can reach: each push binds
+# only from the component the CURRENT screen displays. By the time you
+# are on the repos table the login is gone, so repo_detail is keyed by
+# the `owner/repo` slug that the table itself carries in a column. If a
+# child needs a value, the parent has to show it.
+#
+# A double click on a row is the mouse spelling of enter, so both
+# drilldowns work from the mouse too.
 app:
   title: GitHub (key pushes)
   theme: nord
@@ -51,6 +61,18 @@ data:
       refresh: 10m
       timeout: 15s
 
+    # Third level. Parameterized by the full `owner/repo` slug rather
+    # than a bare name because the repo endpoint needs both halves, and
+    # the repos table already has the slug in a column — a push can only
+    # bind what its source component displays.
+    repo_detail:
+      type: http
+      parameters:
+        full_name: {type: string, required: true, description: "owner/repo slug"}
+      url:     https://api.github.com/repos/${params.full_name}
+      refresh: 10m
+      timeout: 15s
+
 tui:
   components:
     users_list:
@@ -67,7 +89,9 @@ tui:
       source: repos_by_user
       initial_sort: {column: Stars, desc: true}
       columns:
-        - {title: Name,     width: 30, sortable: true,                       value: name}
+        # full_name, not name: this column is what `enter` binds into
+        # repo_detail's `full_name` param, and the API wants owner/repo.
+        - {title: Repo,     width: 32, sortable: true,                       value: full_name}
         - {title: Language, width: 14, sortable: true,                       value: language}
         - {title: Stars,    width: 8,  sortable: true, sort: number, align: right, value: stargazers_count}
         - {title: Updated,  width: 22, sortable: true,                       value: updated_at}
@@ -82,6 +106,31 @@ tui:
         - {title: Repo,     width: 40, sortable: true,                       value: full_name}
         - {title: Language, width: 14, sortable: true,                       value: language}
         - {title: Stars,    width: 8,  sortable: true, sort: number, align: right, value: stargazers_count}
+
+    repo_inspector:
+      type: inspector
+      title: ${selection.Repo}
+      filterable: true
+      initial_depth: 2
+      source: repo_detail
+      auto: true
+      #      fields:
+      #        - {label: Full name,      path: full_name}
+      #        - {label: Description,    path: description}
+      #        - {label: Homepage,       path: homepage}
+      #        - {label: Language,       path: language}
+      #        - {label: License,        path: "license.spdx_id"}
+      #        - {label: Default branch, path: default_branch}
+      #        - label: Stats
+      #          children:
+      #            - {label: Stars,       path: stargazers_count}
+      #            - {label: Forks,       path: forks_count}
+      #            - {label: Open issues, path: open_issues_count}
+      #        - label: Timestamps
+      #          children:
+      #            - {label: Created, path: created_at}
+      #            - {label: Updated, path: updated_at}
+      #            - {label: Pushed,  path: pushed_at}
 
   screens:
     users:
@@ -105,9 +154,23 @@ tui:
     repos:
       title: ${selection} — repos
       layout: {component: repos_table}
+      on_key:
+        # Third level: enter on a repo row opens its detail. Each screen
+        # binds only from the row IT shows — the login picked two screens
+        # back is long out of scope here, which is why the slug travels
+        # in the Repo column rather than being reassembled from parts.
+        - source: repos_table
+          push:   repo_detail
+          key:    enter
+          bind:
+            full_name: ${selection.Repo}
 
     starred:
       title: ${selection} — starred
       layout: {component: starred_table}
+
+    repo_detail:
+      title: ${selection.Repo}
+      layout: {component: repo_inspector}
 
   initial: users

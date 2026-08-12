@@ -52,6 +52,10 @@ func run() error {
 		app.New(app.Options{
 			Root:   root,
 			Themes: themes,
+			// Match tui-builder: the launcher pushes the same screens, so
+			// mouse must be on here too or clicking would work only for
+			// configs opened directly.
+			Mouse: app.MouseClick,
 		}),
 		tea.WithAltScreen(),
 	)

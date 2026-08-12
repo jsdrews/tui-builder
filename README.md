@@ -146,6 +146,12 @@ bin/tui-builder hello.yaml
 That's it — `tab` cycles focus, `/` filters, `[`/`]`/`s` step the sort
 column, `q` quits, `t` cycles themes.
 
+The mouse works too: click a pane to focus it, click a row to move its
+cursor, scroll with the wheel, and double-click a row for `enter` — the
+same `on_key: {key: enter}` push or `enter` action the keyboard fires.
+Mouse reporting takes over the terminal's own click-drag text selection —
+hold `shift` (or `alt` in iTerm2) while dragging to select text for a copy.
+
 ## Tour by feature
 
 ### Data sources

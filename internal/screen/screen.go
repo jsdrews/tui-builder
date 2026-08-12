@@ -451,7 +451,7 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 			m.cycleFocus(-1)
 			return m, nil
 		case "enter":
-			if cmd, handled := m.tryPush("enter"); handled {
+			if cmd, handled := m.activate(); handled {
 				return m, cmd
 			}
 		default:
@@ -512,6 +512,41 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		return m, m.actionOutcome(captured, x.Err)
 	case nonInteractiveResult:
 		return m, m.actionOutcome(strings.TrimSpace(x.stderr), x.err)
+	case list.ActivatedMsg, table.ActivatedMsg:
+		// A double click is the mouse spelling of enter. The message names
+		// its sender by token, so we activate the component that was
+		// double-clicked rather than m.focus — the focus request the same
+		// click emitted rides in the same batch, and batched cmds have no
+		// ordering guarantee.
+		for i, c := range m.tree.All() {
+			if !componentActivated(c, msg) {
+				continue
+			}
+			if i != m.focus {
+				m.focus = i
+				m.applyFocus()
+			}
+			if cmd, handled := m.activate(); handled {
+				return m, cmd
+			}
+			break
+		}
+		return m, nil
+	case focus.RequestMsg:
+		// A component emits this when a click lands inside its rect. Without
+		// honouring it the clicked pane moves its own cursor while the
+		// keyboard keeps driving the previously focused one — two panes look
+		// active at once.
+		for i, c := range m.tree.All() {
+			if focusRequested(c, x) {
+				if i != m.focus {
+					m.focus = i
+					m.applyFocus()
+				}
+				break
+			}
+		}
+		return m, nil
 	}
 
 	var cmds []tea.Cmd
@@ -734,22 +769,29 @@ func (m *Model) applyFocus() {
 	}
 }
 
-func setFocused(c *build.Component, on bool) {
-	var f focus.Focusable
+// focusableOf returns the component's tuilib focus handle, or nil for
+// kinds that take no focus.
+func focusableOf(c *build.Component) focus.Focusable {
 	switch c.Kind {
 	case build.KList:
-		f = c.List
+		return c.List
 	case build.KTable:
-		f = c.Table
+		return c.Table
 	case build.KLogview:
-		f = c.Logview
+		return c.Logview
 	case build.KTree:
-		f = c.Tree
+		return c.Tree
 	case build.KInspector:
-		f = c.Inspector
+		return c.Inspector
 	case build.KTextview:
-		f = c.Textview
-	default:
+		return c.Textview
+	}
+	return nil
+}
+
+func setFocused(c *build.Component, on bool) {
+	f := focusableOf(c)
+	if f == nil {
 		return
 	}
 	// Focus returns a cursor-blink cmd for components that have one; none
@@ -759,6 +801,30 @@ func setFocused(c *build.Component, on bool) {
 		return
 	}
 	f.Blur()
+}
+
+// focusRequested reports whether req names c. A clicked component asks for
+// focus by token (it can't name its own address — see focus.Token); a
+// caller holding the component names it by address.
+//
+// This mirrors focus.Group's matching. We can't use a Group directly: this
+// screen's focus index also drives on_cursor tagging, action dispatch, and
+// help text, so the index stays the source of truth and requests are
+// translated into it.
+func focusRequested(c *build.Component, req focus.RequestMsg) bool {
+	f := focusableOf(c)
+	if f == nil {
+		return false
+	}
+	if req.Target != nil && f == req.Target {
+		return true
+	}
+	if req.Token != nil {
+		if id, ok := f.(focus.Identified); ok && id.FocusToken() == req.Token {
+			return true
+		}
+	}
+	return false
 }
 
 func componentCapturing(c *build.Component) bool {
@@ -1034,6 +1100,36 @@ func (m *Model) newAlertModal(title, message string) alert.Model {
 	opts.ActiveColor = m.th.ErrorBG
 	opts.Autosize = true
 	return alert.New(opts)
+}
+
+// activate runs the "open the selection" verb against the focused
+// component: an on_key binding for enter first, then an action bound to
+// enter. Keyboard enter and a double click both route through here so the
+// two spellings of the same verb can't drift apart.
+//
+// Push-before-action matches the ordering the other keys use in Update.
+func (m *Model) activate() (tea.Cmd, bool) {
+	if cmd, handled := m.tryPush("enter"); handled {
+		return cmd, true
+	}
+	return m.tryAction(tea.KeyMsg{Type: tea.KeyEnter})
+}
+
+// componentActivated reports whether msg is c's own activation. Only lists
+// and tables emit one, which is also all the validator allows as an on_key
+// or action source.
+//
+// Call this only for ActivatedMsg: tuilib's IsActivate also answers true for
+// a plain enter KeyMsg regardless of which component it belongs to, and the
+// keyboard path already resolves that through m.focus.
+func componentActivated(c *build.Component, msg tea.Msg) bool {
+	switch c.Kind {
+	case build.KList:
+		return c.List.IsActivate(msg)
+	case build.KTable:
+		return c.Table.IsActivate(msg)
+	}
+	return false
 }
 
 // tryPush handles a key that the focused component has an on_key
