@@ -20,20 +20,23 @@
 app:
   title: GitHub by user
   theme: nord
+  # Boot prompts share the Parameter vocabulary with action inputs, so
+  # the widget follows the data type: options: means select, type: bool
+  # means toggle, everything else is text. `default:` is the starting
+  # value for all three (name the option by value, not by index).
   prompts:
     - key:   USER
       label: GitHub username
       placeholder: torvalds
-      initial: torvalds
+      default: torvalds
     - key:   SORT
       label: Sort by
-      type:  select
       options: [updated, created, pushed, full_name]
-      initial_index: 0
+      default: updated
     - key:   ARCHIVED
       label: Include archived repos?
-      type:  confirm
-      initial_bool: false
+      type:  bool
+      default: "false"
 
 data:
   sources:

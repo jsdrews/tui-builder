@@ -293,55 +293,45 @@ tui:
           bind:
             namespace: ${selection.Namespace}
             name:      ${selection.Name}
-      # Actions: while focused on the pods table, these keys dispatch a
-      # subprocess via tuilib's pkg/runner. The TUI suspends, the
-      # subprocess gets the TTY, and we resume on exit. ${selection.Col}
-      # resolves to the focused row's cell.
+      # Actions: each key binds to a NAMED action from the top-level
+      # `actions:` block. The binding owns the TUI-side concerns — which
+      # key, which pane's row feeds it (`from:`), whether to confirm —
+      # while the action itself owns what actually runs.
+      #
+      # `from:` is required here only because the bind templates read
+      # ${selection.*}. An action needing no row would omit it, and its
+      # key would then fire regardless of which pane holds focus.
       actions:
         - key: x
+          action: pod_shell
           label: exec
-          source: pods_table
-          # `confirm:` prompts a yes/no modal before dispatch. ${selection.*}
-          # substitutes here too, so the message names the pod you're about
-          # to drop into.
+          from: pods_table
+          interactive: true
+          # `confirm:` prompts a yes/no modal before dispatch. This is the
+          # only blocking interrupt left in the flow — deliberately a
+          # pre-action gate, since the moment to stop someone is before
+          # the delete, not after.
           confirm: "Open an interactive shell in ${selection.Name} (${selection.Namespace})?"
           notice: "connecting…"
-          run:
-            - kubectl
-            - --context
-            - kind-tui-builder
-            - exec
-            - -it
-            - -n
-            - ${selection.Namespace}
-            - ${selection.Name}
-            - --
-            - sh
+          bind:
+            namespace: ${selection.Namespace}
+            name:      ${selection.Name}
         - key: d
+          action: pod_describe
           label: describe
-          source: pods_table
-          run:
-            - sh
-            - -c
-            - "kubectl --context kind-tui-builder describe -n ${selection.Namespace} pod ${selection.Name} | ${PAGER:-less} -R"
+          from: pods_table
+          interactive: true
+          bind:
+            namespace: ${selection.Namespace}
+            name:      ${selection.Name}
         - key: D
+          action: pod_delete
           label: delete
-          source: pods_table
-          # `interactive: false` runs kubectl in a goroutine, captures
-          # stdout/stderr, and never suspends the alt-screen — no flicker.
-          # On error the captured stderr is shown in the modal alert; on
-          # success the statusbar reports "action complete."
-          interactive: false
+          from: pods_table
           confirm: "Delete pod ${selection.Name} in ${selection.Namespace}? This cannot be undone."
-          run:
-            - kubectl
-            - --context
-            - kind-tui-builder
-            - delete
-            - -n
-            - ${selection.Namespace}
-            - pod
-            - ${selection.Name}
+          bind:
+            namespace: ${selection.Namespace}
+            name:      ${selection.Name}
 
     detail:
       title: ${selection.Name}
@@ -350,3 +340,64 @@ tui:
           - {flex: 2, component: pod_inspector}
           - {flex: 3, component: pod_logs_view}
   initial: namespaces
+
+# Actions — the write side, peer to `data.sources:` rather than an entry
+# in it. That separation is a safety property: sources get re-fetched on
+# a timer and on manual `r`, and "re-fetch" must never come to mean
+# "delete the pod again."
+#
+# Each action declares typed `inputs:` and refers to them as
+# ${inputs.<name>}. It never mentions ${selection.*} — mapping a focused
+# row onto inputs is the binding's job, which is what lets the same
+# action be bound from several screens.
+#
+# Inspect them without a TTY:
+#   wrangl --list-actions examples/kube.yaml
+#   wrangl --describe-action examples/kube.yaml pod_delete \
+#     --param namespace=default --param name=nginx-abc
+actions:
+  pod_shell:
+    description: Open an interactive shell in a pod
+    inputs:
+      namespace: {type: string, required: true}
+      name:      {type: string, required: true}
+    run:
+      - kubectl
+      - --context
+      - kind-tui-builder
+      - exec
+      - -it
+      - -n
+      - ${inputs.namespace}
+      - ${inputs.name}
+      - --
+      - sh
+
+  pod_describe:
+    description: kubectl describe, piped through a pager
+    inputs:
+      namespace: {type: string, required: true}
+      name:      {type: string, required: true}
+    run:
+      - sh
+      - -c
+      - "kubectl --context kind-tui-builder describe -n ${inputs.namespace} pod ${inputs.name} | ${PAGER:-less} -R"
+
+  pod_delete:
+    description: Delete a pod
+    inputs:
+      namespace: {type: string, required: true}
+      name:      {type: string, required: true}
+    # No `interactive:` on the binding, so this captures instead of
+    # handing over the terminal: kubectl's output streams line by line
+    # into the output console (`o`) with no alt-screen flicker.
+    run:
+      - kubectl
+      - --context
+      - kind-tui-builder
+      - delete
+      - -n
+      - ${inputs.namespace}
+      - pod
+      - ${inputs.name}
+    message: "deleted ${inputs.name}"

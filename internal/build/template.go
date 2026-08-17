@@ -25,15 +25,15 @@ type Selection struct {
 	Columns []string
 }
 
-// SubstituteAll runs ${selection.*}/${env.*}/${prompt.*} substitution
+// SubstituteAll runs ${selection.*}/${env.*}/${inputs.*} substitution
 // on every entry in argv and returns a new slice. Used by action
 // dispatch — the run argv references the focused row's selection AND
-// any prompt values entered moments before dispatch. Pass nil for
-// prompts when there were none.
-func SubstituteAll(argv []string, sel Selection, prompts map[string]string) []string {
+// any input values bound or entered moments before dispatch. Pass nil
+// for inputs when there are none.
+func SubstituteAll(argv []string, sel Selection, inputs map[string]string) []string {
 	out := make([]string, len(argv))
 	for i, s := range argv {
-		out[i] = substituteAll(s, sel, prompts)
+		out[i] = substituteAll(s, sel, inputs)
 	}
 	return out
 }
@@ -166,7 +166,6 @@ func walkUsed(n *cfg.Node, components map[string]*cfg.Component, used map[string
 	}
 }
 
-
 func cloneComponent(c *cfg.Component, sel Selection) *cfg.Component {
 	if c == nil {
 		return nil
@@ -276,31 +275,33 @@ func substituteCell(v any, sel Selection) any {
 //	                          component. Refetches when the cursor moves.
 //	${cursor.SUFFIX}        — same, indexed like selection
 //	${env.NAME}             — os.Getenv("NAME") (empty when unset)
-//	${prompt.KEY}           — value collected from a form prompt at action-fire time
+//	${inputs.KEY}           — an action input, resolved at action-fire time:
+//	                          bound at the call site or collected in the
+//	                          generated form
 //
 // The first capture group is the namespace; the second is the optional suffix.
-var tokenRe = regexp.MustCompile(`\$\{(selection|cursor|env|prompt)(?:\.([A-Za-z0-9_]+))?\}`)
+var tokenRe = regexp.MustCompile(`\$\{(selection|cursor|env|inputs)(?:\.([A-Za-z0-9_]+))?\}`)
 
 func substitute(s string, sel Selection) string {
 	return substituteAll(s, sel, nil)
 }
 
-// substituteAll is the general form — sel for ${selection.*}, prompts
-// for ${prompt.*}. Either map can be nil. Cursor is unresolved via
+// substituteAll is the general form — sel for ${selection.*}, inputs
+// for ${inputs.*}. Either map can be nil. Cursor is unresolved via
 // this path (push-time substitution freezes selection; cursor stays
 // live for its own resolver).
-func substituteAll(s string, sel Selection, prompts map[string]string) string {
+func substituteAll(s string, sel Selection, inputs map[string]string) string {
 	if s == "" || !strings.Contains(s, "${") {
 		return s
 	}
 	return tokenRe.ReplaceAllStringFunc(s, func(match string) string {
 		groups := tokenRe.FindStringSubmatch(match)
-		return resolveToken(groups[1], groups[2], sel, Selection{}, prompts)
+		return resolveToken(groups[1], groups[2], sel, Selection{}, inputs)
 	})
 }
 
 // SubstituteCursor resolves both ${cursor.*} (against the live cursor
-// Selection) AND every other namespace (env, prompt-less) so a cursor
+// Selection) AND every other namespace (env, input-less) so a cursor
 // bind template like `${cursor.Name}-${env.CLUSTER}` composes cleanly.
 // Selection tokens pass through as literals — this is the runtime
 // path, not the push-time one, and no push-site sel is in scope.
@@ -314,7 +315,7 @@ func SubstituteCursor(s string, cursor Selection) string {
 	})
 }
 
-func resolveToken(namespace, key string, sel, cursor Selection, prompts map[string]string) string {
+func resolveToken(namespace, key string, sel, cursor Selection, inputs map[string]string) string {
 	switch namespace {
 	case "selection":
 		return resolveSelection(key, sel)
@@ -322,11 +323,11 @@ func resolveToken(namespace, key string, sel, cursor Selection, prompts map[stri
 		return resolveCursor(key, cursor)
 	case "env":
 		return os.Getenv(key)
-	case "prompt":
+	case "inputs":
 		if key == "" {
 			return ""
 		}
-		return prompts[key]
+		return inputs[key]
 	}
 	return ""
 }

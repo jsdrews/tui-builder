@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
@@ -50,17 +51,20 @@ func podsWithDeleteConfig(marker string) *cfg.Config {
 			},
 			Screen: cfg.Screen{
 				Layout: cfg.Node{Component: "pods_table"},
-				Actions: []cfg.Action{
+				Actions: []cfg.ActionBinding{
 					{
 						Key:         "D",
+						Action:      "delete_pod",
 						Label:       "delete",
-						Source:      "pods_table",
+						From:        "pods_table",
 						Interactive: &no,
 						Confirm:     "Delete pod ${selection.Name} in ${selection.Namespace}? This cannot be undone.",
-						Run:         []string{"sh", "-c", "touch " + marker},
 					},
 				},
 			},
+		},
+		Actions: map[string]*cfg.Action{
+			"delete_pod": {Run: []string{"sh", "-c", "touch " + marker}},
 		},
 	}
 }
@@ -124,9 +128,25 @@ func TestActionConfirm_YesDispatches(t *testing.T) {
 	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
 	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 
-	if _, err := os.Stat(marker); err != nil {
-		t.Errorf("delete dispatch did not run the command; marker missing: %v", err)
+	// Non-interactive dispatch goes through runner.CaptureWith, which
+	// Start()s the process and returns CaptureStarted immediately so its
+	// output can stream into the console. The subprocess therefore
+	// outlives the message pump — poll rather than assuming it finished.
+	waitForFile(t, marker)
+}
+
+// waitForFile blocks until path exists or the deadline passes. Used for
+// asserting that an async (captured) dispatch actually ran.
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+	t.Errorf("dispatch did not run the command; marker never appeared: %s", path)
 }
 
 // TestActionConfirm_EnterDefaultsToNo documents the safe default: with the

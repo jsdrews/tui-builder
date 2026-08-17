@@ -62,6 +62,16 @@ tui-builder has two halves, split by what they do with the same config:
   it for `where:`, `keep:`, `compute:`, `by:`, and join `on:`. A
   small set of built-ins (`now`, `parseTime`, `lower`, `upper`)
   layers on top of the library's natives.
+- **`internal/action`** is the **write** side, and the newest package.
+  Turns a `cfg.Action` + input values into something concrete
+  (`Resolve` → argv or HTTP request) and normalises the outcome into one
+  `Result` (exit status vs HTTP status, `success:` / `message:` /
+  `error_message:`). It deliberately does NOT run exec actions: the TUI
+  runs those through tuilib's `runner.CaptureWith` so output streams into
+  the console, and that lives on the far side of the boundary. Actions
+  are a peer of `data.sources:`, never an entry in it — sources get
+  re-polled on a timer and on `r`, and "re-fetch" must never come to mean
+  "delete the pod again."
 - **`internal/output`** is the JSON / NDJSON stdout sink used by
   `wrangl`. One-shot sources emit one JSON value; streams emit
   NDJSON. `--raw` mode skips JSON encoding for plain-text values.
@@ -87,9 +97,10 @@ selection.
 
 ### Hard rule: the data layer never imports the TUI
 
-The five packages above the dotted line —
-`internal/datasource`, `internal/pipeline`, `internal/output`,
-`internal/config`, `cmd/wrangl` — MUST NOT import
+The packages above the dotted line —
+`internal/datasource`, `internal/pipeline`, `internal/action`,
+`internal/output`, `internal/config`, `internal/expr`, `cmd/wrangl` —
+MUST NOT import
 `internal/screen`, `internal/build`, or any `tuilib` package. This
 is enforced in CI by `scripts/check-data-layer-boundary.sh`
 (walks `go list -deps` for each data-layer package).
@@ -516,6 +527,27 @@ These are real foot-guns we've hit. Don't repeat them.
   did `Get(msg.data, entry.root)` after fetch — broke merge because
   children's roots never applied. Fixed by moving root into `Fetch`.
   Don't move it back out.
+- **Hand-rolling subprocess capture.** `dispatch()` used to run
+  non-interactive actions via `cmd.Run()` into two `bytes.Buffer`s. That
+  predates tuilib v0.19.0, which added `runner.Capture` — and the
+  hand-rolled version had a latent hang: with a non-`*os.File` writer,
+  `os/exec` spawns a copy goroutine that `Wait()` blocks on, so any
+  descendant outliving the process wedges the action forever. Use
+  `runner.CaptureWith`. It uses real `os.Pipe`s, bounds memory, preserves
+  per-line stdout/stderr order, sets a process group, and gives the
+  console's kill picker a handle.
+- **Eating every `${...}` during substitution.** An exec argv routinely
+  contains shell syntax that only looks like a token —
+  `sh -c "… | ${PAGER:-less} -R"` is a POSIX default-value expansion the
+  shell must receive intact. `internal/action` substitutes only
+  `${inputs.*}`, `${env.*}`, `${body.*}` and leaves everything else
+  verbatim. Eating `${PAGER:-less}` yields `| -R`, which fails nowhere
+  near the cause.
+- **Blocking modals for things the user should be able to re-read.** The
+  statusbar's centre slot wipes on the next keypress, which is why error
+  modals existed. tuilib v0.19.0's `pkg/output` is the real fix: a ring
+  buffer, a screen, and a persistent unread badge that does NOT wipe.
+  Route failures to `app.ErrorDetail`, not a modal.
 - **Stdout tee to the terminal for action errors.** Old behavior wrote
   subprocess stderr to both the alt-screen AND a buffer. Caused
   garbled output behind the alert modal. Fixed by capturing stderr

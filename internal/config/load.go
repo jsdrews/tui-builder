@@ -21,6 +21,11 @@ func Load(path string) (*Config, error) {
 	if err := ExpandSourcesPipe(c.Data.Sources); err != nil {
 		return nil, fmt.Errorf("expand %s: %w", path, err)
 	}
+	// Hoist inline action declarations into the top-level registry, so
+	// validation (and everything after it) sees exactly one shape.
+	if err := hoistInlineActions(&c); err != nil {
+		return nil, fmt.Errorf("expand %s: %w", path, err)
+	}
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("validate %s: %w", path, err)
 	}
@@ -56,7 +61,12 @@ func (c *Config) Validate() error {
 	if err := validateJoinLookups(c.Data.Sources); err != nil {
 		return err
 	}
-	// 4. Component bindings: `source:` must name an entry.
+	// 4. Action definitions (post-hoist, so inline declarations are
+	//    covered too).
+	if err := validateActionDefs(c.Actions); err != nil {
+		return err
+	}
+	// 5. Component bindings: `source:` must name an entry.
 	for name, comp := range c.TUI.Components {
 		if comp == nil {
 			return fmt.Errorf("tui.components.%s: empty definition", name)
@@ -91,7 +101,7 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("tui.components.%s: referenced %d times in tui.screen.layout — each component may be placed only once per screen", name, n)
 			}
 		}
-		if err := validateActions(c.TUI.Screen.Actions, refs, c.TUI.Components, "tui.screen"); err != nil {
+		if err := validateActionBindings(c.TUI.Screen.Actions, refs, c.TUI.Components, c.Actions, "tui.screen"); err != nil {
 			return err
 		}
 		if err := validateOnCursor(refs, c.TUI.Components, "tui.screen"); err != nil {
@@ -147,7 +157,7 @@ func (c *Config) Validate() error {
 			}
 			seenKeys[dedupKey] = i
 		}
-		if err := validateActions(s.Actions, refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name)); err != nil {
+		if err := validateActionBindings(s.Actions, refs, c.TUI.Components, c.Actions, fmt.Sprintf("tui.screens.%s", name)); err != nil {
 			return err
 		}
 		if err := validateOnCursor(refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name)); err != nil {
@@ -157,6 +167,17 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// validateOnCursor checks every layout-participating component's
+// OnCursor binding. Rules:
+//   - Source names another component in the same screen's layout.
+//   - Driver must be a table, list, or tree (the three tuilib
+//     components that emit focus-change messages: RowFocusedMsg from
+//     v0.16.0 for table; SelectedChangedMsg from v0.17.0 for list
+//     and tree).
+//   - Target component must itself be source-bound: the bind: block's
+//     job is to feed the target's source's parameters, and a
+//     component with no source has nowhere for those params to land.
+//   - Target's source must declare `parameters:` covering every bind
 // validateOnCursor checks every layout-participating component's
 // OnCursor binding. Rules:
 //   - Source names another component in the same screen's layout.
@@ -196,41 +217,6 @@ func validateOnCursor(refs map[string]int, components map[string]*Component, pat
 		}
 		if comp.Source == "" {
 			return fmt.Errorf("%s.components.%s.on_cursor: target component has no `source:` — nothing to rebind on cursor moves", path, name)
-		}
-	}
-	return nil
-}
-
-func validateActions(actions []Action, refs map[string]int, components map[string]*Component, path string) error {
-	for i, a := range actions {
-		if a.Key == "" {
-			return fmt.Errorf("%s.actions[%d]: key is required", path, i)
-		}
-		if a.Source == "" {
-			return fmt.Errorf("%s.actions[%d]: source is required", path, i)
-		}
-		if len(a.Run) == 0 {
-			return fmt.Errorf("%s.actions[%d]: run is required (non-empty argv)", path, i)
-		}
-		if refs[a.Source] == 0 {
-			return fmt.Errorf("%s.actions[%d]: source %q not used in this screen's layout", path, i, a.Source)
-		}
-		src := components[a.Source]
-		if src.Type != "list" && src.Type != "table" {
-			return fmt.Errorf("%s.actions[%d]: source %q must be a list or table (got %s)", path, i, a.Source, src.Type)
-		}
-		for j, p := range a.Prompts {
-			if p.Key == "" {
-				return fmt.Errorf("%s.actions[%d].prompts[%d]: key is required", path, i, j)
-			}
-			switch p.Type {
-			case "", "text", "select", "confirm":
-			default:
-				return fmt.Errorf("%s.actions[%d].prompts[%d]: unknown type %q (want text|select|confirm)", path, i, j, p.Type)
-			}
-			if p.Type == "select" && len(p.Options) == 0 {
-				return fmt.Errorf("%s.actions[%d].prompts[%d]: select prompt needs options", path, i, j)
-			}
 		}
 	}
 	return nil

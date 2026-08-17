@@ -54,7 +54,8 @@ See [`docs/data-layer.md`](docs/data-layer.md) for the full reference.
 | **Live data** | Per-source `refresh: <duration>` polling with in-place updates — cursor / filter / sort survive every refresh |
 | **Color** | Theme-wide palettes (Nord, Dracula, …) + per-component `colors:` overrides + per-value `color_rules:` ("Running" → green, "ERROR" → red) |
 | **Templating** | `${selection.col}` (parent row), `${env.VAR}` (env var) substitute anywhere a string lives — titles, URLs, headers, action argv |
-| **Actions** | Bind a key to a subprocess (`kubectl exec`, `$EDITOR`, `open`); optional `confirm:` modal; interactive (TTY handoff) or non-interactive (no flicker) |
+| **Actions** | Named, addressable units of work (`exec` subprocess or `http` request) with typed `inputs:`. Bound to keys per screen; optional `confirm:` modal; interactive (TTY handoff) or captured (streams into the output console). Inspectable headlessly via `wrangl --list-actions` / `--describe-action` |
+| **Output console** | One sink for every action result, subprocess line, and fetch error. `o` opens it; an unread badge tints red on failure. No blocking error modals anywhere |
 | **Errors** | Failed subprocesses surface in an alert modal with stderr captured; failed merge children surface in the statusbar without blanking the table |
 
 ## Quickstart
@@ -144,7 +145,7 @@ bin/tui-builder hello.yaml
 ```
 
 That's it — `tab` cycles focus, `/` filters, `[`/`]`/`s` step the sort
-column, `q` quits, `t` cycles themes.
+column, `q` quits, and `o` opens the output console.
 
 The mouse works too: click a pane to focus it, click a row to move its
 cursor, scroll with the wheel, and double-click a row for `enter` — the
@@ -295,27 +296,97 @@ tui:
 
 ### Actions
 
-Bind a key to a subprocess. Confirms can be required; errors land in a
-modal with the captured stderr.
+Actions are the write side, declared in a top-level `actions:` block and
+bound to keys by a screen. The split is deliberate: an action says *what
+to run* and what inputs it needs; a binding says *which key*, *which
+pane's row feeds it*, and *whether to confirm*.
 
 ```yaml
+actions:
+  pod_delete:
+    description: Delete a pod
+    inputs:
+      namespace: {type: string, required: true}
+      name:      {type: string, required: true}
+    run: [kubectl, delete, -n, "${inputs.namespace}", pod, "${inputs.name}"]
+    message: "deleted ${inputs.name}"
+
 tui:
   screens:
     pods:
-      layout: {component: pods_table}
       actions:
-        - key: x
-          label: exec
-          source: pods_table
-          confirm: "Open shell in ${selection.Name}?"
-          run: [kubectl, exec, -it, -n, "${selection.Namespace}", "${selection.Name}", --, sh]
         - key: D
+          action: pod_delete
           label: delete
-          source: pods_table
-          confirm: "Delete pod ${selection.Name}? Cannot be undone."
-          interactive: false
-          run: [kubectl, delete, -n, "${selection.Namespace}", pod, "${selection.Name}"]
+          from: pods_table
+          confirm: "Delete ${selection.Name}? Cannot be undone."
+          bind:
+            namespace: ${selection.Namespace}
+            name:      ${selection.Name}
 ```
+
+An action never mentions `${selection.*}` — that keeps it reusable from
+any screen. `from:` is required exactly when a template reads a
+selection and rejected otherwise, so an action needing no row simply
+omits it and its key fires from anywhere on the screen.
+
+Actions are also addressable from the CLI, which makes them testable
+without a TTY:
+
+```sh
+wrangl --list-actions examples/kube.yaml
+# NAME         KIND   INPUTS              DESCRIPTION
+# pod_delete   exec   name*, namespace*   Delete a pod
+
+wrangl --describe-action examples/kube.yaml pod_delete \
+  --param namespace=default --param name=nginx-abc
+# ...
+# DRY RUN
+#   kubectl delete -n default pod nginx-abc
+```
+
+There is no `wrangl --run`: every safety gate an action has is TUI state,
+and a headless caller would bypass all of it.
+
+**HTTP actions.** `type: http` is for APIs with no CLI in the loop —
+`method` / `url` / `headers` / `body`, plus a result contract for APIs
+that don't use status codes honestly:
+
+```yaml
+actions:
+  sync_app:
+    type: http
+    method: POST
+    url: ${env.ARGOCD_URL}/api/v1/applications/${inputs.app}/sync
+    headers: {Authorization: "Bearer ${env.ARGOCD_TOKEN}"}
+    inputs: {app: {type: string, required: true}}
+    success: code < 400 or code == 409   # already syncing isn't a failure
+    error_message: ${body.message}       # the API's reason, not "→ 403"
+```
+
+**Inputs the caller doesn't bind get collected in a form** generated
+from the input declarations — there is no separate `prompts:` schema, so
+the form can't drift out of step with the argv. The data type picks the
+widget: `type: bool` is a toggle, anything with `options:` is a select,
+everything else is a text input.
+
+### Where results go
+
+Every action reports to the **app-wide output console** (`o`), and only
+there. Its stdout/stderr stream in line by line as they arrive; the
+summary line paints the statusbar; a persistent unread badge in the
+statusbar's right slot goes red if anything failed and stays until you
+read it.
+
+There are no error modals — not for actions, not for failed fetches. The
+statusbar's centre slot wipes on the next keypress, which is why modals
+existed; the console plus a badge that *doesn't* wipe is the better fix,
+and nothing blocks.
+
+Actions also never refresh your views. A view owns its own refresh cycle:
+one that should converge after a mutation declares `refresh:`, and `r`
+refetches on demand. Coupling a mutation to a repaint would make every
+action responsible for knowing which panes it invalidated.
 
 ### Color rules
 
@@ -363,8 +434,9 @@ via `task examples`.
 | `examples/stream_websocket.yaml` | `websocket` source → logview |
 | `examples/stream_trades_table.yaml` | `websocket` source → live table (`max_rows: 100` ring buffer of bitstamp BTC/USD trades) |
 | `examples/stream_l1.yaml` | L1 ticker JOINED from two Binance.us streams (`bookTicker` for fast bid/ask + `@ticker` for last price + 24h stats), merged by symbol via `row_key: data.s`. Deep-merge composes both sources' fields onto each row |
-| `examples/prompts_boot.yaml` | Boot-time form modal collects params (`app.prompts`) before the main screen renders; values become env vars, feed into the source URL via `${env.USER}` |
-| `examples/action_prompts.yaml` | Per-action form modal collects input (`action.prompts`); `${prompt.<key>}` substitutes into run argv + confirm message at fire time |
+| `examples/prompts_boot.yaml` | Boot-time form collects params (`app.prompts`) before the main screen renders; values become env vars, feed into the source URL via `${env.USER}` |
+| `examples/action_prompts.yaml` | Action `inputs:` the binding doesn't fill are collected in a generated form; `${inputs.<key>}` substitutes into run argv + confirm message at fire time |
+| `examples/action_http_argocd.yaml` | `type: http` actions against the Argo CD API — bearer auth, `success:` for a 409-is-fine API, `error_message: ${body.message}` |
 | `examples/kube.yaml` | Single-cluster kube: namespaces → pods → pod detail + logs |
 | `examples/kube_multi.yaml` | Multi-cluster kube: 3 clusters merged into one table |
 

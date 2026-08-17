@@ -199,6 +199,10 @@ func collectEnvRefs(c *Config) map[string]struct{} {
 		visitScreen(s, visit)
 	}
 
+	// Actions: the argv / URL / headers / body that actually reach the
+	// outside world.
+	visitActions(c.Actions, visit)
+
 	// Components: titles + static row/list content.
 	for _, comp := range c.TUI.Components {
 		if comp == nil {
@@ -223,16 +227,41 @@ func collectEnvRefs(c *Config) map[string]struct{} {
 	return refs
 }
 
-// visitScreen walks screen-level templated fields (actions'
-// Run/Confirm/Notice). Split out because both the shorthand
-// `screen:` and the multi-screen `screens:` map need the same walk.
+// visitScreen walks screen-level templated fields — an action binding's
+// Confirm / Notice and its Bind templates. Split out because both the
+// shorthand `screen:` and the multi-screen `screens:` map need the same
+// walk.
+//
+// The action's own Run / URL / Headers / Body are NOT walked here: they
+// live in the top-level actions: map now, and visitActions covers them
+// once each rather than once per binding that references them.
 func visitScreen(s *Screen, visit func(string)) {
-	for _, a := range s.Actions {
-		visit(a.Confirm)
-		visit(a.Notice)
+	for _, b := range s.Actions {
+		visit(b.Confirm)
+		visit(b.Notice)
+		for _, tmpl := range b.Bind {
+			visit(tmpl)
+		}
+	}
+}
+
+// visitActions walks the templated fields of every defined action. Runs
+// after hoisting, so inline declarations are covered too.
+func visitActions(actions map[string]*Action, visit func(string)) {
+	for _, a := range actions {
+		if a == nil {
+			continue
+		}
 		for _, arg := range a.Run {
 			visit(arg)
 		}
+		visit(a.URL)
+		visit(a.Body)
+		for _, v := range a.Headers {
+			visit(v)
+		}
+		visit(a.Message)
+		visit(a.ErrorMessage)
 	}
 }
 

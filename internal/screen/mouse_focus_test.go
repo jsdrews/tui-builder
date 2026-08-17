@@ -28,7 +28,7 @@ func TestClickFocusesClickedPane(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,17 +147,20 @@ func TestDoubleClickActivatesLikeEnter(t *testing.T) {
 // never fired.
 func TestEnterFiresActionBoundToEnter(t *testing.T) {
 	c := twoPaneConfig()
-	c.TUI.Screen.Actions = []cfg.Action{{
+	c.TUI.Screen.Actions = []cfg.ActionBinding{{
 		Key:     "enter",
+		Action:  "order",
 		Label:   "order",
-		Source:  "names",
+		From:    "names",
 		Confirm: "Order ${selection}?",
-		Run:     []string{"echo", "${selection}"},
 	}}
+	c.Actions = map[string]*cfg.Action{
+		"order": {Run: []string{"echo", "hello"}},
+	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}

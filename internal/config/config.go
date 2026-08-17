@@ -22,6 +22,15 @@ type Config struct {
 	App  App       `yaml:"app"`
 	Data DataBlock `yaml:"data,omitempty"`
 	TUI  TUIBlock  `yaml:"tui,omitempty"`
+	// Actions is the write side: named units of work bound to keys by
+	// `tui.screens.*.actions`. Peer to `data.sources:` rather than an
+	// entry in it — see action.go for why a mutation must never live in
+	// the polled source graph.
+	//
+	// Inline action declarations are hoisted into this map at load time,
+	// so post-Load it holds every action the config can perform
+	// regardless of how it was written.
+	Actions map[string]*Action `yaml:"actions,omitempty"`
 }
 
 // DataBlock holds the data-layer definitions. Every entry under
@@ -285,46 +294,67 @@ type MergeChild struct {
 // rules, complex types, and computed defaults are deferred until a
 // concrete need surfaces.
 type Parameter struct {
-	// Type is informational today: string (default), int, bool, duration.
-	// Future use: form widget selection at TUI binding sites, basic
-	// validation in wrangl (--param port=abc against type:int rejects).
+	// Type is the value's data type: string (default), int, bool,
+	// duration. It also PICKS THE FORM WIDGET when this parameter has
+	// to be collected from the user (an action input nobody bound):
+	// bool renders a yes/no toggle, everything else a text input,
+	// unless Options is set — then it's a select regardless of type.
+	//
+	// Note this is the data type, not the widget name. There is
+	// deliberately no `type: select`: "one of these strings" is a
+	// string that happens to have Options, and conflating the two axes
+	// is what made the old Prompt schema need both a Type and an
+	// InitialIdx.
 	Type string `yaml:"type,omitempty"`
-	// Required means callers MUST bind a value before the source can
-	// run. Mutually exclusive with Default.
+	// Required means callers MUST supply a value before the source or
+	// action can run. Mutually exclusive with Default. For an action
+	// input, "supply" means either a bind: entry at the call site or a
+	// value typed into the generated form.
 	Required bool `yaml:"required,omitempty"`
-	// Default is the value used when no caller supplies one. Setting
-	// Default implies the param is optional.
+	// Default is the value used when no caller supplies one, and the
+	// value a generated form field starts on. Setting Default implies
+	// the param is optional. For type: bool use "true" / "false"; for
+	// a param with Options, one of the option strings.
 	Default string `yaml:"default,omitempty"`
-	// Description shows up in --list / launcher prompts / future
-	// --help output. One-line summary.
+	// Description shows up in --list / --describe / --list-actions
+	// output. One-line summary.
 	Description string `yaml:"description,omitempty"`
+
+	// The remaining fields matter only when this parameter is rendered
+	// as a form field. They're inert for wrangl --param binding.
+
+	// Label is the form field's caption. Defaults to the param name.
+	Label string `yaml:"label,omitempty"`
+	// Placeholder is the empty-state hint inside a text input.
+	Placeholder string `yaml:"placeholder,omitempty"`
+	// Options turns the field into a select over these choices. Legal
+	// for any Type; the chosen option is the value.
+	Options []string `yaml:"options,omitempty"`
+	// Order sorts fields in a generated form. Inputs live in a map, and
+	// map iteration has no order — without this, a two-field form would
+	// render its fields in a different sequence run to run. Ties break
+	// alphabetically, so leaving Order unset everywhere is stable, just
+	// alphabetical.
+	Order int `yaml:"order,omitempty"`
 }
 
-// Prompt is one field in an action's input form. Types map 1:1 to
-// tuilib pkg/form field kinds:
+// Prompt is one field in the boot-time form (`app.prompts:`), which
+// runs before any screen renders and os.Setenv's each value under its
+// Key so ${env.<KEY>} resolves downstream.
 //
-//	text    (default) — single-line text input
-//	select  — pick one of `options`
-//	confirm — yes/no toggle (value is "true" / "false")
+// It is an ordered list rather than a map because a form has a reading
+// order and boot prompts are usually a short deliberate sequence. The
+// field vocabulary is Parameter's, inlined — one widget schema for boot
+// prompts and action inputs alike.
+//
+// Action inputs are NOT prompts. An action declares typed `inputs:`;
+// anything the call site doesn't bind is collected in a generated form
+// built from those same Parameter fields. There is no separate
+// ${prompt.*} namespace.
 type Prompt struct {
-	Key         string   `yaml:"key"`
-	Label       string   `yaml:"label,omitempty"`
-	Type        string   `yaml:"type,omitempty"`          // text | select | confirm
-	Placeholder string   `yaml:"placeholder,omitempty"`   // text only
-	Initial     string   `yaml:"initial,omitempty"`       // text default value
-	Options     []string `yaml:"options,omitempty"`       // select choices
-	InitialIdx  int      `yaml:"initial_index,omitempty"` // select default
-	InitialBool bool     `yaml:"initial_bool,omitempty"`  // confirm default
-}
-
-// InteractiveDefault reports whether an action with no explicit
-// Interactive field should run via pkg/runner. The default is true so
-// the most common case (drop into a shell, edit a file) Just Works.
-func (a Action) InteractiveDefault() bool {
-	if a.Interactive == nil {
-		return true
-	}
-	return *a.Interactive
+	// Key names the env var the collected value is written to.
+	Key       string `yaml:"key"`
+	Parameter `yaml:",inline"`
 }
 
 // OnKeyBinding wires "pressing Key on Source pushes Push." The source

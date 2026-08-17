@@ -14,6 +14,7 @@ set -euo pipefail
 DATA_LAYER=(
   ./internal/datasource
   ./internal/pipeline
+  ./internal/action
   ./internal/output
   ./internal/config
   ./internal/expr

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jsdrews/tuilib/pkg/app"
@@ -56,6 +57,13 @@ func run() error {
 			// mouse must be on here too or clicking would work only for
 			// configs opened directly.
 			Mouse: app.MouseClick,
+			// Same reasoning for the output console — a config opened
+			// through the launcher must have the same sink for action
+			// results and fetch errors as one opened directly.
+			OutputKey: key.NewBinding(
+				key.WithKeys("o"),
+				key.WithHelp("o", "output"),
+			),
 		}),
 		tea.WithAltScreen(),
 	)

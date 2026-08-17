@@ -12,6 +12,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -71,10 +72,11 @@ func run() error {
 			Screens:    c.TUI.Screens,
 			Components: c.TUI.Components,
 			Sources:    c.Data.Sources,
+			Actions:    c.Actions,
 		}
 		root, err = tqscreen.NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, initial)
 	} else {
-		root, err = tqscreen.New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, initial)
+		root, err = tqscreen.New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, initial)
 	}
 	if err != nil {
 		return err
@@ -86,6 +88,17 @@ func run() error {
 			Themes:      themes,
 			Version:     c.App.Version,
 			HelpVerbose: c.App.HelpVerbose,
+			// The app-wide output console. Every app.Info / app.Error /
+			// InfoDetail / ErrorDetail and everything runner.Capture
+			// streams lands in its ring buffer, with an unread badge in
+			// the statusbar's right slot. This is the single sink for
+			// action results and fetch errors alike — the statusbar's
+			// center slot wipes on the next keypress, so anything worth
+			// reading twice has to live here instead.
+			OutputKey: key.NewBinding(
+				key.WithKeys("o"),
+				key.WithHelp("o", "output"),
+			),
 			// Every component we build (list / table / tree / logview /
 			// inspector / textview) hit-tests mouse events against its
 			// own rect, so clicking is uniformly useful. The cost is the
@@ -115,22 +128,34 @@ func collectAppPrompts(prompts []cfg.Prompt, th theme.Theme) error {
 		if label == "" {
 			label = p.Key
 		}
-		switch p.Type {
-		case "select":
+		// Widget follows the data type, same rule the generated action
+		// input form uses: Options means select, bool means toggle,
+		// everything else is a text input.
+		switch {
+		case len(p.Options) > 0:
+			initial := 0
+			for j, o := range p.Options {
+				if o == p.Default {
+					initial = j
+				}
+			}
 			fields[i] = form.Select(form.SelectOptions{
 				Key:     p.Key,
 				Label:   label,
 				Options: append([]string(nil), p.Options...),
-				Initial: p.InitialIdx,
+				Initial: initial,
 			})
-		case "confirm":
+		case p.Type == "bool":
 			fields[i] = form.Confirm(form.ConfirmOptions{
 				Key:     p.Key,
 				Label:   label,
-				Initial: p.InitialBool,
+				Initial: p.Default == "true",
 			})
-		default: // text
-			initial := p.Initial
+		default:
+			// An already-set env var pre-fills the field, so
+			// `USER=x tui-builder …` becomes "press enter" rather than
+			// "type it again".
+			initial := p.Default
 			if v := os.Getenv(p.Key); v != "" {
 				initial = v
 			}
