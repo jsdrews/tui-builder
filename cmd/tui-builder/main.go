@@ -63,6 +63,12 @@ func run() error {
 		}
 	}
 
+	// Resolve ${env.*} now that the environment is final — after the
+	// prompts above have os.Setenv'd their answers, before any screen is
+	// built. Doing it here rather than in cfg.Load is what lets a prompt
+	// supply a var that the config references.
+	c.SubstituteEnv()
+
 	themes = reorderThemes(themes, initial.Name)
 
 	var root tscreen.Screen

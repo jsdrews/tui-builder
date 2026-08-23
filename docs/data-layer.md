@@ -196,6 +196,28 @@ The same templates can also use:
 | `${selection.COLNAME}` | parent's table row, cell by column-title prefix (TUI only) |
 | `${prompt.KEY}` | action prompt value (actions only) |
 
+**When `${env.*}` resolves.** Both binaries substitute it once, up
+front, over the whole config — every source URL / header / body / argv /
+`env:` value, every screen and component title, every action's argv,
+confirm, and notice. `tui-builder` does it *after* `app.prompts:` runs,
+which is what lets a boot prompt supply a variable the config
+references; `wrangl` does it immediately after load, since it has no
+prompts.
+
+Two consequences worth knowing:
+
+- A resolved value is **data, not a template**. If an env var's value
+  itself contains `${env.SOMETHING}`, that text is left alone rather
+  than expanded — one variable can't be used to reach another.
+- `wrangl --describe` is the one place that deliberately *doesn't*
+  substitute. It reports the templated shape of a request, so
+  `${env.AWX_HOST}/api/v2/jobs/` is the useful answer, and expanding it
+  would print whatever secret a variable holds into your terminal.
+
+Fields that name data rather than carry display text are never
+substituted: dot-paths (a column's `value:`, a source's `root:`) and
+expression strings (`where:`, `compute:`, `by:`).
+
 ### Declaring env-var dependencies (`app.env`)
 
 An unset env var referenced in a URL / Command / Header silently
@@ -302,6 +324,8 @@ POST body), anything HTTP-shaped.
 | `refresh` | ✗ | duration string (e.g. `30s`); enables polling (ignored with `follow: true`) |
 | `timeout` | ✗ | duration string; default `10s` (ignored with `follow: true` — streams are long-running by design) |
 | `follow` | ✗ | `true` switches to streaming: holds the request open, reads body line-by-line, emits one Event per line. Use for kube `?follow=true` log endpoints, SSE streams, NDJSON change-feeds |
+| `paginate` | ✗ | walk every page up front and concatenate them into one list. Mutually exclusive with `follow`, `window`, and `format: text` |
+| `window` | ✗ | fetch only the rows on screen, and let the server answer the filter and sort. Mutually exclusive with `follow`, `paginate`, and `format: text`. See [Windowed sources](#windowed-sources) |
 | `parameters` | ✗ | the params block above |
 
 **Emits:**
@@ -314,6 +338,180 @@ POST body), anything HTTP-shaped.
 **Cadence:** streamed when `follow: true`; polled when `refresh:` set;
 otherwise one-shot. Binding: `needs params` when any required
 parameter has no default.
+
+#### Windowed sources
+
+`window:` inverts how a big endpoint is consumed. Instead of pulling
+every page into memory and letting the table work over the result, the
+table asks for the rows it is showing and the **server** answers the
+filter and the sort.
+
+| | `paginate:` | `window:` |
+|---|---|---|
+| Requests before first frame | one per page | one |
+| Rows held | all of them | one page |
+| Who filters | the table, over what it holds | the server, over everything |
+| Who sorts | the table | the server |
+| Good for | up to a few thousand rows | sets too big to hold |
+
+`window:` works on **`http`** and **`exec`**. Those are the two kinds
+that can carry an offset, a limit, and a filter into a request; a kind
+that silently ignored the block would leave the bound table's filter bar
+and sort keys doing nothing, so setting it on `file` / `static` /
+`websocket` or on an operator is a config error, not a no-op.
+
+Binding rules, all enforced at config load:
+
+- only a `type: table` component can bind a windowed source — it's the
+  one component that renders a sparse slice of a larger set
+- a windowed source can't be an operator's upstream. `filter` over one
+  would filter the 100 resident rows and present that as the answer over
+  all 30,000
+- a `sortable: true` column needs `window.sort_param:` — under a window
+  the sort is a request, so without somewhere to send it the control
+  does nothing
+
+The bound table switches to remote filtering and sorting automatically.
+There's no second flag: binding to a source with `window:` is what flips
+it.
+
+Shared by both kinds:
+
+| Field | Notes |
+|---|---|
+| `page_size` | rows per request; default 100 |
+| `prefetch` | extra pages to pull beyond the screen; default 0. `1` hides the placeholder flash at page boundaries for one extra request |
+| `total_path` | dot-path into the **raw** response (pre-`root:`) to the match count. Without it the table treats the end of what's loaded as the end |
+| `filters` | map of **column title** → the destination that answers a scoped `title:value` term. On http that's a query param; on exec it's a token suffix |
+
+`http` only — the request goes into the query string:
+
+| Field | Required | Notes |
+|---|---|---|
+| `offset_param` | ✓ | query param carrying the first row wanted (`offset`, `_start`, `skip`) |
+| `limit_param` | ✓ | query param carrying the page size (`limit`, `per_page`) |
+| `search_param` | ✗ | query param answering *bare* filter terms; all bare terms join with spaces |
+| `sort_param` | ✗ | query param carrying the sort field |
+| `sorts` | ✗ | map of column title → the sort field name the API wants |
+| `sort_desc_prefix` | ✗ | prepended for a descending sort — `-` covers Django REST and most of what copies it |
+
+At least one of `search_param` / `filters` is required: a windowed table
+filters remotely, so with neither the filter bar has nowhere to send what
+the user types.
+
+`exec` only — the request goes into the argv, so there are no parameter
+names to declare. Setting any of the `http` fields above on an exec
+source is an error rather than a no-op. Instead, `command:` references
+these tokens:
+
+| Token | Value |
+|---|---|
+| `${window.offset}` | first row wanted. **Required** — a command that ignores it returns page one forever |
+| `${window.limit}` | page size. **Required** |
+| `${window.search}` | bare filter terms joined with spaces; empty when none |
+| `${window.filters.<name>}` | a scoped term's value, where `<name>` is what `filters:` maps that column title to |
+| `${window.sort}` | the sort column's **title**; the command maps it itself |
+| `${window.sort_dir}` | `asc` / `desc`; empty when unsorted |
+
+Substitution happens before the process starts, so the command never
+sees a literal `${window.…}`, and ordinary shell variables are untouched.
+An argv element that referenced window tokens and whose tokens **all**
+resolved empty is **dropped entirely** — that is what makes the
+`--author=${window.filters.author}` idiom work: with no `author:` term
+typed the whole flag disappears, rather than being passed as
+`--author=` and matching nothing. An element mixing an always-present
+token with an empty one survives, so a single `sh -c "… LIMIT
+${window.limit} … '%${window.search}%'"` string is never dropped.
+
+Validation requires that the command actually reference
+`${window.offset}`, `${window.limit}`, and at least one filter token, and
+that every `filters:` entry it declares is referenced — dead config here
+means a control the user can operate that does nothing.
+
+> **Quoting.** Substitution is literal, matching how `${params.*}`
+> already behaves in argv. A filter value containing shell
+> metacharacters lands verbatim, so a `sh -c` template is only as safe as
+> the quoting around it. Prefer plain argv when you can — the value is
+> then passed as one argument and no shell ever parses it.
+
+Query params already on the source `url:` survive into every request, so
+an API key or a field mask can be pinned there. A param the window also
+sets is overwritten — which makes `?q=tolkien` on the URL a *default*
+search that the user's filter replaces.
+
+```yaml
+data:
+  sources:
+    books:
+      type: http
+      url: https://openlibrary.org/search.json?q=tolkien&fields=title,author_name
+      root: docs
+      window:
+        page_size: 100
+        prefetch: 1
+        offset_param: offset
+        limit_param: limit
+        total_path: numFound
+        search_param: q        # "hobbit"        → ?q=hobbit
+        filters:
+          Author: author       # "author:tolkien" → ?author=tolkien
+          Title: title
+```
+
+How the filter the user types becomes a request: the text is parsed into
+AND-ed terms; a `title:value` term whose column appears in `filters:`
+becomes that query param; everything else — bare terms, and scoped terms
+on unmapped columns — joins into `search_param`. A regex term (`~^new`)
+travels as its literal text minus the tilde, since a regex can't cross a
+query string; the server answers a substring search, which is narrower
+than asked but never wrong.
+
+`refresh:` still works and means "same rows, fresh data" — the window on
+screen is refetched in place rather than jumping back to page one. So
+does the `r` key.
+
+`wrangl` on a windowed source returns its **first page**, not the whole
+set — the whole set is exactly what doesn't exist here. This holds for
+both kinds, so a windowed exec source is still pipeable.
+
+An exec window, end to end — `git log` already speaks offset
+(`--skip`), limit (`--max-count`), a scoped filter (`--author`), and a
+bare search (`--grep`):
+
+```yaml
+commits:
+  type: exec
+  root: rows
+  command:
+    - sh
+    - -c
+    - |
+      AUTHOR="${window.filters.author}"; SEARCH="${window.search}"
+      ARGS=""
+      [ -n "$AUTHOR" ] && ARGS="$ARGS --author=$AUTHOR"
+      [ -n "$SEARCH" ] && ARGS="$ARGS --grep=$SEARCH"
+      TOTAL=$(git rev-list --count $ARGS HEAD)
+      ROWS=$(git log $ARGS --skip=${window.offset} --max-count=${window.limit} …)
+      printf '{"total":%s,"rows":[%s]}' "$TOTAL" "$ROWS"
+  window:
+    page_size: 100
+    total_path: total
+    filters:
+      Author: author        # "author:john" → ${window.filters.author}
+```
+
+Note the total is computed under the *same* filter as the rows. Reporting
+an unfiltered count would size the table's scrollbar against the wrong
+set and let the cursor run off the end of the results.
+
+Worked examples:
+[`examples/http_window.yaml`](../examples/http_window.yaml) (query
+string) and [`examples/exec_window.yaml`](../examples/exec_window.yaml)
+(argv).
+
+**Known gap:** filter tab-completion still hints from the rows the table
+holds. tuilib exposes `SetDistinct` for feeding a facet endpoint instead;
+there's no YAML surface for that yet.
 
 ### `exec`
 
@@ -333,6 +531,7 @@ that streams text (`kubectl logs -f`, `tail -f`, `journalctl -f`).
 | `root` | ✗ | dot-path into JSON output |
 | `refresh` | ✗ | re-run interval (ignored when `follow: true`) |
 | `timeout` | ✗ | hard cap per run |
+| `window` | ✗ | run one command per window of a larger set, with the filter and sort templated into the argv. Mutually exclusive with `follow` and `format: text`. See [Windowed sources](#windowed-sources) |
 | `parameters` | ✗ | per-param substitution into argv / env |
 
 **Emits:** typed JSON value (capture mode) or text frames (`follow: true`,

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,6 +41,7 @@ type httpSource struct {
 	timeout  time.Duration
 	refresh  time.Duration
 	paginate *cfg.PaginateConfig // nil = single-page fetch
+	window   *cfg.WindowConfig   // nil = not windowed
 }
 
 // defaultMaxPages caps a paginate walk when the user didn't set one.
@@ -79,6 +82,7 @@ func newHTTP(d *cfg.Source) (Source, error) {
 		timeout:  timeout,
 		refresh:  refresh,
 		paginate: d.Paginate,
+		window:   d.Window,
 	}, nil
 }
 
@@ -93,6 +97,17 @@ func (s *httpSource) Fetch(ctx context.Context) (any, error) {
 	}
 	if s.paginate != nil {
 		return s.fetchPaginated(ctx)
+	}
+	if s.window != nil {
+		// A windowed source has no "everything" to hand back — that's the
+		// point of it. Return the first page so `wrangl` and any
+		// non-table consumer see representative data instead of an
+		// error; the bound table goes through FetchWindow instead.
+		page, err := s.FetchWindow(ctx, WindowQuery{Offset: 0, Limit: s.pageSize()})
+		if err != nil {
+			return nil, err
+		}
+		return page.Items, nil
 	}
 
 	raw, err := s.fetchOne(ctx, s.url)
@@ -192,6 +207,109 @@ func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
 	// bump max_pages, or add a follow-up feature (a "truncated" flag
 	// on the result) if this becomes a real complaint.
 	return acc, nil
+}
+
+// pageSize is the configured window size, or the default.
+func (s *httpSource) pageSize() int {
+	if s.window == nil || s.window.PageSize <= 0 {
+		return cfg.DefaultWindowPageSize
+	}
+	return s.window.PageSize
+}
+
+// FetchWindow implements WindowedSource: one request for one window,
+// with the filter and sort pushed into the query string so the server
+// answers them across the whole set rather than the page.
+//
+// Unlike fetchPaginated this makes exactly one request. That is the
+// trade: the caller re-invokes as the user scrolls, so latency is paid
+// per screenful instead of all at once up front.
+func (s *httpSource) FetchWindow(ctx context.Context, q WindowQuery) (WindowPage, error) {
+	if s.window == nil {
+		return WindowPage{}, ErrNotWindowed
+	}
+	url, err := s.windowURL(q)
+	if err != nil {
+		return WindowPage{}, err
+	}
+	raw, err := s.fetchOne(ctx, url)
+	if err != nil {
+		return WindowPage{}, err
+	}
+	var parsed any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return WindowPage{}, fmt.Errorf("parse json: %w", err)
+	}
+	// Root sees the items, total_path sees the envelope — the same
+	// split fetchPaginated uses for next_path, and for the same reason:
+	// in `{numFound: N, docs: [...]}` both live at the top level.
+	page := WindowPage{Items: Iter(applyRoot(parsed, s.root)), Total: -1}
+	if p := s.window.TotalPath; p != "" {
+		if n, ok := toInt(Get(parsed, p)); ok {
+			page.Total = n
+		}
+		// A missing or non-numeric total is not an error: -1 means
+		// "can't say", and the table degrades to treating the end of
+		// what has loaded as the end of the set.
+	}
+	return page, nil
+}
+
+// windowURL renders q into s.url's query string. Any parameters already
+// on the configured URL (`?fields=title,author`) survive — only the
+// window's own parameters are set, so a source can pin API options in
+// the URL and let the window drive the rest.
+func (s *httpSource) windowURL(q WindowQuery) (string, error) {
+	u, err := neturl.Parse(s.url)
+	if err != nil {
+		return "", fmt.Errorf("url: %w", err)
+	}
+	w := s.window
+	vals := u.Query()
+	vals.Set(w.OffsetParam, strconv.Itoa(q.Offset))
+	vals.Set(w.LimitParam, strconv.Itoa(q.Limit))
+
+	if q.Search != "" && w.SearchParam != "" {
+		vals.Set(w.SearchParam, q.Search)
+	}
+	for title, val := range q.Filters {
+		if param, ok := w.Filters[title]; ok {
+			vals.Set(param, val)
+		}
+		// A scoped term whose column has no mapping was already folded
+		// into Search by the caller, so there's nothing to do here.
+	}
+	if q.Sort != "" && w.SortParam != "" {
+		field := q.Sort
+		if mapped, ok := w.Sorts[field]; ok {
+			field = mapped
+		}
+		if q.Desc {
+			field = w.SortDescPrefix + field
+		}
+		vals.Set(w.SortParam, field)
+	}
+	u.RawQuery = vals.Encode()
+	return u.String(), nil
+}
+
+// toInt coerces a JSON number (always float64 out of encoding/json) or a
+// numeric string into an int. Returns ok=false for anything else, which
+// the caller treats as "total unknown" rather than an error.
+func toInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	case json.Number:
+		i, err := n.Int64()
+		return int(i), err == nil
+	case string:
+		i, err := strconv.Atoi(n)
+		return i, err == nil
+	}
+	return 0, false
 }
 
 // Subscribe implements StreamingSource for follow mode. Holds the

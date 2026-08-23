@@ -1,0 +1,131 @@
+# exec_window.yaml — page and filter a *command* from the table.
+#
+# The same windowing contract as examples/http_window.yaml, but the
+# request goes into an argv instead of a query string. `git log` happens
+# to speak it natively:
+#
+#   --skip=N        offset
+#   --max-count=N   limit
+#   --author=X      a scoped filter
+#   --grep=X        a bare search
+#
+# ...so the command below is a thin shell wrapper that turns one window
+# request into one `git log` invocation, plus a `git rev-list --count`
+# for the total.
+#
+# The point isn't git. It's that anything with paging flags works the
+# same way:
+#
+#   psql -tAc "SELECT … LIMIT ${window.limit} OFFSET ${window.offset}"
+#   aws ec2 describe-instances --max-items ${window.limit} …
+#   gh api "/search/issues?per_page=${window.limit}&page=…"
+#   ./my-report --offset=${window.offset} --limit=${window.limit}
+#
+# What to try:
+#
+#   /                    open the filter
+#   fix                  bare term  → --grep=fix       (searches all commits)
+#   author:john          scoped     → --author=john    (mapped in filters:)
+#   author:john fix      both flags at once
+#   enter                commits — the command runs here, not per keystroke
+#   G                    jump to the oldest commit; watch windows swap
+#   r                    re-run the command for the window on screen
+#
+# Run it against a big repo to see the real point — in a clone of the
+# Linux kernel this pages through 1.3M commits holding 5 at a time.
+#
+# Headless check (runs the first window, prints it as JSON):
+#
+#   task wrangl -- examples/exec_window.yaml commits | jq 'length'
+
+app:
+  title: Commit log (windowed exec)
+
+data:
+  sources:
+    commits:
+      type: exec
+      root: rows
+
+      # Window tokens substitute BEFORE the shell runs, so `sh` never
+      # sees `${window.*}` — by the time it starts, these are literals
+      # like `--skip=0`. Ordinary shell variables ($ARG, $TOTAL) are
+      # untouched: only the `${window.…}` namespace is substituted.
+      #
+      # Quoting note: substitution is literal, exactly like ${params.*}.
+      # A filter value containing a quote or a `$` lands verbatim in this
+      # shell string. That's tolerable here because the only person who
+      # can type in the filter bar is the person already running the
+      # command — but prefer plain argv (no `sh -c`) when you can, so
+      # the value is passed as a single arg and never parsed by a shell.
+      command:
+        - sh
+        - -c
+        - |
+          AUTHOR="${window.filters.author}"
+          SEARCH="${window.search}"
+          ARGS=""
+          [ -n "$AUTHOR" ] && ARGS="$ARGS --author=$AUTHOR"
+          [ -n "$SEARCH" ] && ARGS="$ARGS --grep=$SEARCH"
+
+          # The total has to reflect the SAME filter the rows do, or the
+          # table sizes its scrollbar against the wrong set and lets the
+          # cursor run off the end of the results.
+          TOTAL=$(git rev-list --count $ARGS HEAD)
+
+          ROWS=$(git log $ARGS --skip=${window.offset} --max-count=${window.limit} \
+                   --pretty=format:'%h%x09%an%x09%ad%x09%s' --date=short \
+                 | awk -F'\t' 'NR>1{printf ","}
+                     {gsub(/\\/,"\\\\",$4); gsub(/"/,"\\\"",$4);
+                      printf "{\"hash\":\"%s\",\"author\":\"%s\",\"date\":\"%s\",\"subject\":\"%s\"}",$1,$2,$3,$4}')
+
+          printf '{"total":%s,"rows":[%s]}' "$TOTAL" "$ROWS"
+
+      window:
+        # Deliberately tiny so windows actually swap in a small repo.
+        # Use 100+ against anything real.
+        page_size: 5
+        prefetch: 1
+
+        # Where the filtered commit count lives in the RAW stdout,
+        # before `root: rows` slices out the items.
+        total_path: total
+
+        # Note what ISN'T here: no offset_param / limit_param /
+        # search_param / sort_param. Those name query-string parameters
+        # and mean nothing to an argv — an exec window templates the
+        # request into `command:` instead, and validation rejects them
+        # rather than ignoring them.
+        #
+        # filters: maps a COLUMN TITLE to the token that carries it, so
+        # typing "author:john" against the Author column below reaches
+        # the command as ${window.filters.author}. The user can type any
+        # unambiguous prefix — "auth:john" resolves to Author just the
+        # same, and arrives here as the full title.
+        filters:
+          Author: author
+
+tui:
+  components:
+    commits:
+      type: table
+      title: Commits
+      source: commits
+      # Automatic, because the bound source declares `window:` — the
+      # filter goes to the command, not to the five rows on screen.
+      filterable: true
+      filter_placeholder: "fix · author:john · author:john fix"
+      columns:
+        # Fixed and flex widths only — a content-auto column would
+        # reflow every time a window landed.
+        - {title: Hash,    width: 9,  value: hash}
+        - {title: Author,  width: 20, value: author}
+        - {title: Date,    width: 10, value: date}
+        - {title: Subject, width: 40, flex: 1, value: subject}
+      # No sortable columns: `git log` orders by history, and there's no
+      # ${window.sort} plumbing in the command above. A command that DID
+      # take an order flag would reference ${window.sort} and
+      # ${window.sort_dir} and mark its columns sortable.
+  screen:
+    layout:
+      component: commits

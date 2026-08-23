@@ -156,6 +156,13 @@ func runDump(args []string, listOnly, pretty, raw, all bool, limit int, maxDurat
 	if err != nil {
 		return err
 	}
+	// Resolve ${env.*} before anything reads a URL or an argv. The TUI
+	// does this after its prompts run; wrangl has no prompts, so the
+	// environment is already final here. Without it, a config that works
+	// under `tui-builder` would fetch a literal "${env.HOST}/api" here —
+	// the same config behaving differently depending on which binary
+	// opened it.
+	c.SubstituteEnv()
 
 	// Route --param: if the target is a PIPELINE with its own
 	// `parameters:` block, bind to the pipeline (its operator
@@ -224,6 +231,10 @@ func runDescribe(configPath, target string) error {
 	if err != nil {
 		return err
 	}
+	// Deliberately NOT SubstituteEnv'd: --describe reports the templated
+	// shape of a request, so `${env.AWX_HOST}/api/v2/jobs/` is the useful
+	// answer, and resolving it would print whatever secret an env var
+	// holds into the terminal.
 	s, ok := c.Data.Sources[target]
 	if !ok {
 		return fmt.Errorf("no entry named %q (run `wrangl --list %s` to see what's defined)", target, configPath)

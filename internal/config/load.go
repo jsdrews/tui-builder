@@ -65,10 +65,19 @@ func (c *Config) Validate() error {
 			return err
 		}
 		if ref := comp.Source; ref != "" {
-			if _, ok := c.Data.Sources[ref]; !ok {
+			entry, ok := c.Data.Sources[ref]
+			if !ok {
 				return fmt.Errorf("tui.components.%s: source %q not defined in data.sources", name, ref)
 			}
+			if err := bindWindowed(name, comp, ref, entry); err != nil {
+				return err
+			}
 		}
+	}
+	// 5. Windowed sources can't be fed through operators — see
+	//    validateWindowedUpstreams.
+	if err := validateWindowedUpstreams(c.Data.Sources); err != nil {
+		return err
 	}
 
 	// Mode check: exactly one of screen / screens.
@@ -364,6 +373,55 @@ func (c *Component) validate(path string) error {
 			if len(c.Children) > 0 && len(c.GroupBy) > 0 {
 				return fmt.Errorf("%s: tree `children:` (recursive walk) and `group_by:` (flat + bucket) are mutually exclusive", path)
 			}
+		}
+	}
+	return nil
+}
+
+// bindWindowed marks a component as windowed when the entry it binds to
+// declares `window:`, rejecting the bindings that can't hold a sparse
+// window. Only tuilib's table has SetWindow — a list or inspector fed a
+// window would silently show page 1 and call it the whole set, which is
+// worse than refusing at load.
+func bindWindowed(name string, comp *Component, ref string, entry *Source) error {
+	if entry == nil || entry.Window == nil {
+		return nil
+	}
+	if comp.Type != "table" {
+		return fmt.Errorf("tui.components.%s: source %q declares `window:` but this is a %s component — only `type: table` can hold a windowed source (it's the one component that renders a sparse slice of a larger set)", name, ref, comp.Type)
+	}
+	// Sorting is answered by the server under a window, so a sortable
+	// column with no `sort_param:` is a control that can't do anything.
+	if entry.Window.SortParam == "" {
+		for i, col := range comp.Columns {
+			if col.Sortable {
+				return fmt.Errorf("tui.components.%s: columns[%d] (%q) is sortable but source %q declares no `window.sort_param:` — a windowed table sorts remotely, so there's nowhere to send the request", name, i, col.Title, ref)
+			}
+		}
+	}
+	comp.Windowed = true
+	return nil
+}
+
+// validateWindowedUpstreams rejects an operator whose upstream declares
+// `window:`. Operators consume a source through Fetch, which for a
+// windowed source yields only its first page — so `filter` over a
+// windowed source would filter 100 rows and present the result as if it
+// had filtered all 30,000. Failing at load beats shipping that answer.
+//
+// The fix for a user hitting this is to push the work into the request:
+// `window.filters:` scopes on the server, which is the whole point.
+func validateWindowedUpstreams(sources map[string]*Source) error {
+	for name, s := range sources {
+		if s == nil || s.Window != nil {
+			continue
+		}
+		for _, up := range s.Upstreams() {
+			u, ok := sources[up]
+			if !ok || u == nil || u.Window == nil {
+				continue
+			}
+			return fmt.Errorf("data.sources.%s: upstream %q declares `window:` — a windowed source can only be bound directly to a table, not consumed by the %q operator (an operator sees one page and would present the result as if it had seen every row). Push the work into the request via `window.filters:` / `window.sort_param:`, or drop `window:` and use `paginate:` if you need the whole set in memory", name, up, s.Type)
 		}
 	}
 	return nil
