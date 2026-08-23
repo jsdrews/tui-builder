@@ -1,0 +1,121 @@
+# http_window.yaml — filter and page a remote API from the table.
+#
+# The Open Library search API holds a few million books and answers
+# `?offset=&limit=` for paging, `?q=` / `?author=` / `?title=` for
+# searching, and reports the match count as `numFound`. That's every
+# ingredient `window:` needs, with no key and no signup.
+#
+# Contrast with examples/http_paginated.yaml, the *other* way to handle a
+# multi-page API:
+#
+#   paginate:  walk every page up front, hand back one flat list. The
+#              table then filters and sorts what it holds. Great up to a
+#              few thousand rows; 300 requests before the first frame at
+#              30,000.
+#
+#   window:    fetch only the rows on screen, and let the server answer
+#              the filter and the sort. One request for the first 100
+#              rows, one more each time the user scrolls past what's
+#              loaded — and "author:tolkien" searches all 2 million
+#              books, not the 100 that happen to be resident.
+#
+# What to try once it's up:
+#
+#   /                     open the filter
+#   hobbit                bare term  → ?q=hobbit          (searches everything)
+#   author:tolkien        scoped     → ?author=tolkien    (mapped in filters:)
+#   author:tolkien ring   both       → ?author=tolkien&q=ring
+#   enter                 commits — the request goes out here, not per keystroke
+#   G                     jump to the last row; watch "·" placeholders fill in
+#   s / [ ]               sort by Editions (see the note on sort_param below)
+#   r                     refetch the window on screen
+#
+# Scroll fast and you'll see rows of "·" for a moment. That's the point:
+# the table is showing you 2 million logical rows while holding 100.
+#
+# Headless check (fetches the first window, prints it as JSON):
+#
+#   task wrangl -- examples/http_window.yaml books | jq 'length'
+
+app:
+  title: Open Library
+
+data:
+  sources:
+    books:
+      type: http
+      # Query params pinned here survive into every windowed request —
+      # only the window's own params get set. So `fields` trims the
+      # response on every page, and `q=tolkien` is the *default* search
+      # that a filter the user types replaces (search_param is `q` too).
+      url: https://openlibrary.org/search.json?q=tolkien&fields=title,author_name,first_publish_year,edition_count
+      root: docs
+
+      window:
+        page_size: 100
+        # One page of lookahead: without it the user sees placeholder
+        # rows for a beat at every 100-row boundary. With it, the next
+        # page is usually already in hand — at the cost of one extra
+        # request per boundary.
+        prefetch: 1
+
+        offset_param: offset
+        limit_param: limit
+        # Where the match count lives in the RAW response (before
+        # `root: docs` slices out the items). This is what lets the
+        # table size its scrollbar against 2,060 rows while holding 100.
+        # Drop it and the table just treats the end of what's loaded as
+        # the end — still correct, less informative.
+        total_path: numFound
+
+        # Bare terms — anything typed without a "column:" prefix — go
+        # here. Open Library's `q` searches title, author, subject, and
+        # full text at once.
+        search_param: q
+        # Scoped terms: the key is the COLUMN TITLE as it appears in
+        # columns[].title below, the value is the query parameter. So
+        # typing "author:tolkien" sends ?author=tolkien. A scoped term on
+        # a column that isn't listed here falls back to `q`.
+        filters:
+          Title: title
+          Author: author
+
+        sort_param: sort
+        sorts:
+          # Open Library's sort tokens bake in their direction — `new` is
+          # newest-first, `old` is oldest-first, `editions` is
+          # most-editions-first. There's no ascending form of `editions`,
+          # so ▲ and ▼ both send the same thing here and only the marker
+          # flips. That's this API, not the schema.
+          #
+          # An API with a symmetric sort (Django REST, most of what
+          # copies it) gets both directions from one line:
+          #
+          #   sort_param: ordering
+          #   sort_desc_prefix: "-"     # ascending: ?ordering=year
+          #                             # descending: ?ordering=-year
+          Editions: editions
+
+tui:
+  components:
+    books:
+      type: table
+      title: Books
+      source: books
+      # A windowed table filters and sorts remotely — it can't do either
+      # locally, because the rows it holds are one page of a much larger
+      # answer. That switch is automatic: binding to a source with
+      # `window:` is what flips it, there's no second flag to set.
+      filterable: true
+      filter_placeholder: "hobbit · author:tolkien · title:ring"
+      columns:
+        # Fixed and flex widths only. A content-auto column sizes itself
+        # to the widest cell it can see, so columns would reflow every
+        # time a new window landed underneath the cursor.
+        - {title: Title,    width: 40, flex: 3, value: title}
+        - {title: Author,   width: 24, flex: 1, value: author_name.0}
+        - {title: Year,     width: 6,  value: first_publish_year, align: right}
+        - {title: Editions, width: 9,  value: edition_count, align: right, sortable: true}
+  screen:
+    layout:
+      component: books

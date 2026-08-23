@@ -149,6 +149,15 @@ type Model struct {
 	// repeated params.
 	cursorAllSources map[string]*cfg.Source
 
+	// windows holds one tuilib coordinator per windowed table, keyed by
+	// component name (not source name — two tables could window the same
+	// source at different scroll positions). See window.go.
+	windows map[string]*windowEntry
+	// windowDefs is the `window:` block per source name, for the page
+	// size / prefetch the coordinator needs and the column-title →
+	// query-parameter map the query translation needs.
+	windowDefs map[string]*cfg.WindowConfig
+
 	// Confirm-modal state. When confirmModal is non-nil it overlays the
 	// body via ZStack and captures all keys until ConfirmedMsg /
 	// CancelledMsg arrives. pendingArgv holds the fully-substituted argv
@@ -266,7 +275,14 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, entries map[str
 			m.sources[boundName] = &sourceEntry{src: bound}
 		}
 		m.sourceUsers[boundName] = append(m.sourceUsers[boundName], name)
+		if def, ok := entries[boundName]; ok && def != nil && def.Window != nil {
+			if m.windowDefs == nil {
+				m.windowDefs = map[string]*cfg.WindowConfig{}
+			}
+			m.windowDefs[boundName] = def.Window
+		}
 	}
+	m.initWindows()
 	if err := m.initCursor(components, entries); err != nil {
 		return nil, err
 	}
@@ -295,7 +311,17 @@ func (m *Model) OnEnter(any) tea.Cmd {
 	}
 	m.started = true
 	var cmds []tea.Cmd
+	// Windowed sources open with a request for the first page instead of
+	// a whole-set Fetch. Their coordinators drive everything after that.
+	cmds = append(cmds, m.startWindows()...)
 	for name, entry := range m.sources {
+		// A windowed source's rows arrive through SetWindow. Fetching it
+		// here would take the ordinary path into SetRows, which clears
+		// the window and leaves the table claiming page one is the whole
+		// set.
+		if m.windowedSource(name) {
+			continue
+		}
 		// Cursor-driven sources fetch only when their driver has a
 		// focused row — kicking a fetch on OnEnter would try to hit
 		// the upstream with empty template substitutions. Skip; the
@@ -478,10 +504,16 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 				if len(m.sources) > 0 {
 					var cmds []tea.Cmd
 					for name := range m.sources {
+						// Windowed sources refresh through their
+						// coordinator — see refreshWindows.
+						if m.windowedSource(name) {
+							continue
+						}
 						if cmd := m.startFetch(name); cmd != nil {
 							cmds = append(cmds, cmd)
 						}
 					}
+					cmds = append(cmds, m.refreshWindows()...)
 					return m, tea.Batch(cmds...)
 				}
 			}
@@ -503,6 +535,16 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		return m, m.handleCursorChange(x)
 	case cursorFetchMsg:
 		return m, m.applyCursorFetch(x)
+	case windowRequestMsg:
+		return m, m.handleWindowRequest(x)
+	case windowFetchedMsg:
+		return m, m.handleWindowFetched(x)
+	case windowViewportMsg:
+		return m, m.handleWindowViewport(x)
+	case windowQueryMsg:
+		return m, m.handleWindowQuery(x)
+	case windowTickMsg:
+		return m, m.handleWindowTick(x)
 	case runner.Result:
 		captured := ""
 		if m.inFlightStderr != nil {
@@ -1351,6 +1393,11 @@ func translateFocusMsg(msg tea.Msg, name string) tea.Msg {
 			wrapped = append(wrapped, tagCursorFocused(sub, name))
 		}
 		return tea.BatchMsg(wrapped)
+	case table.ViewportChangedMsg, table.QueryChangedMsg:
+		// Windowed-source traffic. Tagged here rather than in its own
+		// wrapper because this is already the one place that knows which
+		// component's Update produced a message, batch unwrap included.
+		return translateWindowMsg(msg, name)
 	case table.RowFocusedMsg:
 		if x.Empty {
 			return taggedCursorMsg{driver: name, empty: true}

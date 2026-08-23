@@ -117,6 +117,8 @@ Below is the current state of each component.
 | Initial filter value | ✓ | `initial_filter` |
 | Filter placeholder | ✓ | `filter_placeholder` |
 | Initial sort | ✓ | `initial_sort: {column, desc}` |
+| `SetWindow` + `FilterRemote` / `SortRemote` | ✓ | implicit — binding `source:` to an entry with `window:` switches the table into windowed mode. See [Windowed sources](data-layer.md#windowed-sources) |
+| `SetDistinct` (filter hints from a facet endpoint) | ✗ | hints still come from resident rows |
 | `SetKeyedRows` (stable cursor) | ✗ | needs data sources |
 | `LoadingLabel` / `SetLoading` | ✗ | needs data sources |
 | `Borders.Vertical` / `HeaderRule` glyphs | ✗ | theme default only |

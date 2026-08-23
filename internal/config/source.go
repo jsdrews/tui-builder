@@ -21,7 +21,9 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -66,6 +68,14 @@ type Source struct {
 	// concatenated item list is returned. Mutually exclusive with
 	// Follow (streaming) and Format: text. See PaginateConfig.
 	Paginate *PaginateConfig `yaml:"paginate,omitempty"`
+
+	// Window opts an http source into lazy, server-answered paging: the
+	// bound table asks for the rows it's showing, and reports the filter
+	// and sort the user builds so the server answers those too. The
+	// opposite trade from Paginate, which walks every page eagerly into
+	// one list. Mutually exclusive with Paginate, Follow, and
+	// Format: text. See WindowConfig.
+	Window *WindowConfig `yaml:"window,omitempty"`
 
 	// ── exec ──
 	Command []string          `yaml:"command,omitempty"`
@@ -215,6 +225,16 @@ func (s *Source) Validate(path string) error {
 		}
 	}
 
+	// `window:` is http-only, and getting this wrong is silent rather
+	// than loud: a table bound to a windowed entry switches to remote
+	// filtering and sorting, so a kind that can't serve windows leaves
+	// the user with a filter bar and sort keys that do nothing at all.
+	// Reject it here rather than at the binding, so `wrangl` reports it
+	// too and the error names the kind that can't do it.
+	if s.Window != nil && s.Type != "http" && s.Type != "exec" && s.Type != "" {
+		return fmt.Errorf("%s: `window:` is only supported on `type: http` and `type: exec` (this is %s). Windowing means asking the source for a slice of a larger set — offset, limit, filter, sort — and those are the two kinds that can carry that into a request", path, s.Type)
+	}
+
 	switch s.Type {
 	case "":
 		return fmt.Errorf("%s: missing type", path)
@@ -354,6 +374,15 @@ func (s *Source) Clone() *Source {
 		cp := *s.Paginate
 		out.Paginate = &cp
 	}
+	if s.Window != nil {
+		cp := *s.Window
+		// Filters / Sorts are read-only lookup tables after load, but
+		// they're maps — copy so a per-screen clone can't be mutated
+		// through the original's aliased header.
+		cp.Filters = maps.Clone(s.Window.Filters)
+		cp.Sorts = maps.Clone(s.Window.Sorts)
+		out.Window = &cp
+	}
 	// Parameters / Keep / Compute / Parts / Lookups are treated as
 	// immutable declarations after load; aliasing is safe.
 	return &out
@@ -463,6 +492,124 @@ func (s *Source) validateHTTP(path string) error {
 			return fmt.Errorf("%s: `paginate:` requires json format (needs to parse the response to find the next-page reference)", path)
 		}
 	}
+	if s.Window != nil {
+		if err := s.Window.validateHTTPWindow(path + ".window"); err != nil {
+			return err
+		}
+		if s.Paginate != nil {
+			return fmt.Errorf("%s: `window:` and `paginate:` are mutually exclusive (paginate walks every page up front into one list; window fetches only the rows on screen — pick which trade you want)", path)
+		}
+		if s.Follow {
+			return fmt.Errorf("%s: `window:` and `follow: true` are mutually exclusive (a window is a random-access slice of a finite set; follow is an open-ended stream)", path)
+		}
+		if s.Format == "text" {
+			return fmt.Errorf("%s: `window:` requires json format (needs to parse the response to slice items and read the total)", path)
+		}
+	}
+	return nil
+}
+
+// validate enforces WindowConfig's required params and value ranges.
+// path is the YAML path (e.g. `data.sources.books.window`).
+func (w *WindowConfig) validateShared(path string) error {
+	if w.PageSize < 0 {
+		return fmt.Errorf("%s.page_size: must be >= 0 (0 = default %d)", path, DefaultWindowPageSize)
+	}
+	if w.Prefetch < 0 {
+		return fmt.Errorf("%s.prefetch: must be >= 0 (0 = fetch only what's on screen)", path)
+	}
+	for title, dest := range w.Filters {
+		if dest == "" {
+			return fmt.Errorf("%s.filters.%s: empty destination name", path, title)
+		}
+	}
+	for title, field := range w.Sorts {
+		if field == "" {
+			return fmt.Errorf("%s.sorts.%s: empty sort field name", path, title)
+		}
+	}
+	return nil
+}
+
+// validateHTTPWindow enforces the query-string half of the schema.
+func (w *WindowConfig) validateHTTPWindow(path string) error {
+	if err := w.validateShared(path); err != nil {
+		return err
+	}
+	if w.OffsetParam == "" {
+		return fmt.Errorf("%s.offset_param: required on an http source (the query parameter carrying the first row wanted, e.g. \"offset\")", path)
+	}
+	if w.LimitParam == "" {
+		return fmt.Errorf("%s.limit_param: required on an http source (the query parameter carrying the page size, e.g. \"limit\")", path)
+	}
+	// A windowed table always filters remotely — it has no local rows to
+	// filter against. A source that declares no way to carry a filter
+	// would leave the user typing into a filter bar that does nothing.
+	if w.SearchParam == "" && len(w.Filters) == 0 {
+		return fmt.Errorf("%s: set `search_param:` or at least one `filters:` entry — a windowed table filters remotely, so with neither the filter bar has nowhere to send what the user types", path)
+	}
+	if len(w.Sorts) > 0 && w.SortParam == "" {
+		return fmt.Errorf("%s.sorts: set without `sort_param:` — there's no query parameter to carry the mapped sort field", path)
+	}
+	if w.SortDescPrefix != "" && w.SortParam == "" {
+		return fmt.Errorf("%s.sort_desc_prefix: set without `sort_param:` — nothing to prefix", path)
+	}
+	return nil
+}
+
+// validateExecWindow enforces the argv half. Where an http window names
+// query parameters, an exec window templates ${window.*} into the
+// command — so the checks are about what the argv actually references,
+// not about which fields are set.
+func (w *WindowConfig) validateExecWindow(path string, argv []string) error {
+	if err := w.validateShared(path); err != nil {
+		return err
+	}
+	// The query-string fields have no meaning here. Silently ignoring a
+	// copy-pasted http block would leave paging and filtering quietly
+	// broken, so name each one that can't apply.
+	for field, set := range map[string]bool{
+		"offset_param":     w.OffsetParam != "",
+		"limit_param":      w.LimitParam != "",
+		"search_param":     w.SearchParam != "",
+		"sort_param":       w.SortParam != "",
+		"sort_desc_prefix": w.SortDescPrefix != "",
+	} {
+		if set {
+			return fmt.Errorf("%s.%s: http-only — an exec window templates the request into `command:` instead. Use ${window.offset}, ${window.limit}, ${window.search}, ${window.sort} / ${window.sort_dir}, and ${window.filters.<name>}", path, field)
+		}
+	}
+	if len(w.Sorts) > 0 {
+		return fmt.Errorf("%s.sorts: http-only — an exec command receives the column title as ${window.sort} and maps it itself", path)
+	}
+
+	joined := strings.Join(argv, " ")
+	for _, tok := range []string{"${window.offset}", "${window.limit}"} {
+		if !strings.Contains(joined, tok) {
+			return fmt.Errorf("%s: `command:` never references %s — without it the command returns the same rows for every window, and the table would scroll through 10,000 copies of page one", path, tok)
+		}
+	}
+	// Same rule as http: a windowed table filters remotely, so it needs
+	// somewhere for the filter to land.
+	hasFilterToken := strings.Contains(joined, "${window.search}")
+	for _, token := range w.Filters {
+		if strings.Contains(joined, "${window.filters."+token+"}") {
+			hasFilterToken = true
+		}
+	}
+	if !hasFilterToken {
+		return fmt.Errorf("%s: `command:` references neither ${window.search} nor any declared ${window.filters.*} — a windowed table filters remotely, so with neither the filter bar has nowhere to send what the user types", path)
+	}
+	for title, token := range w.Filters {
+		if !strings.Contains(joined, "${window.filters."+token+"}") {
+			return fmt.Errorf("%s.filters.%s: declared as %q but `command:` never references ${window.filters.%s}", path, title, token, token)
+		}
+	}
+	// The program name is resolved before any substitution happens, and
+	// a dropped-empty element there would leave nothing to execute.
+	if len(argv) > 0 && strings.Contains(argv[0], "${window.") {
+		return fmt.Errorf("%s: `command[0]` must not reference ${window.*} — the program name can't depend on the window", path)
+	}
 	return nil
 }
 
@@ -497,6 +644,17 @@ func (s *Source) validateExec(path string) error {
 	}
 	if len(s.Command) == 0 {
 		return fmt.Errorf("%s: exec source needs command (non-empty argv)", path)
+	}
+	if s.Window != nil {
+		if err := s.Window.validateExecWindow(path+".window", s.Command); err != nil {
+			return err
+		}
+		if s.Follow {
+			return fmt.Errorf("%s: `window:` and `follow: true` are mutually exclusive (a window is a random-access slice of a finite set; follow is an open-ended stream)", path)
+		}
+		if s.Format == "text" {
+			return fmt.Errorf("%s: `window:` requires json format (needs to parse stdout to slice items and read the total)", path)
+		}
 	}
 	return nil
 }

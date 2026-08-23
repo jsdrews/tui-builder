@@ -22,6 +22,11 @@ type Config struct {
 	App  App       `yaml:"app"`
 	Data DataBlock `yaml:"data,omitempty"`
 	TUI  TUIBlock  `yaml:"tui,omitempty"`
+
+	// envSubstituted records that SubstituteEnv has already run, so a
+	// second call is a no-op rather than a second pass over values that
+	// are now data rather than templates. See SubstituteEnv.
+	envSubstituted bool
 }
 
 // DataBlock holds the data-layer definitions. Every entry under
@@ -121,6 +126,107 @@ type PaginateConfig struct {
 	//                            (subsequent pages simply omitted)
 	OnPageError string `yaml:"on_page_error,omitempty"`
 }
+
+// WindowConfig opts an http source into *windowed* paging — the lazy
+// counterpart to PaginateConfig. Where `paginate:` walks every page up
+// front and hands back one flat list, `window:` fetches only the rows
+// the user is looking at, and re-fetches when they scroll or filter.
+//
+// The difference matters at scale: `paginate:` over a 30,000-row endpoint
+// means 300 requests before the first frame. `window:` means one request
+// for the first 100 rows, and one more each time the user scrolls past
+// what's loaded. It also means the *server* answers the filter, so
+// "author:tolkien" searches all 30,000 rows rather than the 100 that
+// happen to be resident.
+//
+// Supported on `type: http` and `type: exec`. The two carry the request
+// differently, and the fields split accordingly:
+//
+//   - http templates it into the query string, so it names query
+//     parameters: OffsetParam / LimitParam / SearchParam / SortParam,
+//     with Filters mapping a column title to a parameter.
+//   - exec templates it into the argv via ${window.offset},
+//     ${window.limit}, ${window.search}, ${window.sort},
+//     ${window.sort_dir}, and ${window.filters.<name>} — so the *Param
+//     fields don't apply, and Filters maps a column title to the token
+//     suffix instead.
+//
+// PageSize, Prefetch, TotalPath, and Filters are shared; validation
+// rejects the fields that can't apply to the kind in use rather than
+// ignoring them, since a silently-ignored offset_param means the
+// command returns page one forever.
+//
+// A source with `window:` set may only be bound to a `type: table`
+// component — table is the only component that can hold a sparse window
+// (tuilib's table.SetWindow). Binding it elsewhere is a config error.
+//
+// The bound table switches to remote filtering and sorting
+// automatically: the filter the user types is reported to this source
+// rather than applied to the rows on screen, because filtering one page
+// of a larger set isn't filtering.
+type WindowConfig struct {
+	// PageSize is how many rows one request asks for. Default
+	// DefaultWindowPageSize.
+	PageSize int `yaml:"page_size,omitempty"`
+	// Prefetch is how many extra pages to pull beyond the rows actually
+	// on screen. 0 (default) fetches only what's needed — the user sees
+	// placeholder rows briefly at each page boundary. 1 usually hides
+	// that, at the cost of an extra request per boundary.
+	Prefetch int `yaml:"prefetch,omitempty"`
+
+	// OffsetParam is the query parameter carrying the first row wanted
+	// (e.g. "offset", "_start", "skip"). Required on http; rejected on
+	// exec, which uses ${window.offset} in the argv instead.
+	OffsetParam string `yaml:"offset_param"`
+	// LimitParam is the query parameter carrying the page size (e.g.
+	// "limit", "_limit", "per_page"). Required on http; rejected on
+	// exec, which uses ${window.limit} in the argv instead.
+	LimitParam string `yaml:"limit_param"`
+	// TotalPath is the dot-path into the RAW response (pre-`root:`
+	// slicing) holding the total row count — "numFound", "count",
+	// "meta.total". Optional: without it the table can't show a
+	// scrollbar proportion or a row count, and treats the end of what
+	// has loaded as the end of the set.
+	TotalPath string `yaml:"total_path,omitempty"`
+
+	// SearchParam is the query parameter that answers *bare* filter
+	// terms — the words the user types with no "column:" prefix. All
+	// bare terms are joined with spaces into one value. Without it,
+	// bare terms are dropped (and validation requires that a source
+	// declaring no SearchParam declares at least one entry in Filters,
+	// so a filterable table always has some way to filter).
+	SearchParam string `yaml:"search_param,omitempty"`
+	// Filters maps a column *title* to the destination that answers a
+	// scoped term. On http the destination is a query parameter, so a
+	// "author:tolkien" term becomes "?author=tolkien"; on exec it is a
+	// token suffix, so the same term reaches the command as
+	// ${window.filters.author}. Titles match the bound table's
+	// `columns[].title` — the user can type any unambiguous prefix of
+	// one, and it arrives here resolved to the full title.
+	// A scoped term whose column isn't listed here degrades to a bare
+	// term (and so lands in SearchParam), which is what the user meant
+	// often enough to beat dropping it.
+	Filters map[string]string `yaml:"filters,omitempty"`
+
+	// SortParam is the query parameter carrying the sort field. Without
+	// it, a sortable column on the bound table asks for a sort the
+	// source can't answer, so validation rejects that combination.
+	SortParam string `yaml:"sort_param,omitempty"`
+	// Sorts maps a column title to the sort field name the API wants,
+	// for APIs whose sort tokens aren't the column titles ("Year" →
+	// "first_publish_year"). Unlisted columns send their title as-is.
+	Sorts map[string]string `yaml:"sorts,omitempty"`
+	// SortDescPrefix is prepended to the sort field for a descending
+	// sort — "-" covers Django REST (`ordering=-created`) and most of
+	// what follows it. Empty means the API has no descending form, so
+	// both directions send the same value.
+	SortDescPrefix string `yaml:"sort_desc_prefix,omitempty"`
+}
+
+// DefaultWindowPageSize is the window size used when WindowConfig.PageSize
+// is unset. Matches tuilib's source.DefaultPageSize — big enough that a
+// full screen is one request, small enough that the first frame is cheap.
+const DefaultWindowPageSize = 100
 
 // App configures the surrounding tuilib app shell.
 type App struct {
@@ -405,6 +511,18 @@ type Component struct {
 	InitialFilter string `yaml:"initial_filter,omitempty"`
 	// InitialCursor places the cursor at a specific row index on startup.
 	InitialCursor int `yaml:"initial_cursor,omitempty"`
+
+	// Windowed is derived, not authored: Config.Validate sets it on a
+	// table whose `source:` names an entry declaring `window:`. It rides
+	// on the component (rather than being looked up at build time)
+	// because buildTable only ever sees the component — and because a
+	// pushed screen's cloned component needs to stay windowed without
+	// re-deriving anything.
+	//
+	// A windowed table holds a sparse slice of a larger set, so it
+	// filters and sorts remotely and paints unloaded rows as
+	// placeholders. See WindowConfig.
+	Windowed bool `yaml:"-"`
 
 	// Source names the data entry this component is bound to. The
 	// entry can be any kind (leaf source or pipeline operator) —

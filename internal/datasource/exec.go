@@ -40,6 +40,7 @@ type execSource struct {
 	follow  bool
 	timeout time.Duration
 	refresh time.Duration
+	window  *cfg.WindowConfig // nil = not windowed
 }
 
 func newExec(d *cfg.Source) (Source, error) {
@@ -71,6 +72,7 @@ func newExec(d *cfg.Source) (Source, error) {
 		follow:  d.Follow,
 		timeout: timeout,
 		refresh: refresh,
+		window:  d.Window,
 	}, nil
 }
 
@@ -93,10 +95,39 @@ func (s *execSource) Fetch(ctx context.Context) (any, error) {
 		return "", nil
 	}
 
+	if s.window != nil {
+		// A windowed source has no "everything" to hand back. Return the
+		// first page so wrangl and any non-table consumer see
+		// representative data; the bound table goes through FetchWindow.
+		page, err := s.FetchWindow(ctx, WindowQuery{Offset: 0, Limit: s.pageSize()})
+		if err != nil {
+			return nil, err
+		}
+		return page.Items, nil
+	}
+
+	raw, err := s.run(ctx, s.argv)
+	if err != nil {
+		return nil, err
+	}
+	if s.format == "text" {
+		return string(raw), nil
+	}
+	parsed, err := s.parseJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+	return applyRoot(parsed, s.root), nil
+}
+
+// run executes argv and returns its stdout. Shared by the one-shot
+// Fetch and the windowed path so both get identical timeout, env, and
+// stderr-into-the-error handling.
+func (s *execSource) run(ctx context.Context, argv []string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, s.argv[0], s.argv[1:]...)
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	if len(s.env) > 0 {
 		cmd.Env = append(os.Environ(), s.env...)
 	}
@@ -110,18 +141,70 @@ func (s *execSource) Fetch(ctx context.Context) (any, error) {
 		}
 		return nil, err
 	}
-	if s.format == "text" {
-		return stdout.String(), nil
-	}
+	return stdout.Bytes(), nil
+}
+
+// parseJSON decodes stdout, quoting a preview on failure — a command
+// that printed a warning line before its JSON is the usual cause, and
+// the preview is what makes that obvious.
+func (s *execSource) parseJSON(raw []byte) (any, error) {
 	var out any
-	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
-		preview := stdout.String()
+	if err := json.Unmarshal(raw, &out); err != nil {
+		preview := string(raw)
 		if len(preview) > 120 {
 			preview = preview[:120] + "…"
 		}
 		return nil, fmt.Errorf("parse json: %w (preview: %q)", err, preview)
 	}
-	return applyRoot(out, s.root), nil
+	return out, nil
+}
+
+// pageSize is the configured window size, or the default.
+func (s *execSource) pageSize() int {
+	if s.window == nil || s.window.PageSize <= 0 {
+		return cfg.DefaultWindowPageSize
+	}
+	return s.window.PageSize
+}
+
+// FetchWindow implements WindowedSource for exec: the query is rendered
+// into the argv via ${window.*} tokens, and the command is expected to
+// return that slice already filtered and ordered.
+//
+// Where the http source pushes the query into a query string, here it
+// goes into the command line — which is the shape that fits `psql -c
+// "… LIMIT … OFFSET …"`, `aws --max-items --starting-token`, and any
+// script that takes paging flags. The command does the work; this just
+// renders the request and reads the answer back.
+func (s *execSource) FetchWindow(ctx context.Context, q WindowQuery) (WindowPage, error) {
+	if s.window == nil {
+		return WindowPage{}, ErrNotWindowed
+	}
+	argv := renderWindowArgv(s.argv, q, s.window.Filters)
+	if len(argv) == 0 {
+		// Can't happen with a validated config — validateExec requires
+		// the command's first element to be free of window tokens — but
+		// exec.Command on an empty argv panics, so don't rely on it.
+		return WindowPage{}, fmt.Errorf("window: rendered an empty command")
+	}
+	raw, err := s.run(ctx, argv)
+	if err != nil {
+		return WindowPage{}, err
+	}
+	parsed, err := s.parseJSON(raw)
+	if err != nil {
+		return WindowPage{}, err
+	}
+	// Root sees the items, total_path sees the envelope — same split as
+	// the http source, and for the same reason: in
+	// `{total: N, rows: [...]}` both live at the top level.
+	page := WindowPage{Items: Iter(applyRoot(parsed, s.root)), Total: -1}
+	if p := s.window.TotalPath; p != "" {
+		if n, ok := toInt(Get(parsed, p)); ok {
+			page.Total = n
+		}
+	}
+	return page, nil
 }
 
 // Subscribe implements StreamingSource for follow mode. Starts the

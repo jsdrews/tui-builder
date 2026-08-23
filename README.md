@@ -206,6 +206,48 @@ Operator kinds (transform an upstream entry):
 
 See [`docs/components.md`](docs/components.md) for the full schema.
 
+### Paging a remote API
+
+An `http` or `exec` source over more rows than fit in memory has two
+options, and they trade against each other:
+
+```yaml
+paginate:                  # walk every page up front, hand back one list
+  strategy: link
+  next_path: next
+
+window:                    # fetch only the rows on screen; the SERVER
+  offset_param: offset     # answers the filter and the sort
+  limit_param: limit
+  total_path: numFound
+  search_param: q
+  filters: {Author: author}
+```
+
+With `window:` the bound table holds one page of a much larger set and
+paints the rest as `·` until you scroll there. Typing `author:tolkien`
+searches every row the server has, not the hundred that happen to be
+resident — which is the part `paginate:` can't do at any page count.
+Binding a table to a windowed source is what switches it into that mode;
+there's no second flag.
+
+`window:` works on `exec` too — there the request templates into the
+argv instead of a query string, via `${window.offset}`,
+`${window.limit}`, `${window.search}`, and `${window.filters.<name>}`:
+
+```yaml
+command: [myreport, --offset=${window.offset}, --limit=${window.limit},
+          --author=${window.filters.author}]
+```
+
+An element whose window tokens all resolve empty is dropped, so with no
+`author:` term typed the `--author=` flag disappears entirely rather than
+being passed empty.
+
+See [`examples/http_window.yaml`](examples/http_window.yaml),
+[`examples/exec_window.yaml`](examples/exec_window.yaml), and
+[Windowed sources](docs/data-layer.md#windowed-sources).
+
 ### Streaming
 
 Long-running subprocess (`exec` + `follow: true`) or WebSocket
@@ -356,6 +398,9 @@ via `task examples`.
 | `examples/http_github.yaml` | GitHub API drilldown: users → repos → repo detail |
 | `examples/http_github_auth.yaml` | Authenticated GitHub (`${env.GITHUB_TOKEN}`) |
 | `examples/http_refresh.yaml` | CoinGecko prices with 10s polling |
+| `examples/http_paginated.yaml` | `paginate:` — walk every page up front into one list |
+| `examples/http_window.yaml` | `window:` over http — page and filter a remote API from the table; the server answers `author:tolkien` across all 2M Open Library books while the table holds 100 rows |
+| `examples/exec_window.yaml` | `window:` over exec — the same loop templated into an argv; `git log --skip/--max-count/--author/--grep` answers the table's paging and filtering |
 | `examples/exec_local.yaml` | `exec` source: `git log` as a table |
 | `examples/file_fixture.yaml` | `file` source with live re-read |
 | `examples/merge_sources.yaml` | `merge` source unioning file + 2 exec children |

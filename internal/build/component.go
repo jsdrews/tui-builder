@@ -97,7 +97,16 @@ func (c *Component) Rebuild(th theme.Theme) {
 		cursor := c.Table.Cursor()
 		value := c.Table.Value()
 		sortCol, sortDesc := c.Table.SortColumn(), c.Table.SortDescending()
+		off, _, total := c.Table.Window()
+		rows := c.Table.Rows()
 		m := buildTable(c.Cfg, th)
+		if c.Cfg.Windowed {
+			// The fresh table holds nothing, and nothing else will
+			// re-deliver the window — the source only refetches when the
+			// user scrolls or filters, and a theme change is neither.
+			// Reinstall it so a rebuild doesn't blank the page.
+			m.SetWindow(rows, off, total)
+		}
 		m.SetValue(value)
 		m.SetCursor(cursor)
 		m.SetSort(sortCol, sortDesc)
@@ -197,6 +206,15 @@ func buildTable(c *cfg.Component, th theme.Theme) table.Model {
 	opts.Filterable = c.Filterable
 	if c.FilterPlaceholder != "" {
 		opts.Filter.Placeholder = c.FilterPlaceholder
+	}
+	if c.Windowed {
+		// A windowed table holds one page of a larger set, so filtering
+		// and sorting it locally would answer over the 100 rows that
+		// happen to be resident and present that as the answer over all
+		// of them. Both go to the source instead; the screen turns the
+		// resulting QueryChangedMsg into a request.
+		opts.FilterMode = table.FilterRemote
+		opts.SortMode = table.SortRemote
 	}
 	if cs := c.Colors; cs != nil {
 		if v := parseColor(cs.BorderActive, th); v != nil {

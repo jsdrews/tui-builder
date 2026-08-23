@@ -164,75 +164,173 @@ func validateEnvSpecs(specs []EnvSpec) error {
 // in a static payload they're probably doing it deliberately.
 func collectEnvRefs(c *Config) map[string]struct{} {
 	refs := map[string]struct{}{}
-	visit := func(s string) { addEnvRefs(s, refs) }
+	walkTemplates(c, func(s *string) { addEnvRefs(*s, refs) })
+	return refs
+}
+
+// SubstituteEnv replaces every `${env.NAME}` token in the config with
+// os.Getenv(NAME), in place. Unset vars become the empty string —
+// checkEnv has already warned about (or rejected) the ones that matter.
+//
+// This lives in the data layer on purpose. The equivalent TUI-side
+// substitution is in internal/build, which cmd/wrangl must not import
+// (see scripts/check-data-layer-boundary.sh) — so before this existed,
+// `wrangl` silently emitted configs with literal `${env.X}` in their
+// URLs and argv while `tui-builder` resolved them, which is a
+// difference no user could be expected to guess at.
+//
+// It is NOT called from Load, and must not be: cmd/tui-builder collects
+// `app.prompts:` and os.Setenv's the answers *after* loading, so baking
+// env in at load time would freeze prompt-backed vars to empty. Each
+// entry point calls this once its environment is final.
+//
+// Safe to call more than once — the second call returns immediately.
+// That guard is load-bearing, not tidiness: substitution is single-pass
+// within a call, so an inserted value is never rescanned, but a *second*
+// walk would treat it as a fresh template. An env var whose value
+// happens to contain "${env.SOMETHING}" would then expand on the second
+// pass, turning the contents of one variable into a reference to
+// another. A substituted value is data, not a template.
+func (c *Config) SubstituteEnv() {
+	if c == nil || c.envSubstituted {
+		return
+	}
+	c.envSubstituted = true
+	walkTemplates(c, func(s *string) {
+		if *s == "" || !strings.Contains(*s, "${env.") {
+			return
+		}
+		*s = envTokenRe.ReplaceAllStringFunc(*s, func(tok string) string {
+			return os.Getenv(envTokenRe.FindStringSubmatch(tok)[1])
+		})
+	})
+}
+
+// walkTemplates visits every string in the config that may carry a
+// template token, handing each one out by pointer so a caller can read
+// it or rewrite it in place.
+//
+// Both the load-time reference scan and SubstituteEnv go through here.
+// That is the point: when they were two separate walks, the scanner
+// warned about references the substituter never resolved, and coverage
+// drifted apart field by field. One walk means a field is either in
+// both or in neither.
+//
+// Deliberately not covered: fields that name data rather than carry
+// display text — dot-paths (a column's `value:`, a source's `root:`, an
+// inspector field's `path:`) and expression strings (`where:`,
+// `compute:`, `by:`) — and `static` `data:`, which is arbitrary YAML
+// rather than a template. An inspector field's `value:` IS covered: it
+// is a literal, with `path:` being that field's dot-path.
+func walkTemplates(c *Config, fn func(*string)) {
+	visitMap := func(m map[string]string) {
+		for k, v := range m {
+			s := v
+			fn(&s)
+			m[k] = s
+		}
+	}
+	visitSlice := func(xs []string) {
+		for i := range xs {
+			fn(&xs[i])
+		}
+	}
 
 	for _, src := range c.Data.Sources {
 		if src == nil {
 			continue
 		}
-		visit(src.URL)
-		visit(src.Body)
-		visit(src.Method)
-		visit(src.Path)
-		for _, v := range src.Headers {
-			visit(v)
-		}
-		for _, c := range src.Command {
-			visit(c)
-		}
-		for _, v := range src.Env {
-			visit(v)
-		}
-		for _, m := range src.InitialMessages {
-			visit(m)
-		}
+		fn(&src.URL)
+		fn(&src.Body)
+		fn(&src.Method)
+		fn(&src.Path)
+		visitMap(src.Headers)
+		visitSlice(src.Command)
+		visitMap(src.Env)
+		visitSlice(src.InitialMessages)
 	}
 
 	// Screens: single-screen shorthand + multi-screen map.
-	visit(c.TUI.Screen.Title)
-	visitScreen(&c.TUI.Screen, visit)
+	visitScreen(&c.TUI.Screen, fn)
 	for _, s := range c.TUI.Screens {
-		if s == nil {
-			continue
+		if s != nil {
+			visitScreen(s, fn)
 		}
-		visit(s.Title)
-		visitScreen(s, visit)
 	}
 
-	// Components: titles + static row/list content.
 	for _, comp := range c.TUI.Components {
 		if comp == nil {
 			continue
 		}
-		visit(comp.Title)
-		for _, item := range comp.Items {
-			visit(item)
-		}
-		for _, line := range comp.Lines {
-			visit(line)
+		fn(&comp.Title)
+		fn(&comp.FilterPlaceholder)
+		fn(&comp.InitialFilter)
+		fn(&comp.InitialQuery)
+		fn(&comp.RootLabel)
+		visitSlice(comp.Items)
+		visitSlice(comp.Lines)
+		for i := range comp.Columns {
+			fn(&comp.Columns[i].Title)
 		}
 		for _, row := range comp.Rows {
-			for _, cell := range row {
-				if str, ok := cell.(string); ok {
-					visit(str)
+			for j, cell := range row {
+				switch x := cell.(type) {
+				case string:
+					s := x
+					fn(&s)
+					row[j] = s
+				case map[string]any:
+					// Styled cells: {value: X, color: red} / {label: X, url: …}.
+					for k, vv := range x {
+						if str, ok := vv.(string); ok {
+							s := str
+							fn(&s)
+							x[k] = s
+						}
+					}
 				}
 			}
 		}
+		visitTreeNode(comp.Root, fn)
+		visitInspectorFields(comp.Fields, fn)
 	}
-
-	return refs
 }
 
-// visitScreen walks screen-level templated fields (actions'
-// Run/Confirm/Notice). Split out because both the shorthand
-// `screen:` and the multi-screen `screens:` map need the same walk.
-func visitScreen(s *Screen, visit func(string)) {
-	for _, a := range s.Actions {
-		visit(a.Confirm)
-		visit(a.Notice)
-		for _, arg := range a.Run {
-			visit(arg)
+// visitScreen walks a screen's own templated fields: its title, its
+// actions' Run / Confirm / Notice, and any on_key bind templates.
+func visitScreen(s *Screen, fn func(*string)) {
+	fn(&s.Title)
+	for i := range s.Actions {
+		fn(&s.Actions[i].Confirm)
+		fn(&s.Actions[i].Notice)
+		for j := range s.Actions[i].Run {
+			fn(&s.Actions[i].Run[j])
 		}
+	}
+	for i := range s.OnKey {
+		for k, v := range s.OnKey[i].Bind {
+			str := v
+			fn(&str)
+			s.OnKey[i].Bind[k] = str
+		}
+	}
+}
+
+func visitTreeNode(n *TreeNode, fn func(*string)) {
+	if n == nil {
+		return
+	}
+	fn(&n.Label)
+	for _, ch := range n.Children {
+		visitTreeNode(ch, fn)
+	}
+}
+
+func visitInspectorFields(fields []InspectorField, fn func(*string)) {
+	for i := range fields {
+		fn(&fields[i].Label)
+		fn(&fields[i].Value)
+		visitInspectorFields(fields[i].Children, fn)
 	}
 }
 

@@ -117,6 +117,11 @@ type StreamingSource interface {
     Source
     Subscribe(ctx context.Context) (<-chan Event, error)
 }
+
+type WindowedSource interface {
+    Source
+    FetchWindow(ctx context.Context, q WindowQuery) (WindowPage, error)
+}
 ```
 
 **`Fetch` returns the useful value.** `root:` slicing happens *inside*
@@ -128,6 +133,25 @@ of the source.
 detects the interface at `OnEnter`, opens the subscription, and pumps
 events into the bound logview. Non-streaming sources fall back to the
 poll-via-`tea.Tick` path.
+
+**Windowed sources** implement `FetchWindow` *additionally* — a slice of
+a remote set, with the filter and sort pushed into the request.
+Implemented by `http` (into the query string) and `exec` (into the argv
+via `${window.*}` tokens); the two share `WindowConfig`, and validation
+rejects the fields that can't apply to the kind in use rather than
+ignoring them.
+
+The screen registers a tuilib `pkg/source` coordinator per bound table
+(`internal/screen/window.go`) and drives it from the table's viewport and
+query messages; the ordinary fetch wave skips these sources entirely,
+because `SetRows` would collapse the window into the page it holds.
+`Fetch` still works and returns the first page, so `wrangl` gets
+something sensible.
+
+`WindowQuery` / `WindowPage` deliberately mirror tuilib's
+`pkg/source.Query` and `pkg/table`'s window setter *without importing
+them* — the data layer never imports the TUI. `internal/screen` owns the
+translation, which is the one place both halves are already in scope.
 
 ## Pipelines: named, addressable data over sources
 
@@ -307,9 +331,43 @@ stop. Most "I need richer source semantics" are actually:
   project / derive / sort / cache), or wrap with `exec` if the
   transform belongs in a CLI
 
-The one legitimate extension we've added is `StreamingSource` for the
-fundamentally different lifecycle of push-based events. Don't add more
-unless you have a comparable structural reason.
+Two extensions have cleared that bar, both for a genuinely different
+lifecycle rather than richer configuration:
+
+- `StreamingSource` — push-based events instead of snapshots.
+- `WindowedSource` — the set is bigger than anyone wants to hold, so
+  "give me everything" isn't a question the source can answer. The
+  request carries which rows, matching what, in what order, and the
+  answer changes as the user scrolls and types.
+
+Note what adding `exec` windowing did NOT touch: `internal/screen` and
+`internal/build` needed zero changes, because they only ever knew
+`ds.WindowedSource`. That's the interface doing its job — a third
+windowed kind should cost one file in `internal/datasource` plus its
+validator, and nothing else.
+
+Don't add a third without a comparable structural reason.
+
+### 3b. `${env.*}` resolution lives in the data layer, and each entry point calls it.
+
+`Config.SubstituteEnv()` (internal/config/env.go) resolves every
+`${env.*}` token in one walk. `cmd/wrangl` calls it right after Load;
+`cmd/tui-builder` calls it after `app.prompts:` have been collected and
+`os.Setenv`'d, which is why it can't simply live inside `Load` — that
+would freeze prompt-backed vars to empty before the prompt ran.
+
+It lives in `internal/config` rather than `internal/build` because
+`cmd/wrangl` may not import the TUI layer. When it *did* only live in
+`internal/build`, `wrangl` silently emitted configs with literal
+`${env.HOST}` in their URLs while `tui-builder` resolved them — the same
+config behaving differently depending on which binary opened it, with a
+correct-looking load-time warning either way. That is the shape rule 3a
+is warning about: a helper both halves need, stranded on the TUI side.
+
+The load-time reference scan (the "unset and not declared" warning) and
+the substituter share one walker, `walkTemplates`. Keep it that way. As
+two walks they drifted, and the scanner warned about fields the
+substituter never touched.
 
 ### 4. Selection substitution happens at push time, not fetch time.
 
