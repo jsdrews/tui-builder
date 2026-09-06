@@ -76,8 +76,30 @@ Two implementations exist:
 That branch was written against v0.20, before `pkg/action` existed. Its
 own doc comment already reaches for `runner.CaptureWith` "so output
 streams into the console" — it anticipated this release without having
-it. **Rebase it onto the bump first; layer `pkg/action` on top.** Do not
-re-derive it.
+it. Do not re-derive it.
+
+**How to bring it in — unresolved.** The obvious move is to rebase it
+onto the bump and land it green first, but a trial cherry-pick turned up
+two things that argue against:
+
+- Its parent is `274d539`, **before** the pagination/window work
+  (`1499efb`, 3660 lines). So the rebase crosses that schema commit as
+  well as the bump — seven files conflict: `README.md`,
+  `cmd/tui-builder/main.go`, `docs/components.md`,
+  `examples/prompts_boot.yaml`, `internal/config/{config,env,load}.go`
+  and `internal/screen/screen.go`.
+- Most of the `screen.go` conflict is in the dispatch / confirm / alert
+  path that the `pkg/action` step **deletes**. Merging it carefully
+  across pagination in order to remove it next step is wasted work.
+
+The cheaper route is probably to cherry-pick only what applies cleanly —
+`internal/action/`, `internal/config/action.go`,
+`internal/config/action_validate.go`, `cmd/wrangl/actions.go` and the
+examples are all new files — and write the screen wiring straight against
+`pkg/action`. That keeps the branch's design (the registry, typed
+`inputs:`, exec + http, `success:` expressions) and skips a throwaway
+merge. Not decided; the schema halves of `config.go` and `load.go` still
+have to be merged either way.
 
 ### What the shell takes over
 
