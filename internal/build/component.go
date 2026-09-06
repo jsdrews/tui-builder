@@ -182,7 +182,7 @@ func buildList(c *cfg.Component, th theme.Theme) list.Model {
 			opts.InactiveColor = v
 		}
 		if v := parseColor(cs.Selected, th); v != nil {
-			opts.SelectedColor = v
+			opts.SelectedStyle = opts.SelectedStyle.Foreground(v)
 		}
 		if v := parseColor(cs.Spinner, th); v != nil {
 			opts.SpinnerStyle = opts.SpinnerStyle.Foreground(v)
