@@ -1037,6 +1037,13 @@ func (m *Model) newPromptForm(prompts []cfg.Prompt) form.Model {
 				Label:   labelOr(p.Label, p.Key),
 				Initial: p.InitialBool,
 			})
+		case "password":
+			fields[i] = form.Password(form.PasswordOptions{
+				Key:         p.Key,
+				Label:       labelOr(p.Label, p.Key),
+				Placeholder: p.Placeholder,
+				Initial:     p.Initial,
+			})
 		default: // text
 			fields[i] = form.Text(form.TextOptions{
 				Key:         p.Key,

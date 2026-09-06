@@ -38,6 +38,11 @@ func Load(path string) (*Config, error) {
 // entry checks (upstream resolution, cycle detection, join-lookup
 // constraints, component bindings) walk the unified Sources map.
 func (c *Config) Validate() error {
+	// 0. Boot-time prompts. Same shape as an action's, and until now the
+	//    only list of prompts nothing checked.
+	if err := validatePrompts(c.App.Prompts, "app.prompts"); err != nil {
+		return err
+	}
 	// 1. Per-entry structural validation.
 	for name, s := range c.Data.Sources {
 		if s == nil {
@@ -100,7 +105,7 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("tui.components.%s: referenced %d times in tui.screen.layout — each component may be placed only once per screen", name, n)
 			}
 		}
-		if err := validateActions(c.TUI.Screen.Actions, refs, c.TUI.Components, "tui.screen"); err != nil {
+		if err := validateActions(c.TUI.Screen.Actions, refs, c.TUI.Components, "tui.screen", c.App.OutputConsoleKey()); err != nil {
 			return err
 		}
 		if err := validateOnCursor(refs, c.TUI.Components, "tui.screen"); err != nil {
@@ -156,7 +161,7 @@ func (c *Config) Validate() error {
 			}
 			seenKeys[dedupKey] = i
 		}
-		if err := validateActions(s.Actions, refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name)); err != nil {
+		if err := validateActions(s.Actions, refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name), c.App.OutputConsoleKey()); err != nil {
 			return err
 		}
 		if err := validateOnCursor(refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name)); err != nil {
@@ -210,10 +215,16 @@ func validateOnCursor(refs map[string]int, components map[string]*Component, pat
 	return nil
 }
 
-func validateActions(actions []Action, refs map[string]int, components map[string]*Component, path string) error {
+func validateActions(actions []Action, refs map[string]int, components map[string]*Component, path, outputKey string) error {
 	for i, a := range actions {
 		if a.Key == "" {
 			return fmt.Errorf("%s.actions[%d]: key is required", path, i)
+		}
+		// The console key is claimed by the app shell, so a component
+		// never sees it. Binding an action to it would look right in the
+		// config and do nothing at runtime.
+		if outputKey != "" && a.Key == outputKey {
+			return fmt.Errorf("%s.actions[%d]: key %q is the output console key (app.output_key) — pick another, or set app.output_key to disable the console", path, i, a.Key)
 		}
 		if a.Source == "" {
 			return fmt.Errorf("%s.actions[%d]: source is required", path, i)
@@ -228,18 +239,32 @@ func validateActions(actions []Action, refs map[string]int, components map[strin
 		if src.Type != "list" && src.Type != "table" {
 			return fmt.Errorf("%s.actions[%d]: source %q must be a list or table (got %s)", path, i, a.Source, src.Type)
 		}
-		for j, p := range a.Prompts {
-			if p.Key == "" {
-				return fmt.Errorf("%s.actions[%d].prompts[%d]: key is required", path, i, j)
-			}
-			switch p.Type {
-			case "", "text", "select", "confirm":
-			default:
-				return fmt.Errorf("%s.actions[%d].prompts[%d]: unknown type %q (want text|select|confirm)", path, i, j, p.Type)
-			}
-			if p.Type == "select" && len(p.Options) == 0 {
-				return fmt.Errorf("%s.actions[%d].prompts[%d]: select prompt needs options", path, i, j)
-			}
+		if err := validatePrompts(a.Prompts, fmt.Sprintf("%s.actions[%d].prompts", path, i)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validatePrompts checks one list of form prompts — app.prompts and an
+// action's prompts: share the shape, so they share the rules.
+//
+// An unknown type is an error rather than a fall-through to text. It used
+// to be harmless (a typo'd select rendered as a text box), but `password`
+// makes it dangerous: `passwrod:` silently renders the token in the clear,
+// which is the one thing the field exists to prevent.
+func validatePrompts(prompts []Prompt, path string) error {
+	for i, p := range prompts {
+		if p.Key == "" {
+			return fmt.Errorf("%s[%d]: key is required", path, i)
+		}
+		switch p.Type {
+		case "", "text", "password", "select", "confirm":
+		default:
+			return fmt.Errorf("%s[%d]: unknown type %q (want text|password|select|confirm)", path, i, p.Type)
+		}
+		if p.Type == "select" && len(p.Options) == 0 {
+			return fmt.Errorf("%s[%d]: select prompt needs options", path, i)
 		}
 	}
 	return nil

@@ -215,6 +215,13 @@ app:
   version: <string>           # statusbar right
   theme: <name>               # one of theme.All() names
   help_verbose: <bool>        # true = legacy inline footer, false (default) = minimal "? help"
+  output_key: <key>           # opens the output console — scrollback of every
+                              # statusbar message and everything a subprocess
+                              # streams, with a statusbar badge counting events
+                              # and a picker ("x") for killing what's running.
+                              # Default "o"; set "-" to disable. No action may
+                              # bind this key — the shell claims it globally,
+                              # so the validator rejects the collision.
   prompts:                    # optional — boot-time params collected via a form modal
                               # BEFORE the main screen renders. Each value is set as
                               # an env var keyed by `key`, so ${env.<KEY>} works
@@ -222,9 +229,9 @@ app:
                               # the same name. Cancel (esc) aborts the program.
     - key:   <string>         # env var name + token key
       label: <string>         # field label shown in the form
-      type:  text | select | confirm   # default text
-      placeholder:   <string> # text only
-      initial:       <string> # text default (overridden by current env if set)
+      type:  text | password | select | confirm   # default text
+      placeholder:   <string> # text / password only
+      initial:       <string> # text / password default (overridden by current env if set)
       options:       [<string>, ...]   # select choices
       initial_index: <int>    # select default index
       initial_bool:  <bool>   # confirm default
@@ -510,6 +517,13 @@ screens:
                                #   - {key: <string>, label: <string>,
                                #      placeholder: <string>, initial: <string>}
                                #
+                               # password (text, rendered masked — for tokens
+                               # and anything else you'd rather not type in the
+                               # clear on a shared screen. Substitution sees the
+                               # real value):
+                               #   - {key: <string>, label: <string>,
+                               #      placeholder: <string>, initial: <string>}
+                               #
                                # select (selection popup — good for "pick a target
                                # before running" or gating destructive commands
                                # behind an explicit choice; scope, environment,
@@ -629,7 +643,7 @@ initial: <screen-name>         # required when `screens:` is set
 | `examples/stream_websocket.yaml` | `type: websocket` — connects on activate; each text frame appends to a logview. Headers handle auth on the upgrade request |
 | `examples/stream_trades_table.yaml` | Same websocket stream as above, but feeding a **live table** with `max_rows: 100`. Each JSON frame projects into a row via column `value:` paths and prepends to a ring buffer. Plus a side-by-side logview showing raw frames + connection state |
 | `examples/stream_l1.yaml` | **L1 ticker JOINED from two streams**: Binance.us bookTicker (fast bid/ask) + @ticker (slower last-price + 24h stats) merged by symbol via `row_key: data.s`. Deep-merge keeps both sources' fields alive on each row. Demonstrates streaming + merge + keyed upsert together |
-| `examples/prompts_boot.yaml` | **Boot-time params via `app.prompts`**: form modal collects GitHub username + sort field + an archived-repos toggle before the main screen renders. Values become env vars and feed `${env.USER}` into the URL, the title, and a column |
+| `examples/prompts_boot.yaml` | **Boot-time params via `app.prompts`**: form modal collects GitHub username + sort field + an archived-repos toggle + a masked token before the main screen renders. Values become env vars and feed `${env.USER}` into the URL, the title, and a column |
 | `examples/action_prompts.yaml` | **Action prompts**: keys fire a form modal that collects values before the action's subprocess dispatches. `${prompt.<key>}` substitutes into run argv + confirm message + notice |
 | `examples/kube_multi.yaml` | Multi-cluster: 3 kube clusters merged into one pods table via `type: merge`. Tagged + colored by cluster. Use `task kube:multi:up && task kube:multi:proxy:all && task kube:multi:demo` |
 | `examples/demo.yaml` | Kitchen-sink: list + table side-by-side |

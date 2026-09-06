@@ -12,6 +12,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -92,6 +93,11 @@ func run() error {
 			Themes:      themes,
 			Version:     c.App.Version,
 			HelpVerbose: c.App.HelpVerbose,
+			// The output console. Everything a subprocess streams and
+			// every statusbar message lands here, with a badge counting
+			// events and a picker for killing what's still in flight.
+			// Zero binding (app.output_key: "-") leaves it off entirely.
+			OutputKey: outputBinding(c.App.OutputConsoleKey()),
 			// Every component we build (list / table / tree / logview /
 			// inspector / textview) hit-tests mouse events against its
 			// own rect, so clicking is uniformly useful. The cost is the
@@ -104,6 +110,26 @@ func run() error {
 	)
 	_, err = prog.Run()
 	return err
+}
+
+// outputBinding turns the configured console key into the binding
+// app.Options wants. A zero Binding is the shell's "no console" switch,
+// so an empty key must produce one rather than a binding on "".
+func outputBinding(k string) key.Binding {
+	if k == "" {
+		return key.Binding{}
+	}
+	return key.NewBinding(key.WithKeys(k), key.WithHelp(k, "output"))
+}
+
+// initialOr pre-fills a prompt field from the environment variable the
+// prompt is keyed on, falling back to the config's `initial:`. Exporting
+// the var is how you skip a boot prompt you've already answered.
+func initialOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 // collectAppPrompts opens a one-screen tea.Program with just a form
@@ -135,16 +161,22 @@ func collectAppPrompts(prompts []cfg.Prompt, th theme.Theme) error {
 				Label:   label,
 				Initial: p.InitialBool,
 			})
+		case "password":
+			// Pre-fills from the environment like a text prompt does, so
+			// `TOKEN=… tui-builder …` still skips the typing. The value is
+			// masked either way, so pre-filling doesn't put it on screen.
+			fields[i] = form.Password(form.PasswordOptions{
+				Key:         p.Key,
+				Label:       label,
+				Placeholder: p.Placeholder,
+				Initial:     initialOr(p.Key, p.Initial),
+			})
 		default: // text
-			initial := p.Initial
-			if v := os.Getenv(p.Key); v != "" {
-				initial = v
-			}
 			fields[i] = form.Text(form.TextOptions{
 				Key:         p.Key,
 				Label:       label,
 				Placeholder: p.Placeholder,
-				Initial:     initial,
+				Initial:     initialOr(p.Key, p.Initial),
 			})
 		}
 	}

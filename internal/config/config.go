@@ -241,6 +241,16 @@ type App struct {
 	// inline. Default (false) is minimal mode — the footer shows "? help"
 	// and `?` opens the expanded panel.
 	HelpVerbose bool `yaml:"help_verbose,omitempty"`
+	// OutputKey opens tuilib's output console — the scrollback that
+	// collects every statusbar message and everything a subprocess
+	// streams, with a statusbar badge counting events and a picker for
+	// killing what's still running.
+	//
+	// Defaults to "o"; set it to "-" to turn the console off. It is a
+	// key the shell claims globally, so no action may bind it — the
+	// validator rejects that rather than letting one silently shadow
+	// the other.
+	OutputKey string `yaml:"output_key,omitempty"`
 	// Prompts collected at boot, before any screen renders. Each
 	// prompt's Key becomes an env var (set via os.Setenv) whose value
 	// is whatever the user typed / picked, so the existing
@@ -362,6 +372,19 @@ type Action struct {
 	Prompts []Prompt `yaml:"prompts,omitempty"`
 }
 
+// OutputConsoleKey returns the console key with the default applied, or
+// "" when the config disabled it with "-". Callers use this rather than
+// reading OutputKey so the default lives in one place.
+func (a *App) OutputConsoleKey() string {
+	switch a.OutputKey {
+	case "":
+		return "o"
+	case "-":
+		return ""
+	}
+	return a.OutputKey
+}
+
 // MergeChild names a child source plus the tags merge should inject
 // into every row that originated from that child. Tags are key/value
 // strings written at the top level of each map-shaped item — same
@@ -409,15 +432,21 @@ type Parameter struct {
 // Prompt is one field in an action's input form. Types map 1:1 to
 // tuilib pkg/form field kinds:
 //
-//	text    (default) — single-line text input
-//	select  — pick one of `options`
-//	confirm — yes/no toggle (value is "true" / "false")
+//	text     (default) — single-line text input
+//	password — like text, but typed characters render masked
+//	select   — pick one of `options`
+//	confirm  — yes/no toggle (value is "true" / "false")
+//
+// A password prompt masks only the display: Substitute sees the real
+// text, and an app.prompts password lands in the environment like any
+// other value. It exists so an API token isn't typed in the clear on a
+// screen someone may be sharing — not as a secret-storage mechanism.
 type Prompt struct {
 	Key         string   `yaml:"key"`
 	Label       string   `yaml:"label,omitempty"`
-	Type        string   `yaml:"type,omitempty"`          // text | select | confirm
-	Placeholder string   `yaml:"placeholder,omitempty"`   // text only
-	Initial     string   `yaml:"initial,omitempty"`       // text default value
+	Type        string   `yaml:"type,omitempty"`          // text | password | select | confirm
+	Placeholder string   `yaml:"placeholder,omitempty"`   // text / password only
+	Initial     string   `yaml:"initial,omitempty"`       // text / password default value
 	Options     []string `yaml:"options,omitempty"`       // select choices
 	InitialIdx  int      `yaml:"initial_index,omitempty"` // select default
 	InitialBool bool     `yaml:"initial_bool,omitempty"`  // confirm default

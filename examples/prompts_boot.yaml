@@ -34,14 +34,25 @@ app:
       label: Include archived repos?
       type:  confirm
       initial_bool: false
+    # type: password masks what you type. The value is a normal string
+    # everywhere else — ${env.GITHUB_TOKEN} below substitutes the real
+    # text — so this is about not showing a token on a screen someone
+    # may be sharing, not about storing one securely.
+    #
+    # Leave it blank to stay on unauthenticated rate limits.
+    - key:   GITHUB_TOKEN
+      label: GitHub token (optional)
+      type:  password
 
 data:
   sources:
     repos:
       type: http
-      # All three boot prompts feed into the URL. The header below could
-      # use ${env.GITHUB_TOKEN} too if you want authenticated higher rate
-      # limits (uncomment + export the token).
+      # The first three boot prompts feed into the URL. The fourth is the
+      # masked token — uncomment the Authorization header below to use it
+      # for higher rate limits. Left commented because an empty token
+      # sends `Bearer ` and GitHub 401s that, which would make the
+      # example fail for anyone who skips the prompt.
       url: https://api.github.com/users/${env.USER}/repos?sort=${env.SORT}&per_page=50
       refresh: 5m
       timeout: 15s
