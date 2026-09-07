@@ -58,6 +58,17 @@ func ApplyStreamLine(c *Component, line string, th theme.Theme) {
 	} else {
 		prependRing(c, item)
 	}
+	if markable(c.Cfg) {
+		// Works in both stream modes. Keyed-upsert rows are stable by
+		// construction; ring-buffer rows slide down as events arrive,
+		// and a mark travels with its row because it is held by key.
+		// When a marked row falls off the end, tuilib stops reporting
+		// it — Marks() only returns keys the table still holds.
+		rows, byKey := KeyedTableRows(c, c.StreamRows, th)
+		c.RowsByKey = byKey
+		c.Table.SetKeyedRows(rows)
+		return
+	}
 	c.Table.SetRows(projectAllRows(c.StreamRows, c.Cfg.Columns, th))
 }
 
@@ -287,11 +298,24 @@ func applyList(c *Component, data any, th theme.Theme) {
 	for _, it := range items {
 		out = append(out, applyColorRules(ds.String(it, c.Cfg.Item), c.Cfg.ColorRules, th))
 	}
+	if markable(c.Cfg) {
+		// SetItems nils the key slice, which would leave the gutter
+		// drawn and every mark press inert.
+		c.List.SetKeyedItems(keyedItems(out))
+		return
+	}
 	c.List.SetItems(out)
 }
 
 func applyTable(c *Component, data any, th theme.Theme) {
-	c.Table.SetRows(TableRows(c, ds.Iter(data), th))
+	items := ds.Iter(data)
+	if markable(c.Cfg) {
+		rows, byKey := KeyedTableRows(c, items, th)
+		c.RowsByKey = byKey
+		c.Table.SetKeyedRows(rows)
+		return
+	}
+	c.Table.SetRows(TableRows(c, items, th))
 }
 
 // TableRows projects items through a table component's columns —

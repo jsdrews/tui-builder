@@ -392,6 +392,8 @@ via `task examples`.
 | `examples/logview.yaml` | Streaming-log pane, `/`-search, filter mode |
 | `examples/layout.yaml` | Nested vstack / hstack with mixed flex weights |
 | `examples/themes.yaml` | Theme picker reference |
+| `examples/chrome.yaml` | `app.glyphs` + `app.borders` — glyph vocabulary and border shapes |
+| `examples/marking.yaml` | Multi-select with `markable:` + `mark_key:` |
 | `examples/colors.yaml` | Per-component `colors:` overrides |
 | `examples/multi.yaml` | Multi-screen drilldown with breadcrumbs |
 | `examples/http_countries.yaml` | Live REST API table (restcountries.com) |
@@ -408,7 +410,7 @@ via `task examples`.
 | `examples/stream_websocket.yaml` | `websocket` source → logview |
 | `examples/stream_trades_table.yaml` | `websocket` source → live table (`max_rows: 100` ring buffer of bitstamp BTC/USD trades) |
 | `examples/stream_l1.yaml` | L1 ticker JOINED from two Binance.us streams (`bookTicker` for fast bid/ask + `@ticker` for last price + 24h stats), merged by symbol via `row_key: data.s`. Deep-merge composes both sources' fields onto each row |
-| `examples/prompts_boot.yaml` | Boot-time form modal collects params (`app.prompts`) before the main screen renders; values become env vars, feed into the source URL via `${env.USER}` |
+| `examples/prompts_boot.yaml` | Boot-time form modal collects params (`app.prompts`) before the main screen renders; values become env vars, feed into the source URL via `${env.USER}`. Includes a `type: password` field for a token |
 | `examples/action_prompts.yaml` | Per-action form modal collects input (`action.prompts`); `${prompt.<key>}` substitutes into run argv + confirm message at fire time |
 | `examples/kube.yaml` | Single-cluster kube: namespaces → pods → pod detail + logs |
 | `examples/kube_multi.yaml` | Multi-cluster kube: 3 clusters merged into one table |

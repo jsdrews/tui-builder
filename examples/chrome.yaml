@@ -1,0 +1,145 @@
+# chrome.yaml — the glyph vocabulary and border shapes, via app.glyphs
+# and app.borders.
+#
+# A theme picks colors. These two blocks pick the *marks* and the
+# *lines* — the characters components draw for cursors, arrows,
+# scrollbars and column rules, and the border style around each pane.
+# They are deliberately separate from `theme:` and apply to every
+# palette: press `t` to cycle themes and watch the colors change while
+# the chrome below stays put.
+#
+# This example uses a pure-ASCII glyph set, which is the case that
+# actually comes up: a terminal or font without box-drawing coverage
+# renders tuilib's defaults (▸ ✓ █ │ ▲) as tofu boxes. Swapping the
+# vocabulary fixes the whole app at once instead of per component.
+#
+# Every field in both blocks is optional. An unset one keeps tuilib's
+# default, so overriding one arrow does not blank the other twelve —
+# `sort_asc`/`sort_desc` below are left alone on purpose, and still
+# render as ▲ / ▼.
+#
+# What to look at:
+#   - the `>` cursor in every pane (default is ▸)
+#   - `|` between table columns, `-` under an open filter (press /)
+#   - `+` / `-` disclosure arrows in the tree (default ▾ / ▸)
+#   - `#` scrollbar thumbs — narrow a pane or press G to see one
+#   - rounded pane corners, and titles bracketed as `( title )`
+#   - press `?` for the key overlay: a modal, so it takes `overlay`
+#     (double lines here) rather than the rounded pane shape — and the
+#     glyphs follow it in, cursor and filter rule included
+#   - press `o` for the output console — a pushed screen, not a modal, so
+#     it takes the pane shape (`active`). The distinction is the whole
+#     reason `overlay` is its own knob.
+app:
+  title: Chrome
+  theme: nord
+
+  glyphs:
+    cursor:         ">"     # focused row  (default ▸)
+    mark:           "*"     # marked row   (default ✓)
+    expand_open:    "-"     # tree / inspector disclosure (default ▾)
+    expand_closed:  "+"     #                             (default ▸)
+    rule:           "-"     # line under an inline filter (default ─)
+    scroll_thumb:   "#"     # vertical scrollbar          (default █)
+    scroll_track:   "."     #                             (default ░)
+    h_scroll_thumb: "="     # horizontal scrollbar        (default ━)
+    h_scroll_track: "-"     #                             (default ─)
+    column_sep:     "|"     # between table columns       (default │)
+    placeholder:    "~"     # unfetched row in a windowed table (default ·)
+    # sort_asc / sort_desc left unset — they stay ▲ / ▼, which is the
+    # point: a partial block is a partial override, not a reset.
+
+  borders:
+    active:   rounded       # normal | rounded | thick | double | hidden | block | ascii
+    inactive: rounded       # same shape as active on purpose: focus is
+                            # signalled by border *color*, and a pane that
+                            # changed weight on focus would move your eye
+                            # for a reason you didn't ask about
+    overlay:  double        # the key overlay (`?`), confirm + alert dialogs,
+                            # and the action menu — what is drawn *over* a
+                            # screen rather than inside it. A heavier line
+                            # is what separates an overlay from the pane it
+                            # covers. The output console is a pushed
+                            # screen, not a modal, so it takes `active`.
+    slot_brackets: corners  # how a title meets the border line:
+                            #   none     -- title --   (default)
+                            #   corners  ) title (     a labelled tab
+                            #   tees    -| title |-
+
+tui:
+  components:
+    fruits:
+      type: list
+      title: List — cursor
+      filterable: true
+      items:
+        - Apple
+        - Apricot
+        - Banana
+        - Blueberry
+        - Cherry
+        - Date
+        - Elderberry
+        - Fig
+        - Grape
+        - Kiwi
+        - Lemon
+        - Mango
+        - Nectarine
+        - Orange
+        - Papaya
+        - Quince
+        - Raspberry
+        - Strawberry
+
+    cities:
+      type: table
+      title: Table — separators, sort arrows
+      filterable: true
+      initial_sort: {column: Pop, desc: true}
+      columns:
+        - {title: City,   width: 16, sortable: true}
+        - {title: Region, width: 12, sortable: true}
+        - {title: Pop,    width: 10, sortable: true, sort: number, align: right}
+      rows:
+        - [London,    Europe,   "9000000"]
+        - [Tokyo,     Asia,     "37000000"]
+        - [Lima,      Americas, "10000000"]
+        - [Reykjavík, Europe,   "130000"]
+        - [Nairobi,   Africa,   "4400000"]
+        - [Sydney,    Oceania,  "5300000"]
+
+    project:
+      type: tree
+      title: Tree — disclosure arrows
+      searchable: true
+      initial_depth: 2
+      root:
+        label: tui-builder
+        children:
+          - label: internal
+            children:
+              - label: build
+                children:
+                  - {label: chrome.go}
+                  - {label: component.go}
+              - label: config
+                children:
+                  - {label: config.go}
+                  - {label: load.go}
+          - label: examples
+            children:
+              - {label: chrome.yaml}
+              - {label: themes.yaml}
+          - {label: go.mod}
+
+  screen:
+    title: Glyphs and borders
+    layout:
+      hstack:
+        - flex: 1
+          component: fruits
+        - flex: 2
+          vstack:
+            - {flex: 1, component: cities}
+            - {flex: 1, component: project}

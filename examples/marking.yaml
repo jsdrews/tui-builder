@@ -1,0 +1,112 @@
+# marking.yaml — multi-select via `markable:`.
+#
+# A markable component grows a mark gutter and binds:
+#
+#   x    toggle the mark under the cursor
+#   X    extend from the last mark to the cursor (range)
+#   A    mark all
+#   D    mark none
+#
+# Marks are held by KEY, never by index. That is the whole design: a
+# source that repolls can return the same rows in a different order, and
+# an index-held mark would slide onto whichever row now occupies that
+# slot. Try it — mark a pod below, then wait for the 3s refresh. The
+# fixture reverses its order every read, and your mark stays put.
+#
+# Where the key comes from depends on the kind:
+#
+#   list    the item's display string (duplicates collapse onto one
+#           mark, which is the right answer for a list of names)
+#   tree    the node's path — the same identity tuilib already uses for
+#           expansion state, so marking there needs no configuration
+#   table   `mark_key:`, read from the ORIGINAL source item rather than
+#           the rendered cells. So the identity can be a field the table
+#           never displays, which is usually the right one.
+#
+# `mark_key:` is REQUIRED on a source-bound markable table, and is
+# deliberately not defaulted to the first column. Both obvious defaults
+# fail silently and data-dependently:
+#
+#   non-unique  a Name column that repeats across namespaces collapses
+#               two rows onto one key, so marking one marks both
+#   volatile    an AGE / STATUS / RESTARTS column changes on the next
+#               poll, so the marks evaporate or land elsewhere
+#
+# One load error the author fixes once beats a selection that goes wrong
+# at 2am. Note the table below keys on `uid`, a column it never shows.
+#
+# A surprise worth knowing: marks survive filtering. A key does not care
+# whether its row is on screen, so you can mark a row, filter it away,
+# and still be holding it.
+app:
+  title: Marking
+  theme: nord
+
+data:
+  sources:
+    pods:
+      type: exec
+      # Emits the same three pods every time, but reverses their order
+      # on each call — the reordering-poll case, made deterministic.
+      command:
+        - sh
+        - -c
+        - |
+          if [ -f /tmp/tui-builder-mark-flip ]; then
+            rm -f /tmp/tui-builder-mark-flip
+            printf '%s' '[{"uid":"u3","name":"db","status":"Running"},{"uid":"u2","name":"api","status":"CrashLoopBackOff"},{"uid":"u1","name":"web","status":"Running"}]'
+          else
+            touch /tmp/tui-builder-mark-flip
+            printf '%s' '[{"uid":"u1","name":"web","status":"Running"},{"uid":"u2","name":"api","status":"CrashLoopBackOff"},{"uid":"u3","name":"db","status":"Running"}]'
+          fi
+      refresh: 3s
+
+tui:
+  components:
+    pods:
+      type: table
+      title: Pods — mark with x, then watch the 3s refresh reorder them
+      filterable: true
+      markable: true
+      source: pods
+      # The identity. Never rendered — there is no uid column below.
+      mark_key: uid
+      columns:
+        - {title: Name,   width: 20, sortable: true, value: name}
+        - {title: Status, width: 24, sortable: true, value: status}
+
+    fruits:
+      type: list
+      title: List — keys on the item string
+      filterable: true
+      markable: true
+      items: [Apple, Apricot, Banana, Blueberry, Cherry, Date, Fig, Grape]
+
+    project:
+      type: tree
+      title: Tree — keys on the node path
+      searchable: true
+      markable: true
+      initial_depth: 2
+      root:
+        label: tui-builder
+        children:
+          - label: internal
+            children:
+              - {label: build}
+              - {label: config}
+          - label: examples
+            children:
+              - {label: marking.yaml}
+              - {label: chrome.yaml}
+
+  screen:
+    title: Multi-select
+    layout:
+      hstack:
+        - flex: 2
+          component: pods
+        - flex: 1
+          vstack:
+            - {flex: 1, component: fruits}
+            - {flex: 1, component: project}

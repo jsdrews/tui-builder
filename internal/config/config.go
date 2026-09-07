@@ -237,10 +237,38 @@ type App struct {
 	// Theme names a built-in theme.Theme.Name to use as the initial palette.
 	// Unknown names fall through to the first theme.
 	Theme string `yaml:"theme,omitempty"`
-	// HelpVerbose restores the legacy footer that tight-packs bindings
-	// inline. Default (false) is minimal mode — the footer shows "? help"
-	// and `?` opens the expanded panel.
-	HelpVerbose bool `yaml:"help_verbose,omitempty"`
+	// Glyphs overrides the marks components draw — row cursors, expand
+	// arrows, scrollbar thumbs, sort indicators. Unset fields keep the
+	// library's own mark, so overriding one arrow doesn't blank the
+	// other twelve.
+	Glyphs Glyphs `yaml:"glyphs,omitempty"`
+	// Borders picks the border shapes and how a pane's title meets the
+	// border line. Same story as Glyphs: an unset field keeps tuilib's
+	// default (normal for components, thick for overlays).
+	//
+	// Both blocks apply to every palette rather than to Theme alone.
+	// A theme is a choice of color; glyphs and border shapes are a
+	// choice of vocabulary, and cycling themes at runtime (`t`) should
+	// not change the vocabulary halfway through.
+	Borders Borders `yaml:"borders,omitempty"`
+	// ThemeKey cycles the palette, live, through every built-in theme
+	// — the same list Theme picks the initial one from.
+	//
+	// Defaults to "t"; set it to "-" to pin the app to one palette. It
+	// is a key the shell claims globally, so no action may bind it;
+	// the validator rejects the collision rather than letting one
+	// silently shadow the other.
+	ThemeKey string `yaml:"theme_key,omitempty"`
+	// OutputKey opens tuilib's output console — the scrollback that
+	// collects every statusbar message and everything a subprocess
+	// streams, with a statusbar badge counting events and a picker for
+	// killing what's still running.
+	//
+	// Defaults to "o"; set it to "-" to turn the console off. It is a
+	// key the shell claims globally, so no action may bind it — the
+	// validator rejects that rather than letting one silently shadow
+	// the other.
+	OutputKey string `yaml:"output_key,omitempty"`
 	// Prompts collected at boot, before any screen renders. Each
 	// prompt's Key becomes an env var (set via os.Setenv) whose value
 	// is whatever the user typed / picked, so the existing
@@ -276,6 +304,76 @@ type App struct {
 	// cryptic 401 or a double-slash URL.
 	Env []EnvSpec `yaml:"env,omitempty"`
 }
+
+// Glyphs overrides tuilib's glyph vocabulary — the single-character
+// marks components draw. Every field is optional; an empty one keeps
+// whatever the palette already had, which is what lets a config change
+// the cursor without restating the twelve marks it doesn't care about.
+//
+// Each value must be exactly one character. A two-character cursor
+// shifts every list row by a column and pushes every table cell out of
+// line with its header — which reads as a rendering bug rather than as
+// the config that caused it, so the validator rejects it.
+type Glyphs struct {
+	// Cursor marks the focused row in list, logview and the action menu.
+	Cursor string `yaml:"cursor,omitempty"`
+	// Mark marks a selected row where multi-select is enabled.
+	Mark string `yaml:"mark,omitempty"`
+	// ExpandOpen / ExpandClosed are the disclosure arrows in tree and
+	// inspector.
+	ExpandOpen   string `yaml:"expand_open,omitempty"`
+	ExpandClosed string `yaml:"expand_closed,omitempty"`
+	// Rule is the horizontal line under an inline filter, drawn
+	// identically by every filterable component.
+	Rule string `yaml:"rule,omitempty"`
+	// ScrollThumb / ScrollTrack are the vertical scrollbar;
+	// HScrollThumb / HScrollTrack the horizontal one.
+	ScrollThumb  string `yaml:"scroll_thumb,omitempty"`
+	ScrollTrack  string `yaml:"scroll_track,omitempty"`
+	HScrollThumb string `yaml:"h_scroll_thumb,omitempty"`
+	HScrollTrack string `yaml:"h_scroll_track,omitempty"`
+	// SortAsc / SortDesc follow the active column's title in a table.
+	SortAsc  string `yaml:"sort_asc,omitempty"`
+	SortDesc string `yaml:"sort_desc,omitempty"`
+	// ColumnSep divides table columns.
+	ColumnSep string `yaml:"column_sep,omitempty"`
+	// Placeholder fills a row a windowed table hasn't received yet.
+	Placeholder string `yaml:"placeholder,omitempty"`
+}
+
+// Borders picks the border shapes a theme draws with. Values come from
+// BorderShapeNames; an unset field leaves the palette's own shape in
+// place, which for every shipped palette means tuilib's default.
+type Borders struct {
+	// Active / Inactive are the shapes for ordinary components, focused
+	// and unfocused. tuilib defaults both to normal on purpose: focus
+	// is signalled by border color, and a component that changed weight
+	// on focus would move the eye for a reason the user didn't ask
+	// about. Set them differently only if that is what you want.
+	Active   string `yaml:"active,omitempty"`
+	Inactive string `yaml:"inactive,omitempty"`
+	// Overlay is for what floats above content — confirm, alert, the
+	// output console, the action menu. Defaults to thick, because a
+	// heavier line is what separates an overlay from the pane it covers.
+	Overlay string `yaml:"overlay,omitempty"`
+	// SlotBrackets controls how a pane's title meets the border line.
+	// One of SlotBracketNames:
+	//
+	//	none     ── title ──     (default)
+	//	corners  ┐ title ┌       reads as a labelled tab
+	//	tees    ─┤ title ├─
+	SlotBrackets string `yaml:"slot_brackets,omitempty"`
+}
+
+// BorderShapeNames are the shapes `app.borders.{active,inactive,overlay}`
+// accept. internal/build maps each one to its lipgloss constructor; a
+// test there walks this list so the two can't drift apart.
+var BorderShapeNames = []string{
+	"normal", "rounded", "thick", "double", "hidden", "block", "ascii",
+}
+
+// SlotBracketNames are the values `app.borders.slot_brackets` accepts.
+var SlotBracketNames = []string{"none", "corners", "tees"}
 
 // EnvSpec declares one environment variable dependency. Same shape
 // as Parameter (required + default + description) but scoped to
@@ -360,6 +458,41 @@ type Action struct {
 	// message, and Notice. Order: prompts → confirm (with substituted
 	// preview) → dispatch. Cancel from the form aborts the action.
 	Prompts []Prompt `yaml:"prompts,omitempty"`
+	// Section is the heading this action sits under in the key overlay
+	// (`?`). Defaults to "Actions". Same vocabulary as
+	// OnKeyBinding.Section.
+	//
+	// Deliberately temporary. Actions are help-strip bindings today; the
+	// pkg/action work moves them into the menu, where a help heading
+	// means nothing. Delete this field in that cut — see
+	// plans/tuilib-0.24.md, "on_key: folds into the registry".
+	Section string `yaml:"section,omitempty"`
+}
+
+// ThemeCycleKey returns the theme-cycle key with the default applied,
+// or "" when the config pinned the palette with "-". Same shape as
+// OutputConsoleKey, and for the same reason: one place owns the default.
+func (a *App) ThemeCycleKey() string {
+	switch a.ThemeKey {
+	case "":
+		return "t"
+	case "-":
+		return ""
+	}
+	return a.ThemeKey
+}
+
+// OutputConsoleKey returns the console key with the default applied, or
+// "" when the config disabled it with "-". Callers use this rather than
+// reading OutputKey so the default lives in one place.
+func (a *App) OutputConsoleKey() string {
+	switch a.OutputKey {
+	case "":
+		return "o"
+	case "-":
+		return ""
+	}
+	return a.OutputKey
 }
 
 // MergeChild names a child source plus the tags merge should inject
@@ -409,15 +542,21 @@ type Parameter struct {
 // Prompt is one field in an action's input form. Types map 1:1 to
 // tuilib pkg/form field kinds:
 //
-//	text    (default) — single-line text input
-//	select  — pick one of `options`
-//	confirm — yes/no toggle (value is "true" / "false")
+//	text     (default) — single-line text input
+//	password — like text, but typed characters render masked
+//	select   — pick one of `options`
+//	confirm  — yes/no toggle (value is "true" / "false")
+//
+// A password prompt masks only the display: Substitute sees the real
+// text, and an app.prompts password lands in the environment like any
+// other value. It exists so an API token isn't typed in the clear on a
+// screen someone may be sharing — not as a secret-storage mechanism.
 type Prompt struct {
 	Key         string   `yaml:"key"`
 	Label       string   `yaml:"label,omitempty"`
-	Type        string   `yaml:"type,omitempty"`          // text | select | confirm
-	Placeholder string   `yaml:"placeholder,omitempty"`   // text only
-	Initial     string   `yaml:"initial,omitempty"`       // text default value
+	Type        string   `yaml:"type,omitempty"`          // text | password | select | confirm
+	Placeholder string   `yaml:"placeholder,omitempty"`   // text / password only
+	Initial     string   `yaml:"initial,omitempty"`       // text / password default value
 	Options     []string `yaml:"options,omitempty"`       // select choices
 	InitialIdx  int      `yaml:"initial_index,omitempty"` // select default
 	InitialBool bool     `yaml:"initial_bool,omitempty"`  // confirm default
@@ -466,6 +605,17 @@ type OnKeyBinding struct {
 	// the strip shows the key + "open". Handy for kubectl-shape UIs
 	// that want "d → describe", "l → logs", etc.
 	Label string `yaml:"label,omitempty"`
+	// Section is the heading this binding sits under in the key overlay
+	// (`?`). Defaults to "Open".
+	//
+	// Headings name what the keys DO, never what holds them — that is
+	// tuilib's rule and the reason the overlay is worth opening. The
+	// component's own keys arrive already grouped that way (Navigate,
+	// Scroll, Filter, Search, Select, Sort, Expand, View); reuse one of
+	// those names to file a push alongside them, or invent one for a
+	// group of your own. Bindings sharing a name share a heading, in
+	// first-appearance order.
+	Section string `yaml:"section,omitempty"`
 }
 
 // Node is a tagged-union layout node. Exactly one of VStack / HStack /
@@ -550,6 +700,45 @@ type Component struct {
 	// evaluate in order, first match wraps the rendered text with
 	// ansi.CellColor.
 	ColorRules []ColorRule `yaml:"color_rules,omitempty"`
+
+	// Markable turns on multi-select: the component grows a mark
+	// gutter and binds x / X / A / D (toggle, range-extend from the
+	// last mark, all, none). Supported on list, table and tree; a
+	// load error anywhere else, because tuilib ships no marking there
+	// and a mark key that quietly did nothing would read as broken.
+	//
+	// Marks are held by KEY, never by index, so a poll that reorders
+	// rows between marking and acting can't slide the selection onto
+	// neighbours. Where that key comes from depends on the kind — see
+	// MarkKey.
+	Markable bool `yaml:"markable,omitempty"`
+	// MarkKey is the dot-path to a stable per-row identity, and is
+	// REQUIRED on a source-bound markable table. It is read from the
+	// original source item, not the rendered cells, so the identity
+	// can be a field the table never displays (`metadata.uid`, `id`,
+	// a self-link) — usually the right one.
+	//
+	// It is deliberately not defaulted to the first column. That
+	// fails two ways, both silent and data-dependent: a non-unique
+	// first column (pods named the same across namespaces) collapses
+	// two rows onto one key, so marking one marks both; and a
+	// volatile one (AGE, STATUS, RESTARTS) changes on the next poll,
+	// so the user's marks evaporate. tuilib protects against index
+	// drift; nothing can protect against a key that isn't stable.
+	// One load error the author fixes once beats a selection that
+	// goes wrong at 2am.
+	//
+	// Not accepted on the kinds that already have an identity: a
+	// list keys on its item string, a tree on a node's path (the
+	// same path it uses for expansion state), and a static table on
+	// the row's position, which cannot drift because nothing
+	// repolls it. Setting it there means the author expected it to
+	// do something.
+	//
+	// Distinct from RowKey below, which changes how a STREAMING
+	// table inserts rows. They can differ, and setting one must not
+	// silently do the other's job.
+	MarkKey Path `yaml:"mark_key,omitempty"`
 
 	// list fields
 	Items []string `yaml:"items,omitempty"`

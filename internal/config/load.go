@@ -3,6 +3,9 @@ package config
 import (
 	"fmt"
 	"os"
+	"slices"
+	"strings"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -38,6 +41,16 @@ func Load(path string) (*Config, error) {
 // entry checks (upstream resolution, cycle detection, join-lookup
 // constraints, component bindings) walk the unified Sources map.
 func (c *Config) Validate() error {
+	// 0. Boot-time prompts. Same shape as an action's, and until now the
+	//    only list of prompts nothing checked.
+	if err := validatePrompts(c.App.Prompts, "app.prompts"); err != nil {
+		return err
+	}
+	// 0b. App chrome. Presentation only, but both halves fail quietly
+	//     when they're wrong — see validateChrome.
+	if err := validateChrome(&c.App); err != nil {
+		return err
+	}
 	// 1. Per-entry structural validation.
 	for name, s := range c.Data.Sources {
 		if s == nil {
@@ -73,6 +86,11 @@ func (c *Config) Validate() error {
 				return err
 			}
 		}
+		// After bindWindowed: the windowed check below needs the flag
+		// it sets.
+		if err := validateMarkable(comp, "tui.components."+name); err != nil {
+			return err
+		}
 	}
 	// 5. Windowed sources can't be fed through operators — see
 	//    validateWindowedUpstreams.
@@ -100,7 +118,7 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("tui.components.%s: referenced %d times in tui.screen.layout — each component may be placed only once per screen", name, n)
 			}
 		}
-		if err := validateActions(c.TUI.Screen.Actions, refs, c.TUI.Components, "tui.screen"); err != nil {
+		if err := validateActions(c.TUI.Screen.Actions, refs, c.TUI.Components, "tui.screen", c.App.OutputConsoleKey(), c.App.ThemeCycleKey()); err != nil {
 			return err
 		}
 		if err := validateOnCursor(refs, c.TUI.Components, "tui.screen"); err != nil {
@@ -156,7 +174,7 @@ func (c *Config) Validate() error {
 			}
 			seenKeys[dedupKey] = i
 		}
-		if err := validateActions(s.Actions, refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name)); err != nil {
+		if err := validateActions(s.Actions, refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name), c.App.OutputConsoleKey(), c.App.ThemeCycleKey()); err != nil {
 			return err
 		}
 		if err := validateOnCursor(refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name)); err != nil {
@@ -210,10 +228,19 @@ func validateOnCursor(refs map[string]int, components map[string]*Component, pat
 	return nil
 }
 
-func validateActions(actions []Action, refs map[string]int, components map[string]*Component, path string) error {
+func validateActions(actions []Action, refs map[string]int, components map[string]*Component, path, outputKey, themeKey string) error {
 	for i, a := range actions {
 		if a.Key == "" {
 			return fmt.Errorf("%s.actions[%d]: key is required", path, i)
+		}
+		// The console key is claimed by the app shell, so a component
+		// never sees it. Binding an action to it would look right in the
+		// config and do nothing at runtime.
+		if outputKey != "" && a.Key == outputKey {
+			return fmt.Errorf("%s.actions[%d]: key %q is the output console key (app.output_key) — pick another, or set app.output_key to disable the console", path, i, a.Key)
+		}
+		if themeKey != "" && a.Key == themeKey {
+			return fmt.Errorf("%s.actions[%d]: key %q is the theme-cycle key (app.theme_key) — pick another, or set app.theme_key to \"-\" to pin the palette", path, i, a.Key)
 		}
 		if a.Source == "" {
 			return fmt.Errorf("%s.actions[%d]: source is required", path, i)
@@ -228,19 +255,126 @@ func validateActions(actions []Action, refs map[string]int, components map[strin
 		if src.Type != "list" && src.Type != "table" {
 			return fmt.Errorf("%s.actions[%d]: source %q must be a list or table (got %s)", path, i, a.Source, src.Type)
 		}
-		for j, p := range a.Prompts {
-			if p.Key == "" {
-				return fmt.Errorf("%s.actions[%d].prompts[%d]: key is required", path, i, j)
-			}
-			switch p.Type {
-			case "", "text", "select", "confirm":
-			default:
-				return fmt.Errorf("%s.actions[%d].prompts[%d]: unknown type %q (want text|select|confirm)", path, i, j, p.Type)
-			}
-			if p.Type == "select" && len(p.Options) == 0 {
-				return fmt.Errorf("%s.actions[%d].prompts[%d]: select prompt needs options", path, i, j)
-			}
+		if err := validatePrompts(a.Prompts, fmt.Sprintf("%s.actions[%d].prompts", path, i)); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+// validatePrompts checks one list of form prompts — app.prompts and an
+// action's prompts: share the shape, so they share the rules.
+//
+// An unknown type is an error rather than a fall-through to text. It used
+// to be harmless (a typo'd select rendered as a text box), but `password`
+// makes it dangerous: `passwrod:` silently renders the token in the clear,
+// which is the one thing the field exists to prevent.
+func validatePrompts(prompts []Prompt, path string) error {
+	for i, p := range prompts {
+		if p.Key == "" {
+			return fmt.Errorf("%s[%d]: key is required", path, i)
+		}
+		switch p.Type {
+		case "", "text", "password", "select", "confirm":
+		default:
+			return fmt.Errorf("%s[%d]: unknown type %q (want text|password|select|confirm)", path, i, p.Type)
+		}
+		if p.Type == "select" && len(p.Options) == 0 {
+			return fmt.Errorf("%s[%d]: select prompt needs options", path, i)
+		}
+	}
+	return nil
+}
+
+// validateMarkable checks `markable:` and `mark_key:`.
+//
+// Every rule here exists because the alternative is an affordance that
+// renders and silently does nothing — a mark gutter you can move a
+// cursor through, press x on, and watch not respond. tuilib holds marks
+// by key, so a component that can't supply keys can't mark, and the
+// only honest place to say so is load time.
+//
+// Runs after bindWindowed, which is what sets Windowed.
+func validateMarkable(c *Component, path string) error {
+	if !c.Markable {
+		if len(c.MarkKey) > 0 {
+			return fmt.Errorf("%s: `mark_key:` set without `markable: true` — it does nothing on its own", path)
+		}
+		return nil
+	}
+	switch c.Type {
+	case "list", "table", "tree":
+	default:
+		return fmt.Errorf("%s: `markable: true` is not supported on %s (want list|table|tree) — no verb acts on a set of its rows and tuilib draws no mark gutter there", path, c.Type)
+	}
+	if c.Type != "table" {
+		if len(c.MarkKey) > 0 {
+			return fmt.Errorf("%s: `mark_key:` is not accepted on %s — a list keys on its item string and a tree on a node's path", path, c.Type)
+		}
+		return nil
+	}
+	// Tables from here down.
+	if c.Windowed {
+		return fmt.Errorf("%s: `markable: true` and a windowed source are mutually exclusive — a window holds one page of rows without keys, so marking there is inert", path)
+	}
+	if c.Source == "" {
+		if len(c.MarkKey) > 0 {
+			return fmt.Errorf("%s: `mark_key:` is not accepted on a table with static `rows:` — the rows are fixed at load, so their position is their identity", path)
+		}
+		return nil
+	}
+	if len(c.MarkKey) == 0 || c.MarkKey[0] == "" {
+		return fmt.Errorf("%s: `markable: true` on a source-bound table needs `mark_key:` (dot-path to a stable per-row identity, e.g. metadata.uid). It is not defaulted to the first column on purpose: a non-unique one collapses two rows onto one mark, and a volatile one (AGE, STATUS) loses the marks on the next poll", path)
+	}
+	return nil
+}
+
+// validateChrome checks app.glyphs and app.borders.
+//
+// Both are pure presentation, and both fail *quietly* when they're
+// wrong, which is why they're load errors rather than best-effort. An
+// unrecognised border name would keep the default shape, so the config
+// change simply appears not to have worked. An over-long glyph renders
+// fine on its own but shifts every row it's drawn on, so it reads as a
+// layout bug somewhere else entirely.
+func validateChrome(a *App) error {
+	for _, g := range []struct{ field, value string }{
+		{"cursor", a.Glyphs.Cursor},
+		{"mark", a.Glyphs.Mark},
+		{"expand_open", a.Glyphs.ExpandOpen},
+		{"expand_closed", a.Glyphs.ExpandClosed},
+		{"rule", a.Glyphs.Rule},
+		{"scroll_thumb", a.Glyphs.ScrollThumb},
+		{"scroll_track", a.Glyphs.ScrollTrack},
+		{"h_scroll_thumb", a.Glyphs.HScrollThumb},
+		{"h_scroll_track", a.Glyphs.HScrollTrack},
+		{"sort_asc", a.Glyphs.SortAsc},
+		{"sort_desc", a.Glyphs.SortDesc},
+		{"column_sep", a.Glyphs.ColumnSep},
+		{"placeholder", a.Glyphs.Placeholder},
+	} {
+		// Empty means "keep the default", not "draw nothing".
+		if g.value == "" {
+			continue
+		}
+		if utf8.RuneCountInString(g.value) != 1 {
+			return fmt.Errorf("app.glyphs.%s: %q must be a single character (it is drawn in a one-cell slot)", g.field, g.value)
+		}
+	}
+	for _, b := range []struct{ field, value string }{
+		{"active", a.Borders.Active},
+		{"inactive", a.Borders.Inactive},
+		{"overlay", a.Borders.Overlay},
+	} {
+		if b.value == "" {
+			continue
+		}
+		if !slices.Contains(BorderShapeNames, b.value) {
+			return fmt.Errorf("app.borders.%s: unknown border %q (want %s)", b.field, b.value, strings.Join(BorderShapeNames, "|"))
+		}
+	}
+	if v := a.Borders.SlotBrackets; v != "" && !slices.Contains(SlotBracketNames, v) {
+		return fmt.Errorf("app.borders.slot_brackets: unknown style %q (want %s)", v, strings.Join(SlotBracketNames, "|"))
 	}
 	return nil
 }

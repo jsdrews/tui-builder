@@ -143,11 +143,17 @@ tui:
           key:    enter
           bind:
             login: ${selection}
-        # `s` → what the user has starred. Custom label shows in the help strip.
+        # `s` → what the user has starred. `label:` is what the help
+        # strip and the key overlay (`?`) show next to the key;
+        # `section:` is the heading it sits under in the overlay.
+        # Both default sensibly — an unlabelled push reads "open" under
+        # a heading called "Open" — so set them when the verb has a
+        # better name than that.
         - source: users_list
-          push:   starred
-          key:    s
-          label:  starred
+          push:    starred
+          key:     s
+          label:   starred
+          section: Drill down
           bind:
             login: ${selection}
 

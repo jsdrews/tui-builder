@@ -176,9 +176,10 @@ Unchanged from round 1. `layout.Center` lands when modal components
 | Tuilib feature | Exposed? | Schema field |
 |---|---|---|
 | `Title`, `Version`, `Theme` | ✓ | `app.title`, `app.version`, `app.theme` |
-| `HelpVerbose` (legacy inline footer) | ✓ | `app.help_verbose` (default false → minimal "? help" footer; press `?` for full panel) |
-| `QuitKey`, `ThemeKey`, `HelpKey` custom bindings | ✗ | defaults locked |
-| `HelpMaxRows` (cap expanded help panel) | ✗ | defaults to 6 |
+| `HelpVerbose` (legacy inline footer) | ✗ | **deliberately dropped.** Verbose mode packs bindings inline and only lets `?` open the key overlay once they *overflow* the statusbar, so on a wide terminal with a simple screen the modal silently never opens. The footer is always minimal ("? help") and `?` always opens the overlay |
+| `DisableHelpSearch` | ✗ | the overlay's search field stays on — it is the fast route through a screen with 15+ bindings |
+| `ThemeKey` (cycle palettes) | ✓ | `app.theme_key` (default `t`; `-` pins the palette) |
+| `QuitKey`, `HelpKey` custom bindings | ✗ | defaults locked |
 | `ThemeEnvVar` / `SkipConfig` / `DisableAutoEscPop` | ✗ | |
 | Inline custom themes | ✗ | |
 | `theme.Terminal()` | ✗ | |
@@ -214,7 +215,56 @@ app:
   title: <string>             # breadcrumb prefix
   version: <string>           # statusbar right
   theme: <name>               # one of theme.All() names
-  help_verbose: <bool>        # true = legacy inline footer, false (default) = minimal "? help"
+  theme_key: <key>            # cycles the palette live through every
+                              # built-in theme. Default "t"; set "-" to pin
+                              # the app to one palette. No action may bind
+                              # this key — the shell claims it globally, so
+                              # the validator rejects the collision.
+  output_key: <key>           # opens the output console — scrollback of every
+                              # statusbar message and everything a subprocess
+                              # streams, with a statusbar badge counting events
+                              # and a picker ("x") for killing what's running.
+                              # Default "o"; set "-" to disable. No action may
+                              # bind this key — the shell claims it globally,
+                              # so the validator rejects the collision.
+  glyphs:                     # optional — the single-character marks components
+                              # draw. Every field is optional and an unset one
+                              # keeps tuilib's default, so overriding one arrow
+                              # doesn't blank the other twelve. Each value must
+                              # be exactly one character: a two-character cursor
+                              # shifts every row it's drawn on.
+    cursor:         <char>    # focused row in list / logview / action menu
+    mark:           <char>    # marked row where multi-select is enabled
+    expand_open:    <char>    # tree + inspector disclosure arrows
+    expand_closed:  <char>
+    rule:           <char>    # horizontal line under an inline filter
+    scroll_thumb:   <char>    # vertical scrollbar
+    scroll_track:   <char>
+    h_scroll_thumb: <char>    # horizontal scrollbar
+    h_scroll_track: <char>
+    sort_asc:       <char>    # follows the active column's title in a table
+    sort_desc:      <char>
+    column_sep:     <char>    # divides table columns
+    placeholder:    <char>    # fills a row a windowed table hasn't received yet
+  borders:                    # optional — border shapes. Unset keeps tuilib's
+                              # default: normal for components, thick for overlays.
+    active:   normal | rounded | thick | double | hidden | block | ascii
+    inactive: <same>          # defaults to matching `active`'s shape upstream:
+                              # focus is signalled by border *color*, so a pane
+                              # that changed weight on focus would move the eye
+                              # for a reason the user didn't ask about
+    overlay:  <same>          # the key overlay (`?`), confirm + alert dialogs
+                              # and the action menu — what is drawn *over* a
+                              # screen. The output console is a pushed screen,
+                              # not a modal, so it takes `active`.
+    slot_brackets: none | corners | tees
+                              # how a pane's title meets the border line:
+                              #   none     ── title ──   (default)
+                              #   corners  ┐ title ┌     reads as a labelled tab
+                              #   tees    ─┤ title ├─
+                              # Both blocks apply to EVERY palette, not just the
+                              # one `theme:` names — cycling themes with `t`
+                              # shouldn't change the chrome vocabulary midway.
   prompts:                    # optional — boot-time params collected via a form modal
                               # BEFORE the main screen renders. Each value is set as
                               # an env var keyed by `key`, so ${env.<KEY>} works
@@ -222,9 +272,9 @@ app:
                               # the same name. Cancel (esc) aborts the program.
     - key:   <string>         # env var name + token key
       label: <string>         # field label shown in the form
-      type:  text | select | confirm   # default text
-      placeholder:   <string> # text only
-      initial:       <string> # text default (overridden by current env if set)
+      type:  text | password | select | confirm   # default text
+      placeholder:   <string> # text / password only
+      initial:       <string> # text / password default (overridden by current env if set)
       options:       [<string>, ...]   # select choices
       initial_index: <int>    # select default index
       initial_bool:  <bool>   # confirm default
@@ -338,6 +388,38 @@ components:
     initial_filter: <string>  # list/table — pre-populate filter value
     initial_query:   <string> # logview/tree — pre-populate search query
     initial_cursor:  <int>    # list, table, tree
+
+    # list / table / tree — multi-select
+    markable: <bool>          # adds a mark gutter and binds x (toggle),
+                              # X (extend range from the last mark),
+                              # A (all), D (none). list, table, tree only.
+    mark_key: <dot-path>      # REQUIRED on a source-bound markable table.
+                              # Read from the ORIGINAL source item, not the
+                              # rendered cells, so the identity can be a
+                              # field the table never displays (metadata.uid,
+                              # id, a self-link) — usually the right one.
+                              #
+                              # Not defaulted to the first column on purpose.
+                              # A non-unique one (Name repeating across
+                              # namespaces) collapses two rows onto one mark;
+                              # a volatile one (AGE, STATUS, RESTARTS) changes
+                              # on the next poll and the marks evaporate.
+                              # Both fail silently and data-dependently.
+                              #
+                              # Not accepted on list (keys on its item
+                              # string), tree (keys on the node path), or a
+                              # static table (rows are fixed at load, so
+                              # position is the identity).
+                              #
+                              # Distinct from row_key below, which changes how
+                              # a STREAMING table inserts rows.
+                              #
+                              # Marks are held by key, never index — so they
+                              # survive a poll that reorders rows, and they
+                              # survive filtering (a key doesn't care whether
+                              # its row is on screen).
+                              # `markable` + a windowed source is a load error:
+                              # a window carries rows without keys.
 
     # list
     items: [string, ...]
@@ -478,8 +560,12 @@ screens:
                                # A double click on a row is the mouse
                                # spelling of `enter`, so an `enter`
                                # binding is reachable both ways.
-        label:  <string>       # optional — custom help-strip label.
+        label:  <string>       # optional — the text shown next to the key
+                               # in the help strip AND the key overlay.
                                # Defaults to "open".
+        section: <string>      # optional — the heading it sits under in
+                               # the key overlay (`?`). Defaults to
+                               # "Open". See "Help sections" below.
         bind:                  # optional — templated params forwarded to
                                # the pushed screen's parameterized sources.
           <param>: ${selection.*}
@@ -507,6 +593,13 @@ screens:
                                # action. Field shapes per `type:`:
                                #
                                # text (default):
+                               #   - {key: <string>, label: <string>,
+                               #      placeholder: <string>, initial: <string>}
+                               #
+                               # password (text, rendered masked — for tokens
+                               # and anything else you'd rather not type in the
+                               # clear on a shared screen. Substitution sees the
+                               # real value):
                                #   - {key: <string>, label: <string>,
                                #      placeholder: <string>, initial: <string>}
                                #
@@ -595,6 +688,59 @@ initial: <screen-name>         # required when `screens:` is set
 #   {fixed: <int>, ...}
 ```
 
+## Help sections
+
+`?` opens the key overlay: every binding the focused component exposes,
+grouped, searchable. The groups are named by what the keys **do**, never
+by what holds them — a heading naming the owner ends up sitting above
+every binding that owner has, which is how a screen called "Pods" came
+to be the heading over a table's scroll keys.
+
+Most of it is automatic. Each component describes its own bindings using
+tuilib's shared vocabulary, so a group means the same thing everywhere:
+
+| Section | What lands there |
+|---|---|
+| `Navigate` | cursor / line movement |
+| `Scroll` | the horizontal axis |
+| `Filter` | narrowing what is displayed |
+| `Search` | finding within it (logview, tree) |
+| `Select` | marking — `markable:` puts `x` / `X` / `A` / `D` here |
+| `Sort` | column sorting |
+| `Expand` | opening branches (tree, inspector) |
+| `View` | wrap, follow — how content renders |
+
+A group appears only when the feature is configured: an unmarkable table
+contributes no `Select` heading rather than an empty one.
+
+What the config authors is the **verbs** — `on_key:` pushes and
+`actions:`. Each takes:
+
+```yaml
+on_key:
+  - source:  users_list
+    push:    starred
+    key:     s
+    label:   starred        # the text beside the key
+    section: Drill down     # the heading it sits under (default "Open")
+
+actions:
+  - key:     d
+    source:  pods
+    label:   describe
+    section: Inspect        # default "Actions"
+    run:     [kubectl, describe, pod, "${selection}"]
+```
+
+Both default sensibly, so `section:` is worth setting only when the verb
+has a better home than "Open" / "Actions". Bindings naming the same
+section share one heading, in the order the config lists them — and a
+section name matching a component's (`Filter`, `Select`, …) files the
+verb alongside those keys rather than starting a new group.
+
+Only the **focused** component contributes, which matches the help strip
+and keeps the overlay about the pane you are actually in.
+
 ## Example index
 
 | File | Demonstrates |
@@ -614,6 +760,8 @@ initial: <screen-name>         # required when `screens:` is set
 | `examples/table_wide.yaml` | Wide table demonstrating horizontal scroll (`←`/`→`, `shift+←`/`shift+→`, `0`/`$`) |
 | `examples/layout.yaml` | Nested layouts, mixed flex weights |
 | `examples/themes.yaml` | Built-in theme picker reference |
+| `examples/chrome.yaml` | `app.glyphs` + `app.borders` — ASCII-safe glyph vocabulary, rounded panes, a double-bordered overlay and `slot_brackets: corners`. Press `t` to confirm the chrome survives a palette swap |
+| `examples/marking.yaml` | **Multi-select** (`markable:`): a pods table keyed on a `uid` column it never renders, beside a markable list and tree. The fixture reverses its row order every 3s poll — mark a row with `x` and watch the mark stay on the pod, not the slot |
 | `examples/multi.yaml` | Multi-screen drilldown (Regions → Cities → Detail) with breadcrumbing and `${selection}` substitution |
 | `examples/on_key_push.yaml` | `on_key:` block — GitHub users list where `key: enter` pushes to repos and `key: s` pushes to starred, both binding `${selection}`; the repos table then pushes a repo-detail inspector, binding `${selection.Repo}` |
 | `examples/http_countries.yaml` | Table backed by restcountries.com REST API; `refresh: 5m` polling; per-column `value:` dot-paths |
@@ -629,7 +777,7 @@ initial: <screen-name>         # required when `screens:` is set
 | `examples/stream_websocket.yaml` | `type: websocket` — connects on activate; each text frame appends to a logview. Headers handle auth on the upgrade request |
 | `examples/stream_trades_table.yaml` | Same websocket stream as above, but feeding a **live table** with `max_rows: 100`. Each JSON frame projects into a row via column `value:` paths and prepends to a ring buffer. Plus a side-by-side logview showing raw frames + connection state |
 | `examples/stream_l1.yaml` | **L1 ticker JOINED from two streams**: Binance.us bookTicker (fast bid/ask) + @ticker (slower last-price + 24h stats) merged by symbol via `row_key: data.s`. Deep-merge keeps both sources' fields alive on each row. Demonstrates streaming + merge + keyed upsert together |
-| `examples/prompts_boot.yaml` | **Boot-time params via `app.prompts`**: form modal collects GitHub username + sort field + an archived-repos toggle before the main screen renders. Values become env vars and feed `${env.USER}` into the URL, the title, and a column |
+| `examples/prompts_boot.yaml` | **Boot-time params via `app.prompts`**: form modal collects GitHub username + sort field + an archived-repos toggle + a masked token before the main screen renders. Values become env vars and feed `${env.USER}` into the URL, the title, and a column |
 | `examples/action_prompts.yaml` | **Action prompts**: keys fire a form modal that collects values before the action's subprocess dispatches. `${prompt.<key>}` substitutes into run argv + confirm message + notice |
 | `examples/kube_multi.yaml` | Multi-cluster: 3 kube clusters merged into one pods table via `type: merge`. Tagged + colored by cluster. Use `task kube:multi:up && task kube:multi:proxy:all && task kube:multi:demo` |
 | `examples/demo.yaml` | Kitchen-sink: list + table side-by-side |
