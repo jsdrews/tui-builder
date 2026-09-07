@@ -101,6 +101,23 @@ type Action struct {
 	//
 	//	success: code == 0 or code == 409
 	Success string `yaml:"success,omitempty"`
+
+	// Multi allows this action to run over a selection of more than one
+	// row: it fans out into one run per marked row, each individually
+	// tracked, cancellable and logged.
+	//
+	// Defaults to false, and the default runs the safe way round. A verb
+	// that forgets to think about arity shows up in the menu disabled
+	// with a reason, noticed in the first five seconds of using the
+	// screen. Were the default reversed, forgetting would ship a verb
+	// that picks one of three marked rows arbitrarily — found in
+	// production.
+	//
+	// One run per row rather than one run with a joined argv: that is
+	// what makes each cancellable on its own and pairs exclusivity with
+	// the target, so restarting `web` while `api` restarts is fine and
+	// restarting `web` twice is not.
+	Multi bool `yaml:"multi,omitempty"`
 	// Message is the head line on success — the one that paints the
 	// statusbar summary AND heads the console entry. Supports ${inputs.*}
 	// and, for http, dot-paths into the parsed JSON body via ${body.*}.

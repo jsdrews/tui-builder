@@ -114,6 +114,17 @@ tui:
       filterable: true
       source: pods
       initial_sort: {column: Name, desc: false}
+      # Multi-select. `x` marks a row, `X` extends from the last mark,
+      # `A` marks all, `D` drops them. Marks are held by KEY, so the 5s
+      # poll below can reorder or replace rows without the selection
+      # sliding onto a neighbour.
+      #
+      # `mark_key:` is required and is read from the source item, not a
+      # column — `metadata.uid` is the only field here that is unique and
+      # stable. Name repeats across namespaces; STATUS and the age
+      # change under you. Both would fail silently.
+      markable: true
+      mark_key: metadata.uid
       columns:
         - {title: Name,      width: 36, sortable: true, value: "metadata.name"}
         - {title: Namespace, width: 18, sortable: true, value: "metadata.namespace"}
@@ -385,6 +396,12 @@ actions:
 
   pod_delete:
     description: Delete a pod
+    # Fans out over marked rows: one kubectl per pod, each separately
+    # tracked, separately cancellable, each logged under its own name.
+    # Not one `kubectl delete pod a b c` — that would be a single run
+    # you can only cancel wholesale, and a partial failure would be one
+    # opaque exit code.
+    multi: true
     inputs:
       namespace: {type: string, required: true}
       name:      {type: string, required: true}

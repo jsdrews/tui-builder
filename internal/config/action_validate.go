@@ -130,6 +130,9 @@ func validateActionDefs(actions map[string]*Action) error {
 				return fmt.Errorf("%s: `run:` is not valid on an http action", path)
 			}
 		case "push":
+			if a.Multi {
+				return fmt.Errorf("%s: `multi: true` is meaningless on a push — a push replaces what is on top of the stack, so there is no second screen to open", path)
+			}
 			if a.Push == "" {
 				return fmt.Errorf("%s: `push:` is required for a push action — name a screen in tui.screens", path)
 			}
@@ -204,6 +207,9 @@ func validateActionBindings(bindings []ActionBinding, refs map[string]int, compo
 		a, ok := actions[b.Action]
 		if !ok {
 			return fmt.Errorf("%s: action %q is not defined in the top-level actions: map", bp, b.Action)
+		}
+		if a.Multi && b.Interactive != nil && *b.Interactive {
+			return fmt.Errorf("%s: `interactive: true` and a multi action conflict — the TTY can only be handed to one process at a time", bp)
 		}
 		if a.Kind() == "http" && b.Interactive != nil && *b.Interactive {
 			return fmt.Errorf("%s: `interactive: true` is meaningless for an http action — there is no terminal to hand over", bp)

@@ -12,6 +12,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	taction "github.com/jsdrews/tuilib/pkg/action"
+	"github.com/jsdrews/tuilib/pkg/app"
+	"github.com/jsdrews/tuilib/pkg/runner"
 
 	"github.com/jsdrews/tui-builder/internal/action"
 	"github.com/jsdrews/tui-builder/internal/build"
@@ -93,10 +95,12 @@ func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Comp
 		return a
 	}
 
+	sels := m.selectionsFor(b, cur)
 	sel := build.Selection{}
-	if b.From != "" && cur != nil {
-		sel = selectionFrom(cur)
+	if len(sels) > 0 {
+		sel = sels[0]
 	}
+	a.Multi = def.Multi
 	// A push is navigation: nothing to stream, nothing to cancel, and
 	// the destination's parameters come from bind: rather than from the
 	// action's inputs. Do is the right shape, and tuilib says so —
@@ -134,6 +138,27 @@ func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Comp
 		// a default previews what will actually run rather than an
 		// empty string.
 		a.Confirm = build.SubstituteAll([]string{b.Confirm}, sel, vals)[0]
+		// Under a fan-out the author's template resolved against ONE
+		// row, so on its own it would say "Delete web?" while deleting
+		// three. Say the arity rather than rewriting their sentence:
+		// the count is the part they can't have written, since they
+		// didn't know it.
+		if def.Multi && len(sels) > 1 {
+			a.Confirm = fmt.Sprintf("%s\n\nRuns %d times, once per marked row.", a.Confirm, len(sels))
+		}
+	}
+
+	// Fan-out. One run per marked row rather than one run over a joined
+	// argv: N runs are individually tracked, individually cancellable
+	// and individually logged, and RunKey pairs exclusivity with the
+	// target so restarting `web` while `api` restarts is fine.
+	//
+	// Do rather than Run because the shell's Run path starts exactly one
+	// run for the whole Set. tuilib still sees every one of them: they
+	// go out through the same runner.GoWith it would have used.
+	if def.Multi && len(sels) > 1 {
+		a.Do = func() tea.Cmd { return m.fanOut(b, def, a, sels) }
+		return a
 	}
 
 	// Interactive means "hand over the terminal", which a writer can't
@@ -208,4 +233,58 @@ func runFunc(r *action.Resolved) taction.Func {
 		}
 		return nil
 	}
+}
+
+// selectionsFor lists the rows a binding will act on: every marked row
+// when the binding is scoped to a pane, otherwise nothing.
+//
+// It goes through MarkedSelections, which already follows tuilib's
+// Selection contract — marked rows if any, else the cursor row. A
+// hand-written version of that branch is how a verb quietly acts on one
+// row when the user marked six.
+func (m *Model) selectionsFor(b cfg.ActionBinding, cur *build.Component) []build.Selection {
+	if b.From == "" || cur == nil {
+		return nil
+	}
+	if sels := build.MarkedSelections(cur); len(sels) > 0 {
+		return sels
+	}
+	if s := selectionFrom(cur); s.String != "" {
+		return []build.Selection{s}
+	}
+	return nil
+}
+
+// fanOut turns one pick into N tracked runs, one per marked row.
+//
+// Each row resolves independently — bind: templates are evaluated
+// against that row — so the argv, the success verdict and the summary
+// are that row's own. Inputs the binding didn't fill were collected once
+// before this and apply to every row, which is the right split: bind:
+// is per-row by construction, a form answer is not.
+func (m *Model) fanOut(b cfg.ActionBinding, def *cfg.Action, a taction.Action, sels []build.Selection, extra ...action.Inputs) tea.Cmd {
+	var cmds []tea.Cmd
+	for _, sel := range sels {
+		inputs := resolveBinds(b, def, sel)
+		for _, e := range extra {
+			for k, v := range e {
+				if _, bound := inputs[k]; !bound {
+					inputs[k] = v
+				}
+			}
+		}
+		resolved, err := action.Resolve(def, inputs)
+		if err != nil {
+			cmds = append(cmds, app.Error(fmt.Sprintf("%s: %v", b.Action, err)))
+			continue
+		}
+		target := sel.String
+		cmds = append(cmds, runner.GoWith(runner.GoOptions{
+			Label:  a.Label,
+			Detail: a.Label + " · " + target,
+			Tag:    taction.RunKey(a, target),
+			Run:    runFunc(resolved),
+		}))
+	}
+	return tea.Batch(cmds...)
 }

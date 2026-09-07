@@ -625,6 +625,14 @@ actions:
   <name>:
     description:  <string>     # shown by `wrangl --list-actions`
     type:         exec | http  # default exec; `push:` implies push
+    multi:        <bool>      # default false. true fans out over marked
+                               # rows: one run per row, each separately
+                               # tracked, cancellable and logged, each tagged
+                               # with its own target so exclusivity is
+                               # per-row. False (the safe default) shows the
+                               # verb disabled under a multi-selection rather
+                               # than picking one row arbitrarily. Rejected
+                               # on a push, and with `interactive: true`.
     push:         <screen>     # opens a screen in `tui.screens:` — what the
                                # old `on_key:` block was. Navigation, so it
                                # takes no run:/url:/inputs:; the binding's

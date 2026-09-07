@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	taction "github.com/jsdrews/tuilib/pkg/action"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
@@ -209,5 +211,174 @@ func TestNoBindingsMeansNoMenu(t *testing.T) {
 	m := menuModel(t, nil, nil)
 	if !m.Actions().Empty() {
 		t.Error("a screen with no action bindings should have no menu")
+	}
+}
+
+// markableModel builds a screen whose list carries marks, so a
+// multi-selection is expressible.
+func markableModel(t *testing.T, bindings []cfg.ActionBinding, reg map[string]*cfg.Action) *Model {
+	t.Helper()
+	comps := map[string]*cfg.Component{
+		"pods": {Type: "list", Source: "items", Item: "name", Markable: true},
+	}
+	sources := map[string]*cfg.Source{
+		"items": cfg.NewEntry(&cfg.Source{Type: "static", Data: []any{}}),
+	}
+	sc := &cfg.Screen{Title: "Pods", Layout: cfg.Node{Component: "pods"}, Actions: bindings}
+	m, err := New(sc, comps, sources, reg, theme.Nord())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	build.ApplyData(m.tree.All()[0], []any{
+		map[string]any{"name": "web"},
+		map[string]any{"name": "api"},
+		map[string]any{"name": "db"},
+	}, theme.Nord())
+	return m
+}
+
+func markRows(t *testing.T, m *Model, keys ...string) {
+	t.Helper()
+	m.tree.All()[0].List.SetMarks(keys)
+}
+
+func restartBindings() ([]cfg.ActionBinding, map[string]*cfg.Action) {
+	return []cfg.ActionBinding{{
+			Key: "r2", Action: "restart", Label: "restart", From: "pods",
+			Bind: map[string]string{"name": "${selection}"},
+		}}, map[string]*cfg.Action{
+			"restart": {
+				Multi:  true,
+				Run:    []string{"echo", "${inputs.name}"},
+				Inputs: map[string]*cfg.Parameter{"name": {}},
+			},
+		}
+}
+
+// Set.Count is what the menu uses to decide whether a non-Multi verb is
+// available, and what titles the menu.
+func TestMultiSelectionDrivesTargetAndCount(t *testing.T) {
+	bs, reg := restartBindings()
+	m := markableModel(t, bs, reg)
+	markRows(t, m, "web", "api")
+
+	set := m.Actions()
+	if set.Count != 2 {
+		t.Errorf("Count = %d, want 2", set.Count)
+	}
+	if set.Target != "2 items" {
+		t.Errorf("Target = %q, want \"2 items\"", set.Target)
+	}
+}
+
+// Multi is the action's own declaration; the menu disables a non-Multi
+// verb under a multi-selection on its own.
+func TestMultiFlagIsCarriedToTheMenu(t *testing.T) {
+	bs, reg := restartBindings()
+	m := markableModel(t, bs, reg)
+	markRows(t, m, "web", "api")
+	a, ok := find(m.Actions(), "restart")
+	if !ok {
+		t.Fatal("restart missing")
+	}
+	if !a.Multi {
+		t.Error("Multi should reach the menu; without it the shell disables the verb")
+	}
+
+	reg["restart"].Multi = false
+	a, _ = find(m.Actions(), "restart")
+	if a.Multi {
+		t.Error("Multi must default off — the safe way round")
+	}
+}
+
+// A multi-selection fans out to Do (N runs); a single selection stays on
+// Run, which is what the shell can attribute and cancel on its own.
+func TestFanOutUsesDoOnlyForMoreThanOne(t *testing.T) {
+	bs, reg := restartBindings()
+	m := markableModel(t, bs, reg)
+
+	markRows(t, m, "web")
+	a, _ := find(m.Actions(), "restart")
+	if a.Run == nil || a.Do != nil {
+		t.Error("one target should stay on Run")
+	}
+
+	markRows(t, m, "web", "api", "db")
+	a, _ = find(m.Actions(), "restart")
+	if a.Do == nil || a.Run != nil {
+		t.Error("a multi-selection should fan out via Do")
+	}
+}
+
+// The point of N runs rather than one joined argv: each is tagged with
+// its own target, so exclusivity and cancellation are per-row.
+func TestFanOutTagsEachRunWithItsOwnTarget(t *testing.T) {
+	bs, reg := restartBindings()
+	m := markableModel(t, bs, reg)
+	markRows(t, m, "web", "api")
+
+	a, _ := find(m.Actions(), "restart")
+	sels := build.MarkedSelections(m.tree.All()[0])
+	if len(sels) != 2 {
+		t.Fatalf("want 2 marked rows, got %d", len(sels))
+	}
+	if got := taction.RunKey(a, sels[0].String); got == taction.RunKey(a, sels[1].String) {
+		t.Fatal("two targets produced the same RunKey — exclusivity would be shared")
+	}
+
+	// The fan-out itself batches one command per row.
+	cmd := m.fanOut(bs[0], reg["restart"], a, sels)
+	if cmd == nil {
+		t.Fatal("fanOut produced no command")
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("want a batch of runs, got %T", msg)
+	}
+	if len(batch) != 2 {
+		t.Errorf("got %d runs, want one per marked row", len(batch))
+	}
+}
+
+// Each row resolves its own bind: templates, so the argv is that row's.
+func TestFanOutResolvesPerRow(t *testing.T) {
+	bs, reg := restartBindings()
+	m := markableModel(t, bs, reg)
+	markRows(t, m, "web", "api")
+
+	sels := build.MarkedSelections(m.tree.All()[0])
+	seen := map[string]bool{}
+	for _, sel := range sels {
+		in := resolveBinds(bs[0], reg["restart"], sel)
+		seen[in["name"]] = true
+	}
+	if !seen["web"] || !seen["api"] {
+		t.Errorf("each row should resolve its own name, got %v", seen)
+	}
+}
+
+// A confirm template resolves against one row, so on its own it would
+// say "Delete web?" while deleting three. The count is the part the
+// author couldn't have written.
+func TestFanOutConfirmStatesTheArity(t *testing.T) {
+	bs, reg := restartBindings()
+	bs[0].Confirm = "Restart ${selection}?"
+	m := markableModel(t, bs, reg)
+
+	markRows(t, m, "web")
+	a, _ := find(m.Actions(), "restart")
+	if strings.Contains(a.Confirm, "Runs") {
+		t.Errorf("a single target needs no arity note, got %q", a.Confirm)
+	}
+
+	markRows(t, m, "web", "api", "db")
+	a, _ = find(m.Actions(), "restart")
+	if !strings.Contains(a.Confirm, "Restart ") {
+		t.Errorf("the author's wording should survive, got %q", a.Confirm)
+	}
+	if !strings.Contains(a.Confirm, "Runs 3 times") {
+		t.Errorf("confirm should state the arity, got %q", a.Confirm)
 	}
 }

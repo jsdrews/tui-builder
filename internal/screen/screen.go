@@ -180,7 +180,11 @@ type Model struct {
 	pendingBinding cfg.ActionBinding
 	pendingInputs  action.Inputs
 	pendingSel     build.Selection
-	pendingFields  int
+	pendingSels    []build.Selection
+	// pendingFan is a fan-out held behind the confirm modal: one
+	// dialog gates N runs, not one dialog per row.
+	pendingFan    func() tea.Cmd
+	pendingFields int
 
 	// pendingResolved is the action awaiting a confirm answer.
 	pendingResolved *action.Resolved
@@ -424,7 +428,7 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 			if def == nil {
 				return m, app.Error(fmt.Sprintf("action %q is not defined", b.Action))
 			}
-			return m, m.actionAfterInputs(b, def, sel, inputs)
+			return m, m.actionAfterInputs(b, def, sel, m.pendingSels, inputs)
 		case form.CancelledMsg:
 			m.clearPendingForm()
 			return m, nil
@@ -442,7 +446,11 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 			resolved := m.pendingResolved
 			notice := m.pendingNotice
 			interactive := m.pendingInteractive
+			fan := m.pendingFan
 			m.clearPendingConfirm()
+			if fan != nil {
+				return m, fan()
+			}
 			if resolved == nil {
 				return m, nil
 			}
@@ -1010,9 +1018,13 @@ func (m *Model) startAction(b cfg.ActionBinding) (tea.Cmd, bool) {
 		// rather than panic.
 		return app.Error(fmt.Sprintf("action %q is not defined", b.Action)), true
 	}
+	var sels []build.Selection
+	if b.From == "" || b.From == focusedName {
+		sels = m.selectionsFor(b, cur)
+	}
 	sel := build.Selection{}
-	if b.From != "" && b.From == focusedName && cur != nil {
-		sel = selectionFrom(cur)
+	if len(sels) > 0 {
+		sel = sels[0]
 	}
 	if def.Kind() == "push" {
 		return m.pushAction(b, def, sel)
@@ -1028,17 +1040,35 @@ func (m *Model) startAction(b cfg.ActionBinding) (tea.Cmd, bool) {
 		m.pendingBinding = b
 		m.pendingInputs = inputs
 		m.pendingSel = sel
+		m.pendingSels = sels
 		m.pendingFields = len(missing)
 		return f.Init(), true
 	}
-	return m.actionAfterInputs(b, def, sel, inputs), true
+	return m.actionAfterInputs(b, def, sel, sels, inputs), true
 }
 
 // actionAfterInputs is the second leg of dispatch — runs once every
 // input has a value, whether from bind: or from the generated form.
 // Resolves the action into something concrete, then either pops the
 // confirm modal or dispatches.
-func (m *Model) actionAfterInputs(b cfg.ActionBinding, def *cfg.Action, sel build.Selection, inputs action.Inputs) tea.Cmd {
+func (m *Model) actionAfterInputs(b cfg.ActionBinding, def *cfg.Action, sel build.Selection, sels []build.Selection, inputs action.Inputs) tea.Cmd {
+	// Fan-out after the form: the answers just typed apply to every
+	// marked row, while each row's bind: templates still resolve against
+	// that row. Confirm once, then N runs.
+	if def.Multi && len(sels) > 1 {
+		a := m.menuAction(b, def, m.current(), b.From)
+		fan := func() tea.Cmd { return m.fanOut(b, def, a, sels, inputs) }
+		if b.Confirm != "" {
+			msg := build.SubstituteAll([]string{b.Confirm}, sel, inputs)[0]
+			msg = fmt.Sprintf("%s\n\nRuns %d times, once per marked row.", msg, len(sels))
+			modal := m.newConfirmModal(labelOr(b.Label, b.Action), msg)
+			m.confirmModal = &modal
+			m.pendingFan = fan
+			return nil
+		}
+		return fan()
+	}
+
 	resolved, err := action.Resolve(def, inputs)
 	if err != nil {
 		return app.Error(fmt.Sprintf("%s: %v", b.Action, err))
@@ -1131,6 +1161,7 @@ func (m *Model) clearPendingConfirm() {
 	m.pendingResolved = nil
 	m.pendingNotice = ""
 	m.pendingInteractive = false
+	m.pendingFan = nil
 }
 
 // clearPendingForm drops the form modal and every piece of action
@@ -1140,6 +1171,7 @@ func (m *Model) clearPendingForm() {
 	m.pendingBinding = cfg.ActionBinding{}
 	m.pendingInputs = nil
 	m.pendingSel = build.Selection{}
+	m.pendingSels = nil
 	m.pendingFields = 0
 }
 
