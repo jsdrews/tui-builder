@@ -118,7 +118,7 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("tui.components.%s: referenced %d times in tui.screen.layout — each component may be placed only once per screen", name, n)
 			}
 		}
-		if err := validateActions(c.TUI.Screen.Actions, refs, c.TUI.Components, "tui.screen", c.App.OutputConsoleKey()); err != nil {
+		if err := validateActions(c.TUI.Screen.Actions, refs, c.TUI.Components, "tui.screen", c.App.OutputConsoleKey(), c.App.ThemeCycleKey()); err != nil {
 			return err
 		}
 		if err := validateOnCursor(refs, c.TUI.Components, "tui.screen"); err != nil {
@@ -174,7 +174,7 @@ func (c *Config) Validate() error {
 			}
 			seenKeys[dedupKey] = i
 		}
-		if err := validateActions(s.Actions, refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name), c.App.OutputConsoleKey()); err != nil {
+		if err := validateActions(s.Actions, refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name), c.App.OutputConsoleKey(), c.App.ThemeCycleKey()); err != nil {
 			return err
 		}
 		if err := validateOnCursor(refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name)); err != nil {
@@ -228,7 +228,7 @@ func validateOnCursor(refs map[string]int, components map[string]*Component, pat
 	return nil
 }
 
-func validateActions(actions []Action, refs map[string]int, components map[string]*Component, path, outputKey string) error {
+func validateActions(actions []Action, refs map[string]int, components map[string]*Component, path, outputKey, themeKey string) error {
 	for i, a := range actions {
 		if a.Key == "" {
 			return fmt.Errorf("%s.actions[%d]: key is required", path, i)
@@ -238,6 +238,9 @@ func validateActions(actions []Action, refs map[string]int, components map[strin
 		// config and do nothing at runtime.
 		if outputKey != "" && a.Key == outputKey {
 			return fmt.Errorf("%s.actions[%d]: key %q is the output console key (app.output_key) — pick another, or set app.output_key to disable the console", path, i, a.Key)
+		}
+		if themeKey != "" && a.Key == themeKey {
+			return fmt.Errorf("%s.actions[%d]: key %q is the theme-cycle key (app.theme_key) — pick another, or set app.theme_key to \"-\" to pin the palette", path, i, a.Key)
 		}
 		if a.Source == "" {
 			return fmt.Errorf("%s.actions[%d]: source is required", path, i)

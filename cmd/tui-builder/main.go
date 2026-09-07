@@ -100,6 +100,12 @@ func run() error {
 			// events and a picker for killing what's still in flight.
 			// Zero binding (app.output_key: "-") leaves it off entirely.
 			OutputKey: outputBinding(c.App.OutputConsoleKey()),
+			// Theme cycling. A zero binding disables it, which is what
+			// this was until now — so `theme.All()`, reorderThemes and
+			// every "press t" in the docs described something that
+			// couldn't happen. Zero binding (app.theme_key: "-") pins
+			// the palette.
+			ThemeKey: keyBinding(c.App.ThemeCycleKey(), "theme"),
 			// Every component we build (list / table / tree / logview /
 			// inspector / textview) hit-tests mouse events against its
 			// own rect, so clicking is uniformly useful. The cost is the
@@ -114,15 +120,18 @@ func run() error {
 	return err
 }
 
-// outputBinding turns the configured console key into the binding
-// app.Options wants. A zero Binding is the shell's "no console" switch,
+// keyBinding turns a configured global key into the binding app.Options
+// wants. A zero Binding is the shell's "off" switch for each of these,
 // so an empty key must produce one rather than a binding on "".
-func outputBinding(k string) key.Binding {
+func keyBinding(k, help string) key.Binding {
 	if k == "" {
 		return key.Binding{}
 	}
-	return key.NewBinding(key.WithKeys(k), key.WithHelp(k, "output"))
+	return key.NewBinding(key.WithKeys(k), key.WithHelp(k, help))
 }
+
+// outputBinding is keyBinding for the console key.
+func outputBinding(k string) key.Binding { return keyBinding(k, "output") }
 
 // initialOr pre-fills a prompt field from the environment variable the
 // prompt is keyed on, falling back to the config's `initial:`. Exporting

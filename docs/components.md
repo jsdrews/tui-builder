@@ -178,7 +178,8 @@ Unchanged from round 1. `layout.Center` lands when modal components
 | `Title`, `Version`, `Theme` | ✓ | `app.title`, `app.version`, `app.theme` |
 | `HelpVerbose` (legacy inline footer) | ✗ | **deliberately dropped.** Verbose mode packs bindings inline and only lets `?` open the key overlay once they *overflow* the statusbar, so on a wide terminal with a simple screen the modal silently never opens. The footer is always minimal ("? help") and `?` always opens the overlay |
 | `DisableHelpSearch` | ✗ | the overlay's search field stays on — it is the fast route through a screen with 15+ bindings |
-| `QuitKey`, `ThemeKey`, `HelpKey` custom bindings | ✗ | defaults locked |
+| `ThemeKey` (cycle palettes) | ✓ | `app.theme_key` (default `t`; `-` pins the palette) |
+| `QuitKey`, `HelpKey` custom bindings | ✗ | defaults locked |
 | `ThemeEnvVar` / `SkipConfig` / `DisableAutoEscPop` | ✗ | |
 | Inline custom themes | ✗ | |
 | `theme.Terminal()` | ✗ | |
@@ -214,6 +215,11 @@ app:
   title: <string>             # breadcrumb prefix
   version: <string>           # statusbar right
   theme: <name>               # one of theme.All() names
+  theme_key: <key>            # cycles the palette live through every
+                              # built-in theme. Default "t"; set "-" to pin
+                              # the app to one palette. No action may bind
+                              # this key — the shell claims it globally, so
+                              # the validator rejects the collision.
   output_key: <key>           # opens the output console — scrollback of every
                               # statusbar message and everything a subprocess
                               # streams, with a statusbar badge counting events

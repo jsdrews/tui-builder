@@ -461,6 +461,16 @@ it yet.
 
 **Cost:** ~150 lines of config + mapping, as estimated.
 
+**Found while verifying this: `t` never worked.** `app.Options.ThemeKey`
+was never set, and tuilib treats a zero binding as "cycling disabled" —
+so `theme.All()`, `reorderThemes`, and every "press `t`" in the docs
+(`examples/themes.yaml` said it before this branch existed) described
+something that could not happen. Now bound, with `app.theme_key:`
+mirroring `app.output_key:` — default `t`, `-` to pin the palette, and
+reserved against action bindings the same way. Which means the
+apply-to-every-palette design above is now actually observable, rather
+than argued.
+
 ---
 
 ## Workstream 4 — password prompts

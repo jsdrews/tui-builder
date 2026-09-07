@@ -251,6 +251,14 @@ type App struct {
 	// choice of vocabulary, and cycling themes at runtime (`t`) should
 	// not change the vocabulary halfway through.
 	Borders Borders `yaml:"borders,omitempty"`
+	// ThemeKey cycles the palette, live, through every built-in theme
+	// — the same list Theme picks the initial one from.
+	//
+	// Defaults to "t"; set it to "-" to pin the app to one palette. It
+	// is a key the shell claims globally, so no action may bind it;
+	// the validator rejects the collision rather than letting one
+	// silently shadow the other.
+	ThemeKey string `yaml:"theme_key,omitempty"`
 	// OutputKey opens tuilib's output console — the scrollback that
 	// collects every statusbar message and everything a subprocess
 	// streams, with a statusbar badge counting events and a picker for
@@ -450,6 +458,19 @@ type Action struct {
 	// message, and Notice. Order: prompts → confirm (with substituted
 	// preview) → dispatch. Cancel from the form aborts the action.
 	Prompts []Prompt `yaml:"prompts,omitempty"`
+}
+
+// ThemeCycleKey returns the theme-cycle key with the default applied,
+// or "" when the config pinned the palette with "-". Same shape as
+// OutputConsoleKey, and for the same reason: one place owns the default.
+func (a *App) ThemeCycleKey() string {
+	switch a.ThemeKey {
+	case "":
+		return "t"
+	case "-":
+		return ""
+	}
+	return a.ThemeKey
 }
 
 // OutputConsoleKey returns the console key with the default applied, or

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jsdrews/tuilib/pkg/app"
@@ -52,6 +53,9 @@ func run() error {
 		app.New(app.Options{
 			Root:   root,
 			Themes: themes,
+			// Same default as tui-builder: `t` cycles the palette.
+			// Without a binding the Themes list above is inert.
+			ThemeKey: key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "theme")),
 			// Match tui-builder: the launcher pushes the same screens, so
 			// mouse must be on here too or clicking would work only for
 			// configs opened directly.
