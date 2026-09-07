@@ -24,10 +24,12 @@
 #   - `+` / `-` disclosure arrows in the tree (default ▾ / ▸)
 #   - `#` scrollbar thumbs — narrow a pane or press G to see one
 #   - rounded pane corners, and titles bracketed as `( title )`
-#   - press `o` for the output console — a pushed screen, so it takes the
-#     pane shape (`active`), not `overlay`. `overlay` is for what floats
-#     *above* a screen: confirm and alert dialogs, and the action menu.
-#     Nothing here opens one, so `double` below is set but unexercised.
+#   - press `?` for the key overlay: a modal, so it takes `overlay`
+#     (double lines here) rather than the rounded pane shape — and the
+#     glyphs follow it in, cursor and filter rule included
+#   - press `o` for the output console — a pushed screen, not a modal, so
+#     it takes the pane shape (`active`). The distinction is the whole
+#     reason `overlay` is its own knob.
 app:
   title: Chrome
   theme: nord
@@ -53,10 +55,12 @@ app:
                             # signalled by border *color*, and a pane that
                             # changed weight on focus would move your eye
                             # for a reason you didn't ask about
-    overlay:  double        # confirm + alert dialogs and the action menu —
-                            # the things drawn over a screen rather than
-                            # inside it. A heavier line is what separates
-                            # an overlay from the pane it covers.
+    overlay:  double        # the key overlay (`?`), confirm + alert dialogs,
+                            # and the action menu — what is drawn *over* a
+                            # screen rather than inside it. A heavier line
+                            # is what separates an overlay from the pane it
+                            # covers. The output console is a pushed
+                            # screen, not a modal, so it takes `active`.
     slot_brackets: corners  # how a title meets the border line:
                             #   none     -- title --   (default)
                             #   corners  ) title (     a labelled tab

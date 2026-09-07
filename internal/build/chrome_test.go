@@ -173,19 +173,27 @@ func TestChromeReachesComponentOptions(t *testing.T) {
 // output console looks like it belongs here and doesn't: it is a pushed
 // screen, so it takes the pane shape. Pin the split, because the docs
 // and examples/chrome.yaml both make the claim.
+//
+// The help overlay joined this list in tuilib v0.25, which is exactly
+// how the list goes stale: `?` was a footer panel when chrome.yaml was
+// written and is a modal now.
 func TestOverlayShapeReachesOverlaysOnly(t *testing.T) {
 	a := &cfg.App{Borders: cfg.Borders{Active: "rounded", Overlay: "double"}}
 	th := ApplyChrome([]theme.Theme{theme.Nord()}, a)[0]
 
 	overlay, active := lipgloss.DoubleBorder(), lipgloss.RoundedBorder()
-	if got := th.Confirm().ActiveBorder; got != overlay {
-		t.Error("confirm dialog did not get the overlay shape")
-	}
-	if got := th.Alert().ActiveBorder; got != overlay {
-		t.Error("alert dialog did not get the overlay shape")
-	}
-	if got := th.Actions().ActiveBorder; got != overlay {
-		t.Error("action menu did not get the overlay shape")
+	for _, c := range []struct {
+		what   string
+		border lipgloss.Border
+	}{
+		{"confirm dialog", th.Confirm().ActiveBorder},
+		{"alert dialog", th.Alert().ActiveBorder},
+		{"action menu", th.Actions().ActiveBorder},
+		{"help overlay", th.HelpOverlay().ActiveBorder},
+	} {
+		if c.border != overlay {
+			t.Errorf("%s did not get the overlay shape", c.what)
+		}
 	}
 	// Ordinary components stay on the pane shape.
 	if got := th.Table().ActiveBorder; got != active {
@@ -193,5 +201,31 @@ func TestOverlayShapeReachesOverlaysOnly(t *testing.T) {
 	}
 	if got := th.Logview().ActiveBorder; got != active {
 		t.Error("logview should take the active shape, not the overlay one")
+	}
+}
+
+// The help overlay is the screen a user reaches for when they are
+// already lost, so it is the worst place for the chrome to revert to
+// defaults. v0.25 wires Glyphs and SlotBrackets through theme.HelpOverlay;
+// this pins that they arrive.
+func TestChromeReachesHelpOverlay(t *testing.T) {
+	a := &cfg.App{
+		Glyphs:  cfg.Glyphs{Cursor: ">", Rule: "-"},
+		Borders: cfg.Borders{SlotBrackets: "corners"},
+	}
+	th := ApplyChrome([]theme.Theme{theme.Nord()}, a)[0]
+
+	ov := th.HelpOverlay()
+	if ov.Glyphs.Cursor != ">" {
+		t.Errorf("help overlay cursor = %q, want >", ov.Glyphs.Cursor)
+	}
+	if ov.Glyphs.Rule != "-" {
+		t.Errorf("help overlay rule = %q, want -", ov.Glyphs.Rule)
+	}
+	if ov.Glyphs.ColumnSep != glyph.Default().ColumnSep {
+		t.Errorf("help overlay column_sep = %q, want the default", ov.Glyphs.ColumnSep)
+	}
+	if ov.SlotBrackets != pane.SlotBracketsCorners {
+		t.Errorf("help overlay slot brackets = %v, want corners", ov.SlotBrackets)
 	}
 }

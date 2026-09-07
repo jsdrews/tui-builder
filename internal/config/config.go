@@ -253,7 +253,9 @@ type App struct {
 	Borders Borders `yaml:"borders,omitempty"`
 	// HelpVerbose restores the legacy footer that tight-packs bindings
 	// inline. Default (false) is minimal mode — the footer shows "? help"
-	// and `?` opens the expanded panel.
+	// and `?` opens the key overlay: a searchable modal listing every
+	// binding, sectioned by the component that owns it. It takes
+	// `borders.overlay`, not the pane shape.
 	HelpVerbose bool `yaml:"help_verbose,omitempty"`
 	// OutputKey opens tuilib's output console — the scrollback that
 	// collects every statusbar message and everything a subprocess

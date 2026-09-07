@@ -176,7 +176,7 @@ Unchanged from round 1. `layout.Center` lands when modal components
 | Tuilib feature | Exposed? | Schema field |
 |---|---|---|
 | `Title`, `Version`, `Theme` | ✓ | `app.title`, `app.version`, `app.theme` |
-| `HelpVerbose` (legacy inline footer) | ✓ | `app.help_verbose` (default false → minimal "? help" footer; press `?` for full panel) |
+| `HelpVerbose` (legacy inline footer) | ✓ | `app.help_verbose` (default false → minimal "? help" footer; press `?` for the searchable key overlay) |
 | `QuitKey`, `ThemeKey`, `HelpKey` custom bindings | ✗ | defaults locked |
 | `HelpMaxRows` (cap expanded help panel) | ✗ | defaults to 6 |
 | `ThemeEnvVar` / `SkipConfig` / `DisableAutoEscPop` | ✗ | |
@@ -214,7 +214,9 @@ app:
   title: <string>             # breadcrumb prefix
   version: <string>           # statusbar right
   theme: <name>               # one of theme.All() names
-  help_verbose: <bool>        # true = legacy inline footer, false (default) = minimal "? help"
+  help_verbose: <bool>        # true = legacy inline footer, false (default) =
+                              # minimal "? help" — `?` opens the searchable key
+                              # overlay, a modal that takes `borders.overlay`
   output_key: <key>           # opens the output console — scrollback of every
                               # statusbar message and everything a subprocess
                               # streams, with a statusbar badge counting events
@@ -248,9 +250,10 @@ app:
                               # focus is signalled by border *color*, so a pane
                               # that changed weight on focus would move the eye
                               # for a reason the user didn't ask about
-    overlay:  <same>          # confirm + alert dialogs and the action menu —
-                              # what floats above a screen. The output console
-                              # is a pushed screen, so it takes `active`.
+    overlay:  <same>          # the key overlay (`?`), confirm + alert dialogs
+                              # and the action menu — what is drawn *over* a
+                              # screen. The output console is a pushed screen,
+                              # not a modal, so it takes `active`.
     slot_brackets: none | corners | tees
                               # how a pane's title meets the border line:
                               #   none     ── title ──   (default)

@@ -1,7 +1,7 @@
-# Adopting tuilib v0.21 – v0.24
+# Adopting tuilib v0.21 – v0.25
 
-The bump from `v0.20.0` to `v0.24.0` is already on this branch and
-compiles green. This plan covers what to do with the four releases'
+The bump from `v0.20.0` to `v0.25.0` is already on this branch and
+compiles green. This plan covers what to do with the five releases'
 new surface — none of which is wired into the YAML schema yet.
 
 ## The bump itself (done)
@@ -25,8 +25,13 @@ Everything below is additive.
 | v0.22.0 | Password masking in forms | `pkg/form`, `pkg/input` |
 | v0.23.0 | Multi-select (marking) on list / table / tree | `pkg/{list,table,tree}/mark.go` |
 | v0.24.0 | Glyph vocabulary, border shapes, slot brackets | `pkg/glyph`, `pkg/theme` |
+| v0.25.0 | Help is a searchable modal, not a footer panel | `pkg/help`, `pkg/app` |
 
-The four are not independent. Marking (v0.23) is what makes
+v0.25 needs nothing from us: it compiles clean, `app.HelpVerbose` keeps
+its meaning, and the removed `HelpMaxRows` was never set here. It does
+change one fact this plan asserted, though — see Workstream 3.
+
+The v0.21–v0.24 four are not independent. Marking (v0.23) is what makes
 `action.Action.Multi` mean anything, and the action menu (v0.21) is the
 only surface that can tell a user whether "Delete" is about to hit one
 row or twelve. Plan them together; ship them in the order at the bottom.
@@ -379,9 +384,22 @@ is `none | corners | tees` (`pane.SlotBracketStyle`), not the
 missing.
 
 **`overlay:` does not cover the output console.** It reaches `Confirm()`,
-`Alert()` and `Actions()` — what floats *above* a screen. The console is
-a pushed screen and takes the pane shape. Easy to get backwards, so
+`Alert()`, `Actions()` and — as of v0.25 — `HelpOverlay()`. Those are
+what get drawn *above* a screen. The console is a pushed screen and takes
+the pane shape. Easy to get backwards, so
 `TestOverlayShapeReachesOverlaysOnly` pins the split.
+
+That list gaining a member one release after it was written is the point:
+`?` was a footer panel when this workstream landed and is a modal now, so
+the enumeration is exactly the kind of prose that rots. v0.25's
+`theme.HelpOverlay()` also threads `Glyphs` and `SlotBrackets`, so the
+chrome reaches the screen a lost user is most likely to be looking at —
+`TestChromeReachesHelpOverlay` covers that.
+
+**Not taken:** v0.25's `app.Options.DisableHelpSearch` (the overlay's
+search field, on by default) is a plausible `app.help_search:` knob, but
+it is a help feature rather than a chrome one and nothing has asked for
+it yet.
 
 ### How it landed
 
