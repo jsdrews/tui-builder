@@ -461,6 +461,11 @@ type Action struct {
 	// Section is the heading this action sits under in the key overlay
 	// (`?`). Defaults to "Actions". Same vocabulary as
 	// OnKeyBinding.Section.
+	//
+	// Deliberately temporary. Actions are help-strip bindings today; the
+	// pkg/action work moves them into the menu, where a help heading
+	// means nothing. Delete this field in that cut — see
+	// plans/tuilib-0.24.md, "on_key: folds into the registry".
 	Section string `yaml:"section,omitempty"`
 }
 

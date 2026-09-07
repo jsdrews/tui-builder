@@ -137,7 +137,9 @@ behavior").
 |---|---|
 | `label:` (or action name) | `Label` |
 | `description:` | `Desc` |
-| `key:` (now optional) | `Key` — live only while the menu is open |
+| `key:` (now optional) | `Key` — live only while the menu is open, **except `enter`** |
+| `key: enter` | `Key`, plus direct dispatch via `activate()` and double-click |
+| `push:` + `bind:` (was `on_key:`) | `Do` → push the screen (tuilib's "navigational Do") |
 | `confirm:` (substituted) | `Confirm` — shell owns the modal |
 | binding's `from:` pane not focused | `Disabled` with a reason |
 | exec non-interactive / http | `Run` (an `action.Func`) |
@@ -193,7 +195,8 @@ What changes:
   from their cause.
 - `internal/screen` loses `tryAction` and its call sites in `Update`,
   along with the on_key-before-actions precedence comment that only
-  existed to arbitrate the collision.
+  existed to arbitrate the collision. `verbSections` loses its actions
+  half (see below); the pushes half goes with `on_key:`.
 
 **Migration:** `key: d` still parses and still means something, but `d`
 alone stops firing — it's `a` then `d` now. That's a real behavior
@@ -201,11 +204,71 @@ change for every existing config in `examples/`. They're ours, so it's
 a rewrite rather than a compatibility problem, but the docs need a line
 saying so.
 
-**Open:** `on_key:` screen pushes are a separate mechanism and stay on
-direct keys. `enter` to drill down is a navigation gesture, not a verb,
-and should not move. But a `d → describe` push arguably *is* a verb, and
-tuilib's `Do` exists precisely for "push a child screen". Worth deciding
-whether pushes join the menu later; not part of this cut.
+### `on_key:` folds into the registry — `enter` is the only direct key
+
+**Decided.** There is one registry, not two. `on_key:` disappears as a
+block; a push becomes an action with `push:` + `bind:` alongside `run:`
+and `request:`. Dispatch is:
+
+| binding | fires directly | in the menu |
+|---|---|---|
+| `key: enter` | ✓ — and double-click | ✓ |
+| any other `key:` | ✗ | ✓, menu-scoped |
+| no `key:` | ✗ | ✓ |
+
+The rule is **`enter`, not "pushes"**. An earlier draft of this section
+split by type — pushes keep their keys, verbs go to the menu — which
+quietly walked back the menu-only decision above for `d → describe`.
+Carving out `enter` alone holds that line: `enter` is not a shortcut
+competing for the letter budget, it is *activation*, which is why tuilib
+emits `ActivatedMsg` for it and for a double click rather than treating
+it as a keybinding at all.
+
+**The seam already exists.** `internal/screen.activate()` funnels
+keyboard `enter` and double-click into one place and already falls
+through to an action bound to `enter`:
+
+```go
+func (m *Model) activate() (tea.Cmd, bool) {
+    if cmd, handled := m.tryPush("enter"); handled {
+        return cmd, true
+    }
+    return m.tryAction(tea.KeyMsg{Type: tea.KeyEnter})
+}
+```
+
+So the work is deleting `tryPush` and letting the single registry answer,
+not inventing a carve-out. The on_key-before-actions precedence rule
+(`config.go`, `Action.Key`) then deletes itself — it exists only to
+arbitrate between two registries binding the same key on the same
+component, which was the symptom that this merge is the fix for.
+
+**What the schema loses:**
+
+- `on_key:` — gone. `push:` + `bind:` move onto an action.
+- `section:` on actions — gone. It groups a binding in the key overlay,
+  and actions leave the overlay for the menu. **It is knowingly
+  temporary**: added in 489d55c because actions are still help-strip
+  bindings today, and it should be deleted in the same cut that moves
+  them to the menu. `section:` on a *push* would go too, since pushes
+  become actions.
+- `key:` — survives, but menu-scoped except for `enter`.
+
+**What it keeps:** `label:`, which tuilib requires — *"Label names the
+verb and titles its log event. Required."* Its audience changes from the
+help strip to the menu entry, nothing else.
+
+**One pre-existing constraint, not a cost of the merge.** `tree` emits no
+`ActivatedMsg` and binds its own `enter` to "select", so enter-activation
+is list/table-only. That is already what the validator enforces for both
+`on_key` sources and action sources, so a tree gets menu-only verbs
+either way.
+
+**One thing with teeth.** `key: enter` on a destructive verb means enter
+deletes something — "enter descends" is safe in a way "enter is direct"
+is not. `confirm:` covers it and it is the author's call, so don't
+validate against it, but it is the one place this model is sharper than
+what it replaces.
 
 ### Prompts need a seam the shell doesn't give us
 
@@ -514,10 +577,11 @@ and closes a real hole.
 3. **Rebase `origin/feature/actions`** onto this branch. Land it as-is,
    green, before layering anything new on it.
 4. **Actions onto `pkg/action`.** `Actions() action.Set` + `ActionsKey`;
-   move exec and http onto `Run`, interactive onto `Do`; delete
-   `tryAction` and the screen's confirm/dispatch/alert path; rewrite the
-   `examples/` configs off direct keys. Prompts via `Do` + form +
-   `runner.GoWith`.
+   move exec and http onto `Run`, interactive onto `Do`, pushes onto
+   `Do`; delete `tryAction`, `tryPush` and the screen's
+   confirm/dispatch/alert path; fold `on_key:` into the registry and
+   drop `section:` from actions; rewrite the `examples/` configs off
+   direct keys. Prompts via `Do` + form + `runner.GoWith`.
 5. ~~**Multi-select.**~~ **Done**, minus the fan-out half, which is
    actions. `markable:` + `mark_key:`, keyed setters on all three data
    paths, the key→row map, validator constraints.
@@ -566,6 +630,12 @@ without them, but its fan-out half and most of its payoff aren't.
   the refusal with a reason rather than dropping the press. But it's a
   behavior change for anything already relying on repeat-fire. Leaning
   yes for `type: http`, no for `type: exec`.
+- **Does `bind:` stay its own field on a push action?** `on_key.bind:`
+  maps templated values into the *pushed screen's* parameter namespace,
+  which is not the same operation as substituting `${selection}` into
+  argv. Two substitution targets, one action schema — worth checking
+  they don't want different syntax before assuming `bind:` transplants
+  unchanged.
 - **Do we keep `Screen.Actions []cfg.Action` (main's shape) as a
   deprecated alias?** The feature branch replaces it outright. Existing
   configs in `examples/` would need rewriting either way — but they're
