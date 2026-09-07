@@ -92,15 +92,23 @@ func TestPushRejectsRunAndInputs(t *testing.T) {
 	}
 }
 
-// A binding with no key at all is menu-only, which is the payoff: the
-// letter budget stops being the ceiling on how many verbs a screen has.
-func TestBindingKeyIsRequiredForNow(t *testing.T) {
+// A binding with no key is menu-only. That is the payoff of the menu:
+// the alphabet stops capping how many verbs a screen can have.
+func TestKeylessBindingIsValid(t *testing.T) {
 	c := pushConfig(
 		[]ActionBinding{{Action: "open", From: "tbl"}},
 		map[string]*Action{"open": {Push: "b"}})
-	if err := c.Validate(); err == nil {
-		t.Skip("keyless bindings are accepted; menu-only is live")
-	} else if !strings.Contains(err.Error(), "key") {
-		t.Errorf("unexpected error: %v", err)
+	if err := c.Validate(); err != nil {
+		t.Fatalf("a keyless binding should be legal: %v", err)
+	}
+}
+
+// Two keyless bindings don't collide — there is no key to collide on.
+func TestTwoKeylessBindingsDoNotCollide(t *testing.T) {
+	c := pushConfig(
+		[]ActionBinding{{Action: "open", From: "tbl"}, {Action: "open2", From: "tbl"}},
+		map[string]*Action{"open": {Push: "b"}, "open2": {Push: "b"}})
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
 }

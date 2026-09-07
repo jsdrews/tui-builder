@@ -1,15 +1,23 @@
-# action_prompts.yaml — actions that collect input before running.
+# action_prompts.yaml — the action menu, and actions that ask first.
+#
+# Press `a` for the menu. That is where verbs live now: it lists every
+# action this screen has, with its shortcut in the right column and a
+# reason next to anything unavailable. `enter` is the only key that
+# still fires an action directly, because it is activation rather than a
+# shortcut — which is why a verb needs no key at all unless you want
+# one. See `taste` below: no key, menu only.
 #
 # There is no `prompts:` schema. An action declares typed `inputs:`, and
 # anything the binding doesn't fill via `bind:` is collected in a form
-# generated from those same input declarations. One vocabulary, one
-# namespace (${inputs.*}), and the form can't drift out of step with the
-# argv because it's derived from it.
+# generated from those same declarations. One vocabulary, one namespace
+# (${inputs.*}), and the form can't drift out of step with the argv
+# because it is derived from it.
 #
 # The widget follows the data type:
 #   (default)          single-line text input
 #   options: [...]     select, whatever the type
 #   type: bool         yes/no toggle
+#   mask: true         bullets instead of characters
 #
 # Flow when an action fires:
 #   1. bind: templates resolve against the focused row
@@ -17,8 +25,7 @@
 #   3. (if confirm:) a modal, which can preview ${inputs.*}
 #   4. dispatch — output streams into the output console (press `o`)
 #
-# Every action here runs `echo`, so nothing external is needed: press
-# `o` after firing one to see the substituted argv in the console.
+# Every action here runs `echo`, so nothing external is needed.
 app:
   title: Action inputs demo
   theme: nord
@@ -52,6 +59,13 @@ actions:
       - 'echo "ordered: ${inputs.amount} × ${inputs.fruit}, priority=${inputs.priority}, gift=${inputs.gift}"'
     message: "ordered ${inputs.amount} × ${inputs.fruit}"
 
+  taste:
+    description: A verb with no key, to prove one isn't needed
+    inputs:
+      fruit: {type: string, required: true}
+    run: [echo, "tasting ${inputs.fruit}"]
+    message: "tasted ${inputs.fruit}"
+
 tui:
   components:
     fruits:
@@ -68,20 +82,28 @@ tui:
     layout:
       component: fruits
     actions:
-      # `n`, not `q`: q quits the app, and the validator now rejects any
-      # action bound to a reserved key. (This example previously bound
-      # `q` here — the action could never fire, because the app shell
-      # consumed the key first and quit.)
-      - key: n
-        action: request
-        label: request
-        from: fruits
-        bind: {fruit: "${selection}"}
-
+      # `enter` — the one key that still fires directly. Everything else
+      # is reached through the menu.
       - key: enter
         action: order
         label: order
         from: fruits
         # The confirm message previews values the form just collected.
         confirm: "Order ${inputs.amount} ${selection}(s) as ${inputs.priority} priority?"
+        bind: {fruit: "${selection}"}
+
+      # `n` is a MENU shortcut, not a direct key: it dispatches while the
+      # menu is open. Pressing `n` on the list does nothing.
+      - key: n
+        action: request
+        label: request
+        from: fruits
+        bind: {fruit: "${selection}"}
+
+      # No key at all — reachable only from the menu. This is the payoff:
+      # the alphabet stops being the ceiling on how many verbs a screen
+      # can have, so a verb no longer has to earn a letter to exist.
+      - action: taste
+        label: taste
+        from: fruits
         bind: {fruit: "${selection}"}

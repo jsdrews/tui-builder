@@ -172,26 +172,31 @@ func validateActionBindings(bindings []ActionBinding, refs map[string]int, compo
 	seen := map[string]int{}
 	for i, b := range bindings {
 		bp := fmt.Sprintf("%s.actions[%d]", path, i)
-		if b.Key == "" {
-			return fmt.Errorf("%s: `key:` is required", bp)
+		// `key:` is optional. A binding without one is reachable from
+		// the action menu and nowhere else, which is the point of
+		// having a menu: the alphabet stops being the ceiling on how
+		// many verbs a screen can have, so a verb no longer has to earn
+		// a letter to exist. Everything in this block is about a key
+		// that exists.
+		if b.Key != "" {
+			if why, bad := reservedKeys[b.Key]; bad {
+				return fmt.Errorf("%s: key %q is reserved — it %s, so an action bound to it would never fire", bp, b.Key, why)
+			}
+			// The two the shell claims but the config can move.
+			if outputKey != "" && b.Key == outputKey {
+				return fmt.Errorf("%s: key %q opens the output console (app.output_key) — pick another, or set app.output_key to \"-\" to disable the console", bp, b.Key)
+			}
+			if themeKey != "" && b.Key == themeKey {
+				return fmt.Errorf("%s: key %q cycles the theme (app.theme_key) — pick another, or set app.theme_key to \"-\" to pin the palette", bp, b.Key)
+			}
+			if actionsKey != "" && b.Key == actionsKey {
+				return fmt.Errorf("%s: key %q opens the action menu (app.actions_key) — pick another, or set app.actions_key to \"-\" to turn the menu off", bp, b.Key)
+			}
+			if prev, dup := seen[b.Key]; dup {
+				return fmt.Errorf("%s: key %q already bound at %s.actions[%d]", bp, b.Key, path, prev)
+			}
+			seen[b.Key] = i
 		}
-		if why, bad := reservedKeys[b.Key]; bad {
-			return fmt.Errorf("%s: key %q is reserved — it %s, so an action bound to it would never fire", bp, b.Key, why)
-		}
-		// The two the shell claims but the config can move.
-		if outputKey != "" && b.Key == outputKey {
-			return fmt.Errorf("%s: key %q opens the output console (app.output_key) — pick another, or set app.output_key to \"-\" to disable the console", bp, b.Key)
-		}
-		if themeKey != "" && b.Key == themeKey {
-			return fmt.Errorf("%s: key %q cycles the theme (app.theme_key) — pick another, or set app.theme_key to \"-\" to pin the palette", bp, b.Key)
-		}
-		if actionsKey != "" && b.Key == actionsKey {
-			return fmt.Errorf("%s: key %q opens the action menu (app.actions_key) — pick another, or set app.actions_key to \"-\" to turn the menu off", bp, b.Key)
-		}
-		if prev, dup := seen[b.Key]; dup {
-			return fmt.Errorf("%s: key %q already bound at %s.actions[%d]", bp, b.Key, path, prev)
-		}
-		seen[b.Key] = i
 
 		if b.Action == "" {
 			return fmt.Errorf("%s: needs either `action:` (a name from the top-level actions: map) or an inline declaration with `name:`", bp)
