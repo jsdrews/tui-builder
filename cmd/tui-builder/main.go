@@ -45,7 +45,10 @@ func run() error {
 		return err
 	}
 
-	themes := theme.All()
+	// app.glyphs / app.borders land on every palette, not just the one
+	// app.theme names — cycling themes (`t`) walks the whole slice, and
+	// the chrome vocabulary shouldn't change halfway through.
+	themes := build.ApplyChrome(theme.All(), &c.App)
 	initial := themes[0]
 	if c.App.Theme != "" {
 		if t, ok := theme.ByName(themes, c.App.Theme); ok {

@@ -222,6 +222,43 @@ app:
                               # Default "o"; set "-" to disable. No action may
                               # bind this key — the shell claims it globally,
                               # so the validator rejects the collision.
+  glyphs:                     # optional — the single-character marks components
+                              # draw. Every field is optional and an unset one
+                              # keeps tuilib's default, so overriding one arrow
+                              # doesn't blank the other twelve. Each value must
+                              # be exactly one character: a two-character cursor
+                              # shifts every row it's drawn on.
+    cursor:         <char>    # focused row in list / logview / action menu
+    mark:           <char>    # marked row where multi-select is enabled
+    expand_open:    <char>    # tree + inspector disclosure arrows
+    expand_closed:  <char>
+    rule:           <char>    # horizontal line under an inline filter
+    scroll_thumb:   <char>    # vertical scrollbar
+    scroll_track:   <char>
+    h_scroll_thumb: <char>    # horizontal scrollbar
+    h_scroll_track: <char>
+    sort_asc:       <char>    # follows the active column's title in a table
+    sort_desc:      <char>
+    column_sep:     <char>    # divides table columns
+    placeholder:    <char>    # fills a row a windowed table hasn't received yet
+  borders:                    # optional — border shapes. Unset keeps tuilib's
+                              # default: normal for components, thick for overlays.
+    active:   normal | rounded | thick | double | hidden | block | ascii
+    inactive: <same>          # defaults to matching `active`'s shape upstream:
+                              # focus is signalled by border *color*, so a pane
+                              # that changed weight on focus would move the eye
+                              # for a reason the user didn't ask about
+    overlay:  <same>          # confirm + alert dialogs and the action menu —
+                              # what floats above a screen. The output console
+                              # is a pushed screen, so it takes `active`.
+    slot_brackets: none | corners | tees
+                              # how a pane's title meets the border line:
+                              #   none     ── title ──   (default)
+                              #   corners  ┐ title ┌     reads as a labelled tab
+                              #   tees    ─┤ title ├─
+                              # Both blocks apply to EVERY palette, not just the
+                              # one `theme:` names — cycling themes with `t`
+                              # shouldn't change the chrome vocabulary midway.
   prompts:                    # optional — boot-time params collected via a form modal
                               # BEFORE the main screen renders. Each value is set as
                               # an env var keyed by `key`, so ${env.<KEY>} works
@@ -628,6 +665,7 @@ initial: <screen-name>         # required when `screens:` is set
 | `examples/table_wide.yaml` | Wide table demonstrating horizontal scroll (`←`/`→`, `shift+←`/`shift+→`, `0`/`$`) |
 | `examples/layout.yaml` | Nested layouts, mixed flex weights |
 | `examples/themes.yaml` | Built-in theme picker reference |
+| `examples/chrome.yaml` | `app.glyphs` + `app.borders` — ASCII-safe glyph vocabulary, rounded panes, a double-bordered overlay and `slot_brackets: corners`. Press `t` to confirm the chrome survives a palette swap |
 | `examples/multi.yaml` | Multi-screen drilldown (Regions → Cities → Detail) with breadcrumbing and `${selection}` substitution |
 | `examples/on_key_push.yaml` | `on_key:` block — GitHub users list where `key: enter` pushes to repos and `key: s` pushes to starred, both binding `${selection}`; the repos table then pushes a repo-detail inspector, binding `${selection.Repo}` |
 | `examples/http_countries.yaml` | Table backed by restcountries.com REST API; `refresh: 5m` polling; per-column `value:` dot-paths |

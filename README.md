@@ -392,6 +392,7 @@ via `task examples`.
 | `examples/logview.yaml` | Streaming-log pane, `/`-search, filter mode |
 | `examples/layout.yaml` | Nested vstack / hstack with mixed flex weights |
 | `examples/themes.yaml` | Theme picker reference |
+| `examples/chrome.yaml` | `app.glyphs` + `app.borders` — glyph vocabulary and border shapes |
 | `examples/colors.yaml` | Per-component `colors:` overrides |
 | `examples/multi.yaml` | Multi-screen drilldown with breadcrumbs |
 | `examples/http_countries.yaml` | Live REST API table (restcountries.com) |

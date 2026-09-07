@@ -338,7 +338,7 @@ still act on it. Correct, and a genuine surprise — which is exactly why
 
 ---
 
-## Workstream 3 — glyphs and border shapes
+## Workstream 3 — glyphs and border shapes (done)
 
 Purely cosmetic, entirely additive, no interaction with the above.
 
@@ -347,36 +347,69 @@ Purely cosmetic, entirely additive, no interaction with the above.
 zero-valued in the shipped palettes and resolved to library defaults, so
 a theme literal written before these existed keeps its chrome.
 
-We build themes from `theme.All()` and pick one by name, so overrides
-are a map over the returned slice setting exported fields — no custom
-theme type needed.
-
 ```yaml
 app:
   theme: nord
-  glyphs:
-    cursor: "▸"
-    mark: "✓"
-    expand_open: "▾"
-    expand_closed: "▸"
-    scroll_thumb: "█"
-    column_sep: "│"
-    sort_asc: "▲"
-    sort_desc: "▼"
+  glyphs:                 # all 13 optional; unset keeps the library mark
+    cursor: ">"
+    mark: "*"
+    expand_open: "-"
+    expand_closed: "+"
+    rule: "-"
+    scroll_thumb: "#"
+    scroll_track: "."
+    h_scroll_thumb: "="
+    h_scroll_track: "-"
+    sort_asc: "^"
+    sort_desc: "v"
+    column_sep: "|"
+    placeholder: "~"
   borders:
-    active: normal       # normal | rounded | thick | double | hidden
-    inactive: normal
-    overlay: thick
-    slot_brackets: none  # none | square | round
+    active: rounded       # normal | rounded | thick | double | hidden | block | ascii
+    inactive: rounded
+    overlay: double
+    slot_brackets: corners  # none | corners | tees
 ```
 
-Empty glyph fields fall back to `glyph.Default()` via `Resolve()`, so a
-config overriding one arrow doesn't blank the other twelve. Map the
-border names to the `lipgloss.*Border()` constructors and validate the
-enum.
+**Two corrections to the sketch this plan shipped with.** `slot_brackets`
+is `none | corners | tees` (`pane.SlotBracketStyle`), not the
+`none | square | round` guessed here — `corners` is `┐ text ┌`, `tees` is
+`─┤ text ├─`. And `glyph.Set` has 13 fields, not the 8 listed: `rule`,
+`scroll_track`, `h_scroll_thumb`, `h_scroll_track` and `placeholder` were
+missing.
 
-**Cost:** ~150 lines of config + mapping, mostly mechanical. Do it last
-— it's the least load-bearing.
+**`overlay:` does not cover the output console.** It reaches `Confirm()`,
+`Alert()` and `Actions()` — what floats *above* a screen. The console is
+a pushed screen and takes the pane shape. Easy to get backwards, so
+`TestOverlayShapeReachesOverlaysOnly` pins the split.
+
+### How it landed
+
+- `cfg.Glyphs` / `cfg.Borders` are plain-string structs on `App`, with
+  `BorderShapeNames` / `SlotBracketNames` as the canonical enums.
+  `internal/config` stays tuilib- and lipgloss-free, so the glyph width
+  check is a rune count rather than a display-width one — it catches
+  `"=>"`, not a double-width emoji.
+- `build.ApplyChrome(themes, &c.App)` does the mapping and is the only
+  place that knows a name like `rounded`. `TestBorderNamesAllMap` walks
+  `cfg.BorderShapeNames` so the two lists can't drift.
+- It applies to **every** palette, not just the one `theme:` names.
+  Cycling themes (`t`) walks the whole slice; a palette is a choice of
+  color, glyphs and border shapes are a choice of vocabulary, and the
+  vocabulary shouldn't change halfway through the cycle.
+- Unset fields stay zero rather than being filled in, so "unset" keeps
+  one meaning and it lives upstream in tuilib.
+- Zero changes in the component builders: every one already goes through
+  `th.List()` / `th.Table()` / …, which copy `Glyphs` and `SlotBrackets`
+  in. The whole feature is a config block plus one mapping function.
+- Both are load errors when wrong, because both fail *quietly*
+  otherwise: an unknown border name keeps the default shape (the config
+  looks ignored) and an over-long glyph shifts every row it's drawn on
+  (looks like a layout bug elsewhere).
+- `examples/chrome.yaml` demos an ASCII-safe vocabulary — the case that
+  actually comes up, when a terminal or font renders `▸ ✓ █ │` as tofu.
+
+**Cost:** ~150 lines of config + mapping, as estimated.
 
 ---
 
@@ -428,9 +461,12 @@ and closes a real hole.
 5. **Multi-select.** `markable:` + `key:`, keyed setters, the key→row
    map, `Multi` fan-out, validator constraints.
 6. **Right-click retargeting.** Small, follows naturally from 4.
-7. **Glyphs and border shapes.** Cosmetic; land whenever.
+7. ~~**Glyphs and border shapes.**~~ **Done** — independent of 3-6, so
+   it landed while actions are parked.
 
-Steps 1–2 are worth doing regardless of whether 3–6 ever ship.
+Steps 1–2 and 7 are worth doing regardless of whether 3–6 ever ship;
+all three have landed. **Actions (3, 4, 6) are parked** — 5 is landable
+without them, but its fan-out half and most of its payoff aren't.
 
 ## Tests
 
@@ -448,8 +484,13 @@ Steps 1–2 are worth doing regardless of whether 3–6 ever ship.
   filter; marks survive a theme rebuild; `markable:` + `window:` is a
   load error; a non-`Multi` action is disabled under a multi-selection.
 - **Fan-out:** N marked rows produce N runs with distinct `RunKey`s.
-- **Glyphs/borders:** a partial `glyphs:` block resolves the rest from
-  defaults; unknown border name is a load error.
+- ~~**Glyphs/borders:**~~ **Done.** A partial `glyphs:` block resolves the
+  rest from defaults; unknown border name is a load error. Plus: the
+  overrides land on every palette (not just the initial one); every one
+  of the 13 glyph fields is both validated and copied; `ApplyChrome`
+  doesn't mutate its input; an empty block leaves the shapes zero so
+  tuilib's defaults still apply; and `overlay:` reaches confirm / alert /
+  the action menu but not ordinary components.
 
 ## Open questions
 

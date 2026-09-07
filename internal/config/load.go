@@ -3,6 +3,9 @@ package config
 import (
 	"fmt"
 	"os"
+	"slices"
+	"strings"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -41,6 +44,11 @@ func (c *Config) Validate() error {
 	// 0. Boot-time prompts. Same shape as an action's, and until now the
 	//    only list of prompts nothing checked.
 	if err := validatePrompts(c.App.Prompts, "app.prompts"); err != nil {
+		return err
+	}
+	// 0b. App chrome. Presentation only, but both halves fail quietly
+	//     when they're wrong — see validateChrome.
+	if err := validateChrome(&c.App); err != nil {
 		return err
 	}
 	// 1. Per-entry structural validation.
@@ -266,6 +274,56 @@ func validatePrompts(prompts []Prompt, path string) error {
 		if p.Type == "select" && len(p.Options) == 0 {
 			return fmt.Errorf("%s[%d]: select prompt needs options", path, i)
 		}
+	}
+	return nil
+}
+
+// validateChrome checks app.glyphs and app.borders.
+//
+// Both are pure presentation, and both fail *quietly* when they're
+// wrong, which is why they're load errors rather than best-effort. An
+// unrecognised border name would keep the default shape, so the config
+// change simply appears not to have worked. An over-long glyph renders
+// fine on its own but shifts every row it's drawn on, so it reads as a
+// layout bug somewhere else entirely.
+func validateChrome(a *App) error {
+	for _, g := range []struct{ field, value string }{
+		{"cursor", a.Glyphs.Cursor},
+		{"mark", a.Glyphs.Mark},
+		{"expand_open", a.Glyphs.ExpandOpen},
+		{"expand_closed", a.Glyphs.ExpandClosed},
+		{"rule", a.Glyphs.Rule},
+		{"scroll_thumb", a.Glyphs.ScrollThumb},
+		{"scroll_track", a.Glyphs.ScrollTrack},
+		{"h_scroll_thumb", a.Glyphs.HScrollThumb},
+		{"h_scroll_track", a.Glyphs.HScrollTrack},
+		{"sort_asc", a.Glyphs.SortAsc},
+		{"sort_desc", a.Glyphs.SortDesc},
+		{"column_sep", a.Glyphs.ColumnSep},
+		{"placeholder", a.Glyphs.Placeholder},
+	} {
+		// Empty means "keep the default", not "draw nothing".
+		if g.value == "" {
+			continue
+		}
+		if utf8.RuneCountInString(g.value) != 1 {
+			return fmt.Errorf("app.glyphs.%s: %q must be a single character (it is drawn in a one-cell slot)", g.field, g.value)
+		}
+	}
+	for _, b := range []struct{ field, value string }{
+		{"active", a.Borders.Active},
+		{"inactive", a.Borders.Inactive},
+		{"overlay", a.Borders.Overlay},
+	} {
+		if b.value == "" {
+			continue
+		}
+		if !slices.Contains(BorderShapeNames, b.value) {
+			return fmt.Errorf("app.borders.%s: unknown border %q (want %s)", b.field, b.value, strings.Join(BorderShapeNames, "|"))
+		}
+	}
+	if v := a.Borders.SlotBrackets; v != "" && !slices.Contains(SlotBracketNames, v) {
+		return fmt.Errorf("app.borders.slot_brackets: unknown style %q (want %s)", v, strings.Join(SlotBracketNames, "|"))
 	}
 	return nil
 }
