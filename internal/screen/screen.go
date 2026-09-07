@@ -28,6 +28,7 @@ import (
 	"github.com/jsdrews/tuilib/pkg/help"
 	"github.com/jsdrews/tuilib/pkg/layout"
 	"github.com/jsdrews/tuilib/pkg/list"
+	"github.com/jsdrews/tuilib/pkg/mouse"
 	"github.com/jsdrews/tuilib/pkg/runner"
 	tscreen "github.com/jsdrews/tuilib/pkg/screen"
 	"github.com/jsdrews/tuilib/pkg/table"
@@ -603,7 +604,70 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 			cmds = append(cmds, tagCursorFocused(cmd, m.tree.Order[i]))
 		}
 	}
+	cmds = m.syncFocusAfterPress(msg, cmds)
 	return m, tea.Batch(cmds...)
+}
+
+// syncFocusAfterPress applies a mouse press's focus change immediately,
+// instead of waiting for the component's focus.RequestMsg to arrive as a
+// command on the next Update.
+//
+// Right-click is why this has to be synchronous. The shell forwards the
+// press and opens the action menu in the SAME Update, so by the time it
+// calls Actions() the request has not been delivered — and the menu
+// would describe whichever pane was focused before the click, which is
+// exactly the question the gesture asked. A left click has a frame to
+// spare, but running one rule for both beats two rules.
+//
+// It cannot read the flag off the component: a list sets its own focus
+// on press, a table only emits the request, so "who thinks it is
+// focused" is not a reliable answer. What is reliable is the request
+// itself, so the fan-out's commands are run here and their messages
+// re-wrapped. Each command still runs exactly once and every message is
+// still delivered — only the timing moves, by one Update, within the
+// press that caused it.
+func (m *Model) syncFocusAfterPress(msg tea.Msg, cmds []tea.Cmd) []tea.Cmd {
+	e, ok := msg.(mouse.Msg)
+	if !ok || !e.IsPointPress() {
+		return cmds
+	}
+	out := make([]tea.Cmd, 0, len(cmds))
+	for _, cmd := range cmds {
+		out = append(out, m.flushForFocus(cmd)...)
+	}
+	return out
+}
+
+// flushForFocus runs one command, applies any focus request it produced,
+// and returns commands that re-deliver whatever it produced.
+func (m *Model) flushForFocus(cmd tea.Cmd) []tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	produced := cmd()
+	if produced == nil {
+		return nil
+	}
+	if batch, ok := produced.(tea.BatchMsg); ok {
+		var out []tea.Cmd
+		for _, c := range batch {
+			out = append(out, m.flushForFocus(c)...)
+		}
+		return out
+	}
+	if req, ok := produced.(focus.RequestMsg); ok {
+		for i, c := range m.tree.All() {
+			if !focusRequested(c, req) {
+				continue
+			}
+			if i != m.focus {
+				m.focus = i
+				m.applyFocus()
+			}
+			break
+		}
+	}
+	return []tea.Cmd{func() tea.Msg { return produced }}
 }
 
 // startFetch returns a Cmd that runs the fetch in a goroutine. The

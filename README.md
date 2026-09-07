@@ -149,7 +149,8 @@ column, `q` quits, and `o` opens the output console.
 
 The mouse works too: click a pane to focus it, click a row to move its
 cursor, scroll with the wheel, and double-click a row for `enter` — the
-same action the keyboard fires. Right-click opens the action menu.
+same action the keyboard fires. Right-click a row opens the action
+menu against THAT row — one gesture, not click-then-press-`a`.
 Mouse reporting takes over the terminal's own click-drag text selection —
 hold `shift` (or `alt` in iTerm2) while dragging to select text for a copy.
 
