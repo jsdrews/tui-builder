@@ -128,7 +128,7 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("tui.components.%s: referenced %d times in tui.screen.layout — each component may be placed only once per screen", name, n)
 			}
 		}
-		if err := validateActionBindings(c.TUI.Screen.Actions, refs, c.TUI.Components, c.Actions, "tui.screen", c.App.OutputConsoleKey(), c.App.ThemeCycleKey()); err != nil {
+		if err := validateActionBindings(c.TUI.Screen.Actions, refs, c.TUI.Components, c.Actions, "tui.screen", c.App.OutputConsoleKey(), c.App.ThemeCycleKey(), c.App.ActionMenuKey()); err != nil {
 			return err
 		}
 		if err := validateOnCursor(refs, c.TUI.Components, "tui.screen"); err != nil {
@@ -184,7 +184,7 @@ func (c *Config) Validate() error {
 			}
 			seenKeys[dedupKey] = i
 		}
-		if err := validateActionBindings(s.Actions, refs, c.TUI.Components, c.Actions, fmt.Sprintf("tui.screens.%s", name), c.App.OutputConsoleKey(), c.App.ThemeCycleKey()); err != nil {
+		if err := validateActionBindings(s.Actions, refs, c.TUI.Components, c.Actions, fmt.Sprintf("tui.screens.%s", name), c.App.OutputConsoleKey(), c.App.ThemeCycleKey(), c.App.ActionMenuKey()); err != nil {
 			return err
 		}
 		if err := validateOnCursor(refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name)); err != nil {

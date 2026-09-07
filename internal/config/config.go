@@ -257,6 +257,15 @@ type App struct {
 	// choice of vocabulary, and cycling themes at runtime (`t`) should
 	// not change the vocabulary halfway through.
 	Borders Borders `yaml:"borders,omitempty"`
+	// ActionsKey opens the action menu — the picker listing every verb
+	// this screen has, with its shortcut and a visible reason next to
+	// anything unavailable.
+	//
+	// Defaults to "a"; set it to "-" to turn the menu off, which also
+	// turns off right-click targeting and the menu-scoped shortcuts,
+	// since all three are the one switch on tuilib's side. Like the
+	// other two globals, no action may bind it.
+	ActionsKey string `yaml:"actions_key,omitempty"`
 	// ThemeKey cycles the palette, live, through every built-in theme
 	// — the same list Theme picks the initial one from.
 	//
@@ -417,6 +426,19 @@ type Screen struct {
 	// Actions bind keys to entries in the top-level `actions:`
 	// registry, or declare one inline. See ActionBinding.
 	Actions []ActionBinding `yaml:"actions,omitempty"`
+}
+
+// ActionMenuKey returns the action-menu key with the default applied,
+// or "" when the config turned the menu off with "-". Same shape as
+// OutputConsoleKey and ThemeCycleKey.
+func (a *App) ActionMenuKey() string {
+	switch a.ActionsKey {
+	case "":
+		return "a"
+	case "-":
+		return ""
+	}
+	return a.ActionsKey
 }
 
 // ThemeCycleKey returns the theme-cycle key with the default applied,

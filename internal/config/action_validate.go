@@ -17,11 +17,11 @@ import (
 // screen keys (tab / shift+tab / r) do reach us, and an action would
 // shadow them, silently costing focus cycling or manual refresh.
 //
-// The output-console and theme-cycle keys are NOT in this map: both are
-// configurable (`app.output_key`, `app.theme_key`), so their reserved
-// value depends on the config being validated. validateActionBindings
-// takes them as arguments and reports them with the knob to change,
-// which a static map can't do.
+// The output-console, theme-cycle and action-menu keys are NOT in this
+// map: all three are configurable (`app.output_key`, `app.theme_key`,
+// `app.actions_key`), so their reserved value depends on the config
+// being validated. validateActionBindings takes them as arguments and
+// reports them with the knob to change, which a static map can't do.
 //
 // Deliberately NOT reserved:
 //
@@ -157,7 +157,7 @@ func validateActionDefs(actions map[string]*Action) error {
 
 // validateActionBindings checks one screen's action bindings against the
 // action registry and the components actually placed in its layout.
-func validateActionBindings(bindings []ActionBinding, refs map[string]int, components map[string]*Component, actions map[string]*Action, path, outputKey, themeKey string) error {
+func validateActionBindings(bindings []ActionBinding, refs map[string]int, components map[string]*Component, actions map[string]*Action, path, outputKey, themeKey, actionsKey string) error {
 	seen := map[string]int{}
 	for i, b := range bindings {
 		bp := fmt.Sprintf("%s.actions[%d]", path, i)
@@ -173,6 +173,9 @@ func validateActionBindings(bindings []ActionBinding, refs map[string]int, compo
 		}
 		if themeKey != "" && b.Key == themeKey {
 			return fmt.Errorf("%s: key %q cycles the theme (app.theme_key) — pick another, or set app.theme_key to \"-\" to pin the palette", bp, b.Key)
+		}
+		if actionsKey != "" && b.Key == actionsKey {
+			return fmt.Errorf("%s: key %q opens the action menu (app.actions_key) — pick another, or set app.actions_key to \"-\" to turn the menu off", bp, b.Key)
 		}
 		if prev, dup := seen[b.Key]; dup {
 			return fmt.Errorf("%s: key %q already bound at %s.actions[%d]", bp, b.Key, path, prev)

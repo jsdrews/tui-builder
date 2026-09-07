@@ -107,6 +107,13 @@ func run() error {
 			// couldn't happen. Zero binding (app.theme_key: "-") pins
 			// the palette.
 			ThemeKey: keyBinding(c.App.ThemeCycleKey(), "theme"),
+			// The action menu. One switch for the whole feature: the
+			// overlay, the confirm modal, the goroutine, cancellation,
+			// the console entry, the badge, the kill picker and the
+			// per-target exclusivity check all come from the shell once
+			// this is bound. The screen supplies verbs by implementing
+			// action.Provider.
+			ActionsKey: keyBinding(c.App.ActionMenuKey(), "actions"),
 			// Every component we build (list / table / tree / logview /
 			// inspector / textview) hit-tests mouse events against its
 			// own rect, so clicking is uniformly useful. The cost is the

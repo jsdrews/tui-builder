@@ -556,6 +556,15 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		return m, reportResult(r.Finish(exitCode(x.Err), ""))
 	case actionResultMsg:
 		return m, reportResult(x.res)
+	case actionPickedMsg:
+		// A menu pick that needs input first. The shell ran the action's
+		// Do, which handed control back here rather than running
+		// anything — see menuAction. From this point it is the same path
+		// a key press takes.
+		if cmd, ok := m.startAction(x.binding); ok {
+			return m, cmd
+		}
+		return m, nil
 	case list.ActivatedMsg, table.ActivatedMsg:
 		// A double click is the mouse spelling of enter. The message names
 		// its sender by token, so we activate the component that was
@@ -1030,38 +1039,47 @@ func (m *Model) tryAction(k tea.KeyMsg) (tea.Cmd, bool) {
 		if b.From != "" && b.From != focusedName {
 			continue
 		}
-		def := m.actionDefs[b.Action]
-		if def == nil {
-			// Unreachable via Load (the validator resolves every
-			// reference), so this only fires for a hand-built Model in a
-			// test. Report rather than panic.
-			return app.Error(fmt.Sprintf("action %q is not defined", b.Action)), true
-		}
-
-		// The selection feeding bind: comes from the pane named by
-		// `from:`, which is the focused one — a binding that reads a
-		// selection can't fire from anywhere else.
-		sel := build.Selection{}
-		if b.From != "" && cur != nil {
-			sel = selectionFrom(cur)
-		}
-		inputs := resolveBinds(b, def, sel)
-
-		// Anything the call site didn't bind gets collected from the
-		// user. The form is generated from the action's own declared
-		// inputs — there is no separate prompts: schema to keep in sync.
-		if missing := unboundInputs(def, inputs); len(missing) > 0 {
-			f := m.newInputForm(def, missing)
-			m.formModal = &f
-			m.pendingBinding = b
-			m.pendingInputs = inputs
-			m.pendingSel = sel
-			m.pendingFields = len(missing)
-			return f.Init(), true
-		}
-		return m.actionAfterInputs(b, def, sel, inputs), true
+		return m.startAction(b)
 	}
 	return nil, false
+}
+
+// startAction runs one binding, from wherever it was picked — a direct
+// key or the action menu. Splitting it out is what keeps the two entry
+// points honest: they cannot drift on binding resolution, input
+// collection, confirm or dispatch, because there is only one copy.
+func (m *Model) startAction(b cfg.ActionBinding) (tea.Cmd, bool) {
+	cur := m.current()
+	focusedName := ""
+	if m.focus >= 0 && m.focus < len(m.tree.Order) {
+		focusedName = m.tree.Order[m.focus]
+	}
+	def := m.actionDefs[b.Action]
+	if def == nil {
+		// Unreachable via Load (the validator resolves every reference),
+		// so this only fires for a hand-built Model in a test. Report
+		// rather than panic.
+		return app.Error(fmt.Sprintf("action %q is not defined", b.Action)), true
+	}
+	sel := build.Selection{}
+	if b.From != "" && b.From == focusedName && cur != nil {
+		sel = selectionFrom(cur)
+	}
+	inputs := resolveBinds(b, def, sel)
+
+	// Anything the call site didn't bind gets collected from the user.
+	// The form is generated from the action's own declared inputs —
+	// there is no separate prompts: schema to keep in sync.
+	if missing := unboundInputs(def, inputs); len(missing) > 0 {
+		f := m.newInputForm(def, missing)
+		m.formModal = &f
+		m.pendingBinding = b
+		m.pendingInputs = inputs
+		m.pendingSel = sel
+		m.pendingFields = len(missing)
+		return f.Init(), true
+	}
+	return m.actionAfterInputs(b, def, sel, inputs), true
 }
 
 // actionAfterInputs is the second leg of dispatch — runs once every
