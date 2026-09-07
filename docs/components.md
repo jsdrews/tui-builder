@@ -270,14 +270,25 @@ app:
                               # an env var keyed by `key`, so ${env.<KEY>} works
                               # downstream. Pre-fills from any existing env var of
                               # the same name. Cancel (esc) aborts the program.
-    - key:   <string>         # env var name + token key
-      label: <string>         # field label shown in the form
-      type:  text | password | select | confirm   # default text
-      placeholder:   <string> # text / password only
-      initial:       <string> # text / password default (overridden by current env if set)
-      options:       [<string>, ...]   # select choices
-      initial_index: <int>    # select default index
-      initial_bool:  <bool>   # confirm default
+                              # A prompt is a `key:` plus a Parameter, the
+                              # same vocabulary an action's `inputs:` uses —
+                              # one widget schema for both.
+    - key:   <string>         # env var name
+      label: <string>         # field label; defaults to the key
+      type:  string | int | bool | duration   # default string. The DATA
+                              # type — the widget follows: bool → yes/no
+                              # toggle, options: → select, else a text input.
+                              # There is deliberately no `type: select`.
+      default:       <string> # starting value (overridden by the env var if
+                              # already set). For bool use "true" / "false".
+      options:       [<string>, ...]   # makes it a select, whatever the type
+      mask:          <bool>   # bullets instead of characters. Display only —
+                              # the value substitutes and os.Setenv's as the
+                              # real string. For tokens on a shared screen,
+                              # not a secret-storage mechanism.
+      placeholder:   <string> # empty-state hint inside a text input
+      required:      <bool>   # mutually exclusive with default
+      order:         <int>    # field order in the form
 
 sources:                      # optional — components bind to these via `source:`
   <name>:
@@ -548,81 +559,133 @@ screens:
   <name>:
     title: <string>            # may contain ${selection} when pushed
     layout: <Node>
-    on_key:                    # optional — a keypress on Source pushes Push
-      - source: <component>    # list or table
-        push:   <screen-name>  # destination screen name
-        key:    <string>       # REQUIRED — spell out the trigger key.
-                               # `enter` for the classic drilldown; any
-                               # tea.KeyMsg string works (`d`, `l`,
-                               # `ctrl+r`, ...). Multiple bindings on
-                               # the same source are allowed if their
-                               # (source, key) pairs differ.
-                               # A double click on a row is the mouse
-                               # spelling of `enter`, so an `enter`
-                               # binding is reachable both ways.
-        label:  <string>       # optional — the text shown next to the key
-                               # in the help strip AND the key overlay.
-                               # Defaults to "open".
-        section: <string>      # optional — the heading it sits under in
-                               # the key overlay (`?`). Defaults to
-                               # "Open". See "Help sections" below.
-        bind:                  # optional — templated params forwarded to
-                               # the pushed screen's parameterized sources.
-          <param>: ${selection.*}
-    actions:                   # optional — bind a key to a subprocess
-                               # (kubectl exec, $EDITOR, open, ...) via pkg/runner
-      - key:         <string>  # dispatch key (avoid q/t/?/tab/esc/r//j/k)
-                               # `enter` is allowed — a double click on a row
-                               # fires it too. If the same source also has an
-                               # on_key enter push, the push wins.
-        label:       <string>  # shown in the help strip
-        source:      <component>  # which list/table's selection feeds ${selection.*}
-        confirm:     <string>  # optional yes/no modal message before dispatch
-                               # (${selection.*}/${env.*}/${prompt.*} substituted)
-        notice:      <string>  # optional banner during slow handoffs (interactive only)
-        interactive: <bool>    # default true (uses pkg/runner — TTY handoff, brief
-                               # flicker, right for vim/ssh/kubectl exec).
-                               # false runs cmd.Run() in a goroutine, captures
-                               # stdout/stderr, never suspends — right for one-shot
-                               # commands (delete/scale/open). Errors surface in
-                               # the alert; success goes to the statusbar.
-        prompts:               # optional — collect input via a form modal BEFORE
-                               # dispatch. Values feed ${prompt.<key>} into run argv
-                               # AND confirm message AND notice. Same field shapes
-                               # as app.prompts. Cancel from the form aborts the
-                               # action. Field shapes per `type:`:
-                               #
-                               # text (default):
-                               #   - {key: <string>, label: <string>,
-                               #      placeholder: <string>, initial: <string>}
-                               #
-                               # password (text, rendered masked — for tokens
-                               # and anything else you'd rather not type in the
-                               # clear on a shared screen. Substitution sees the
-                               # real value):
-                               #   - {key: <string>, label: <string>,
-                               #      placeholder: <string>, initial: <string>}
-                               #
-                               # select (selection popup — good for "pick a target
-                               # before running" or gating destructive commands
-                               # behind an explicit choice; scope, environment,
-                               # container, replica-count, etc.):
-                               #   - {key: <string>, label: <string>, type: select,
-                               #      options: [<string>, ...],
-                               #      initial_index: <int>}
-                               #
-                               # confirm (yes/no toggle — value is "true" or
-                               # "false" when substituted):
-                               #   - {key: <string>, label: <string>, type: confirm,
-                               #      initial_bool: <bool>}
-        run:         [<argv...>] # ${selection.*} + ${env.*} + ${prompt.*} substituted
-                               # at fire time (after any prompts have been collected)
-                               #
-                               # Confirming destructive actions: `confirm:` is a
-                               # yes/no modal shown AFTER prompts and BEFORE run.
-                               # Reference ${prompt.*} in the message to include
-                               # the collected values in the preview — e.g.
-                               # "Delete pod ${selection.Name} in ${prompt.namespace}?"
+    actions:                   # optional — bind a key (or nothing) to an
+                               # action from the top-level `actions:` map.
+                               # `a` opens the menu listing them all.
+      - action: <name>         # an entry in the top-level actions: map.
+                               # Omit it and declare the action inline
+                               # instead, giving it a `name:` — see below.
+        key:    <string>       # OPTIONAL.
+                               #   enter  — the one key that still fires
+                               #            directly. A double click on a
+                               #            row is its mouse spelling.
+                               #   other  — a MENU shortcut: it dispatches
+                               #            while the menu is open and does
+                               #            nothing on the screen itself.
+                               #   omitted— menu-only. This is the point of
+                               #            the menu: the alphabet stops
+                               #            capping how many verbs a screen
+                               #            can have.
+                               # May not be a key the shell owns (q, esc,
+                               # tab, r, …) or one of the configurable
+                               # globals (app.actions_key / output_key /
+                               # theme_key) — the validator names the knob.
+        label:  <string>       # the verb's name in the menu. Defaults to
+                               # the action name; a push defaults to
+                               # "open <screen>".
+        from:   <component>    # the list/table/tree whose focused row
+                               # supplies ${selection.*}. REQUIRED when a
+                               # bind/confirm template reads it, or when the
+                               # action is a push; FORBIDDEN otherwise, so a
+                               # keyless verb isn't silently narrowed to one
+                               # pane.
+        bind:                  # fills the callee's declared interface:
+          <name>: ${selection.*}   #   an action's `inputs:`, or for a push,
+                               #   the DESTINATION screen's `parameters:`.
+                               # Anything left unfilled is collected in a
+                               # generated form before dispatch.
+        confirm: <string>      # optional yes/no modal before dispatch.
+                               # ${selection.*} / ${inputs.*} substituted
+                               # against RESOLVED values, so an input with a
+                               # default previews what will actually run.
+        notice:  <string>      # optional banner during slow handoffs
+                               # (interactive only)
+        interactive: <bool>    # default FALSE. false captures the subprocess
+                               # and streams it into the output console with
+                               # no alt-screen flicker. true hands the TTY
+                               # over via pkg/runner — needed for
+                               # vim/ssh/kubectl exec. Rejected for
+                               # `type: http` (no terminal to hand over).
+        name:   <string>       # only for an inline declaration: names the
+                               # action this binding declares on the spot.
+                               # Hoisted into the top-level map at load, so
+                               # nothing downstream cares which way it was
+                               # written.
+
+# ---------------------------------------------------------------------------
+# Top-level actions: the write side. Peer to `data.sources:`, never an entry
+# in it — sources get re-fetched on a timer and on manual `r`, and "re-fetch"
+# must never come to mean "delete the pod again."
+#
+# An action never references ${selection.*}. It declares typed `inputs:` and
+# refers to them as ${inputs.<name>}; mapping a focused row onto those inputs
+# is the binding's job. That's what makes an action reusable across screens.
+# ---------------------------------------------------------------------------
+actions:
+  <name>:
+    description:  <string>     # shown by `wrangl --list-actions`
+    type:         exec | http  # default exec; `push:` implies push
+    multi:        <bool>      # default false. true fans out over marked
+                               # rows: one run per row, each separately
+                               # tracked, cancellable and logged, each tagged
+                               # with its own target so exclusivity is
+                               # per-row. False (the safe default) shows the
+                               # verb disabled under a multi-selection rather
+                               # than picking one row arbitrarily. Rejected
+                               # on a push, and with `interactive: true`.
+    push:         <screen>     # opens a screen in `tui.screens:` — what the
+                               # old `on_key:` block was. Navigation, so it
+                               # takes no run:/url:/inputs:; the binding's
+                               # bind: fills the DESTINATION's parameters.
+    inputs:                    # typed slots. Filled from bind:, else collected
+                               # in a form generated from these same fields,
+                               # else Default. There is no separate `prompts:`.
+      <input>:
+        type:        string | int | bool | duration   # default string.
+                               # ALSO picks the form widget: bool → yes/no
+                               # toggle; anything with options: → select;
+                               # otherwise a text input.
+        mask:        <bool>    # render typed characters as bullets. Display
+                               # only — the value substitutes as the real
+                               # string. A field rather than a type, because
+                               # type: is the DATA type.
+        required:    <bool>    # mutually exclusive with default
+        default:     <string>  # also the form field's starting value.
+                               # For bool use "true"/"false"; with options:,
+                               # name the option by value (not by index).
+        description: <string>
+        label:       <string>  # form caption. Defaults to the input name
+        placeholder: <string>  # text-input hint
+        options:     [<string>, ...]   # makes it a select
+        order:       <int>     # form field order (ties break alphabetically).
+                               # Inputs live in a map, so without this a
+                               # multi-field form renders in a random order.
+
+    # type: exec
+    run:          [<argv...>]  # NOT passed through a shell — use `sh -c "…"`
+                               # explicitly. ${inputs.*} and ${env.*} substitute;
+                               # anything else (e.g. the shell's own
+                               # ${PAGER:-less}) is left verbatim.
+
+    # type: http
+    method:       <string>     # default POST
+    url:          <string>     # required
+    headers:      {<k>: <v>}
+    body:         <string>     # Content-Type defaults to application/json
+    timeout:      <duration>   # default 30s
+
+    # result contract — how the outcome is reported
+    success:      <expr>       # overrides the default verdict (exec: code == 0,
+                               # http: code < 400). expr-lang over `code`,
+                               # `output`, `body`. For APIs that lie:
+                               #   success: code < 400 or code == 409
+    message:      <string>     # head line on success — paints the statusbar AND
+                               # heads the console entry. ${inputs.*}, ${body.*}
+    error_message: <string>    # head line on failure. Worth setting for any JSON
+                               # API: without it the summary is a status code and
+                               # the real reason sits unread in the body.
+                               #   error_message: ${body.message}
+
 initial: <screen-name>         # required when `screens:` is set
 
 # Template tokens (substituted in titles, URLs, headers, body, items,
@@ -668,8 +731,8 @@ initial: <screen-name>         # required when `screens:` is set
 #                             Use for tokens / API keys / boot-time params
 #                             (app.prompts values are written to env, so
 #                             they share this namespace).
-#   ${prompt.KEY}           — value collected from an action's `prompts:`
-#                             form. Substituted at action-fire time, after
+#   ${inputs.KEY}           — an action input: bound at the call site, or
+#                             collected in the generated form. Substituted at
 #                             the form submits.
 #
 # Selection tokens substitute at push time; env tokens substitute at push
@@ -713,30 +776,23 @@ tuilib's shared vocabulary, so a group means the same thing everywhere:
 A group appears only when the feature is configured: an unmarkable table
 contributes no `Select` heading rather than an empty one.
 
-What the config authors is the **verbs** — `on_key:` pushes and
-`actions:`. Each takes:
+Verbs are not here. Actions live in the action menu (`a`), and tuilib
+deliberately keeps a menu shortcut out of `Help()` — moving discovery
+off the footer and into the menu is most of the point, and a footer
+listing nine verbs it can no longer fire would be worse than listing
+none.
+
+The one exception is `enter`, which is still a real direct key. A
+binding on it appears under **Open**, labelled by the binding's
+`label:`:
 
 ```yaml
-on_key:
-  - source:  users_list
-    push:    starred
-    key:     s
-    label:   starred        # the text beside the key
-    section: Drill down     # the heading it sits under (default "Open")
-
 actions:
-  - key:     d
-    source:  pods
-    label:   describe
-    section: Inspect        # default "Actions"
-    run:     [kubectl, describe, pod, "${selection}"]
+  - key:   enter
+    action: open_repos
+    label:  repos      # what the Open section shows
+    from:   users_list
 ```
-
-Both default sensibly, so `section:` is worth setting only when the verb
-has a better home than "Open" / "Actions". Bindings naming the same
-section share one heading, in the order the config lists them — and a
-section name matching a component's (`Filter`, `Select`, …) files the
-verb alongside those keys rather than starting a new group.
 
 Only the **focused** component contributes, which matches the help strip
 and keeps the overlay about the pane you are actually in.
@@ -763,7 +819,7 @@ and keeps the overlay about the pane you are actually in.
 | `examples/chrome.yaml` | `app.glyphs` + `app.borders` — ASCII-safe glyph vocabulary, rounded panes, a double-bordered overlay and `slot_brackets: corners`. Press `t` to confirm the chrome survives a palette swap |
 | `examples/marking.yaml` | **Multi-select** (`markable:`): a pods table keyed on a `uid` column it never renders, beside a markable list and tree. The fixture reverses its row order every 3s poll — mark a row with `x` and watch the mark stay on the pod, not the slot |
 | `examples/multi.yaml` | Multi-screen drilldown (Regions → Cities → Detail) with breadcrumbing and `${selection}` substitution |
-| `examples/on_key_push.yaml` | `on_key:` block — GitHub users list where `key: enter` pushes to repos and `key: s` pushes to starred, both binding `${selection}`; the repos table then pushes a repo-detail inspector, binding `${selection.Repo}` |
+| `examples/push_actions.yaml` | **Push actions** — GitHub users list where `key: enter` drills into repos and a keyless verb opens starred from the menu; the repos table then pushes a repo-detail inspector, binding `${selection.Repo}` |
 | `examples/http_countries.yaml` | Table backed by restcountries.com REST API; `refresh: 5m` polling; per-column `value:` dot-paths |
 | `examples/http_github.yaml` | Multi-screen drilldown over the GitHub API: users → repos (via `/users/${selection}/repos`) → repo inspector (via `/repos/${selection.Repo}`). Shows URL templating from list and table selections |
 | `examples/http_github_auth.yaml` | Authenticated GitHub: `/user/starred` → repo inspector. Uses `${env.GITHUB_TOKEN}` in the Authorization header — token stays out of YAML |
@@ -777,7 +833,8 @@ and keeps the overlay about the pane you are actually in.
 | `examples/stream_websocket.yaml` | `type: websocket` — connects on activate; each text frame appends to a logview. Headers handle auth on the upgrade request |
 | `examples/stream_trades_table.yaml` | Same websocket stream as above, but feeding a **live table** with `max_rows: 100`. Each JSON frame projects into a row via column `value:` paths and prepends to a ring buffer. Plus a side-by-side logview showing raw frames + connection state |
 | `examples/stream_l1.yaml` | **L1 ticker JOINED from two streams**: Binance.us bookTicker (fast bid/ask) + @ticker (slower last-price + 24h stats) merged by symbol via `row_key: data.s`. Deep-merge keeps both sources' fields alive on each row. Demonstrates streaming + merge + keyed upsert together |
-| `examples/prompts_boot.yaml` | **Boot-time params via `app.prompts`**: form modal collects GitHub username + sort field + an archived-repos toggle + a masked token before the main screen renders. Values become env vars and feed `${env.USER}` into the URL, the title, and a column |
-| `examples/action_prompts.yaml` | **Action prompts**: keys fire a form modal that collects values before the action's subprocess dispatches. `${prompt.<key>}` substitutes into run argv + confirm message + notice |
+| `examples/prompts_boot.yaml` | **Boot-time params via `app.prompts`**: form modal collects GitHub username + sort field + an archived-repos toggle before the main screen renders. Values become env vars and feed `${env.USER}` into the URL, the title, and a column |
+| `examples/action_prompts.yaml` | **Action inputs**: an action's declared `inputs:` that the binding doesn't fill via `bind:` are collected in a generated form. One vocabulary — the input's `type:`/`options:` pick the widget, `${inputs.*}` substitutes into run argv + confirm message |
+| `examples/action_http_argocd.yaml` | **`type: http` actions**: POST to the Argo CD API with a bearer token, `success: code < 400 or code == 409` for already-syncing apps, and `error_message: ${body.message}` so the summary shows the API's own reason instead of a status code |
 | `examples/kube_multi.yaml` | Multi-cluster: 3 kube clusters merged into one pods table via `type: merge`. Tagged + colored by cluster. Use `task kube:multi:up && task kube:multi:proxy:all && task kube:multi:demo` |
 | `examples/demo.yaml` | Kitchen-sink: list + table side-by-side |

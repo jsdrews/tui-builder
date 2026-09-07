@@ -8,11 +8,12 @@
 package screen
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os/exec"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,20 +21,21 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
 
-	"github.com/jsdrews/tuilib/pkg/alert"
 	"github.com/jsdrews/tuilib/pkg/app"
 	"github.com/jsdrews/tuilib/pkg/confirm"
 	"github.com/jsdrews/tuilib/pkg/focus"
 	"github.com/jsdrews/tuilib/pkg/form"
 	"github.com/jsdrews/tuilib/pkg/help"
 	"github.com/jsdrews/tuilib/pkg/layout"
-	"github.com/jsdrews/tuilib/pkg/runner"
 	"github.com/jsdrews/tuilib/pkg/list"
+	"github.com/jsdrews/tuilib/pkg/mouse"
+	"github.com/jsdrews/tuilib/pkg/runner"
 	tscreen "github.com/jsdrews/tuilib/pkg/screen"
 	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/theme"
 	"github.com/jsdrews/tuilib/pkg/tree"
 
+	"github.com/jsdrews/tui-builder/internal/action"
 	"github.com/jsdrews/tui-builder/internal/build"
 	cfg "github.com/jsdrews/tui-builder/internal/config"
 	ds "github.com/jsdrews/tui-builder/internal/datasource"
@@ -43,12 +45,16 @@ import (
 // Multi is the shared context for a multi-screen app: every named
 // screen, the top-level components map, and the unified data
 // sources map. Passed once to every Model so any screen can build +
-// push its on_key targets, and so pushed screens get the same
+// push its push-action targets, and so pushed screens get the same
 // data layer.
 type Multi struct {
 	Screens    map[string]*cfg.Screen
 	Components map[string]*cfg.Component
 	Sources    map[string]*cfg.Source
+	// Actions is the config-wide action registry every screen's
+	// bindings resolve against. Post-hoist it holds inline declarations
+	// too.
+	Actions map[string]*cfg.Action
 }
 
 // sourceEntry tracks a live data source bound to one or more components.
@@ -88,28 +94,21 @@ type streamMsg struct {
 	done   bool
 }
 
-// nonInteractiveResult is the outcome of a non-interactive action
-// dispatch. Used instead of runner.Result for the no-TTY path.
-type nonInteractiveResult struct {
-	stdout string
-	stderr string
-	err    error
-}
-
 // Model is the config-driven screen. Construct with New (single-screen)
-// or NewMulti (multi-screen with on_key push support) and pass as the
+// or NewMulti (multi-screen, with push actions) and pass as the
 // root to app.New.
 type Model struct {
-	title    string
-	th       theme.Theme
-	tree     *build.Tree
-	focus    int                            // index into tree.All(); -1 means no component focused
-	multi    *Multi                         // nil for single-screen mode
-	// bindings holds every on_key push for this screen. A single source
-	// may declare multiple bindings distinguished by Key, so lookups
-	// scan linearly per keystroke.
-	bindings []cfg.OnKeyBinding
-	actions  []cfg.Action                   // per-key subprocess bindings for this screen
+	title string
+	th    theme.Theme
+	tree  *build.Tree
+	focus int    // index into tree.All(); -1 means no component focused
+	multi *Multi // nil for single-screen mode
+	// actions holds this screen's action bindings; actionDefs is the
+	// config-wide registry they reference by name. Post-hoist the
+	// registry holds inline declarations too, so there is exactly one
+	// place to look an action up.
+	actions    []cfg.ActionBinding
+	actionDefs map[string]*cfg.Action
 
 	// Data-source state. sources is keyed by source name; sourceUsers
 	// indexes the bound components per source so a single fetch can fan
@@ -161,10 +160,9 @@ type Model struct {
 
 	// Confirm-modal state. When confirmModal is non-nil it overlays the
 	// body via ZStack and captures all keys until ConfirmedMsg /
-	// CancelledMsg arrives. pendingArgv holds the fully-substituted argv
-	// to dispatch on confirmation.
+	// CancelledMsg arrives. pendingResolved holds the fully-resolved
+	// action to dispatch on confirmation.
 	confirmModal       *confirm.Model
-	pendingArgv        []string
 	pendingNotice      string
 	pendingInteractive bool
 	// confirmW / confirmH are the fitted outer dimensions for the confirm
@@ -174,26 +172,27 @@ type Model struct {
 	// (e.g. "Delete pod <long-name> in <ns>? This cannot be undone.") clips.
 	confirmW, confirmH int
 
-	// Alert-modal state. Shown when an action dispatch returns a non-nil
-	// error (subprocess failed to start, exited non-zero, etc.). One OK
-	// button; dismissed on enter/space/esc/o.
-	alertModal *alert.Model
+	// Form-modal state. Shown when a fired action has inputs the call
+	// site didn't bind — each becomes a field generated from its own
+	// Parameter. pendingBinding / pendingInputs / pendingSel carry the
+	// action context across the modal so onSubmit can resume the flow;
+	// pendingFields sizes the overlay.
+	formModal      *form.Model
+	pendingBinding cfg.ActionBinding
+	pendingInputs  action.Inputs
+	pendingSel     build.Selection
+	pendingSels    []build.Selection
+	// pendingFan is a fan-out held behind the confirm modal: one
+	// dialog gates N runs, not one dialog per row.
+	pendingFan    func() tea.Cmd
+	pendingFields int
 
-	// Form-modal state. Shown when an action declares `prompts:` —
-	// each prompt becomes a field, on submit the values feed into
-	// ${prompt.*} substitution for the rest of the action's flow
-	// (confirm message + run argv). pendingAction / pendingSel carry
-	// the action context across the modal.
-	formModal     *form.Model
-	pendingAction cfg.Action
-	pendingSel    build.Selection
-
-	// inFlightStderr captures the dispatched interactive subprocess's
-	// stderr so the alert can show the actual error text. Set in
-	// dispatch() on the interactive path; consumed and cleared on the
-	// next runner.Result. Non-interactive dispatches carry their own
-	// stderr inside nonInteractiveResult instead.
-	inFlightStderr *bytes.Buffer
+	// pendingResolved is the action awaiting a confirm answer.
+	pendingResolved *action.Resolved
+	// pendingRun is the resolved action behind the in-flight capture,
+	// kept so runner.Captured can be turned back into a Result carrying
+	// the action's own message: / error_message:.
+	pendingRun *action.Resolved
 }
 
 // New builds a single-screen Model. Components are looked up by name in
@@ -206,12 +205,12 @@ type Model struct {
 // mode. Parameterized sources will be constructed with unresolved
 // ${params.*} templates and will surface errors at fetch time. Use
 // wrangl --param for now, or have your source declare defaults.
-func New(s *cfg.Screen, components map[string]*cfg.Component, entries map[string]*cfg.Source, th theme.Theme) (*Model, error) {
+func New(s *cfg.Screen, components map[string]*cfg.Component, entries map[string]*cfg.Source, actions map[string]*cfg.Action, th theme.Theme) (*Model, error) {
 	subS, subC, subE, err := build.SubstituteScreen(s, components, entries, build.Selection{}, nil)
 	if err != nil {
 		return nil, err
 	}
-	return build_(subS, subC, subE, th, nil)
+	return build_(subS, subC, subE, actions, th, nil)
 }
 
 // NewMulti builds a Model from one screen in a multi-screen Config. The
@@ -223,7 +222,7 @@ func New(s *cfg.Screen, components map[string]*cfg.Component, entries map[string
 // params carries the push-site `bind:` block's resolved values for the
 // destination screen's parameterized sources. Pass nil on the initial
 // multi-screen construction (no push has fired yet) and on screens
-// whose on_key has no Bind: map. Missing required params surface as
+// whose binding has no Bind: map. Missing required params surface as
 // a build error so tryPush can pop an alert instead of constructing
 // a half-broken screen.
 func NewMulti(screenName string, multi *Multi, sel build.Selection, params map[string]string, th theme.Theme) (*Model, error) {
@@ -235,10 +234,10 @@ func NewMulti(screenName string, multi *Multi, sel build.Selection, params map[s
 	if err != nil {
 		return nil, err
 	}
-	return build_(subScreen, subComponents, subEntries, th, multi)
+	return build_(subScreen, subComponents, subEntries, multi.Actions, th, multi)
 }
 
-func build_(s *cfg.Screen, components map[string]*cfg.Component, entries map[string]*cfg.Source, th theme.Theme, multi *Multi) (*Model, error) {
+func build_(s *cfg.Screen, components map[string]*cfg.Component, entries map[string]*cfg.Source, actions map[string]*cfg.Action, th theme.Theme, multi *Multi) (*Model, error) {
 	tree, err := build.Build(&s.Layout, components, th)
 	if err != nil {
 		return nil, err
@@ -248,9 +247,9 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, entries map[str
 		m.focus = 0
 	}
 	if multi != nil {
-		m.bindings = append([]cfg.OnKeyBinding(nil), s.OnKey...)
 	}
-	m.actions = append([]cfg.Action(nil), s.Actions...)
+	m.actions = append([]cfg.ActionBinding(nil), s.Actions...)
+	m.actionDefs = actions
 
 	// One unified registry over the entries map. Sources and operator
 	// pipelines share the namespace — reg.Get resolves both.
@@ -379,16 +378,16 @@ func nextStreamMsg(source string, ch <-chan ds.Event) tea.Cmd {
 // When a modal is active it overlays a centered dialog on top of the
 // body via ZStack — base still renders behind so the user sees what
 // they're acting on. Precedence (only one can be up at a time in
-// practice): alert > confirm > form.
+// practice): confirm > form.
+//
+// There is deliberately no error modal. Failures — action dispatch and
+// initial fetch alike — go to the app-wide output console instead, which
+// keeps them re-readable rather than dismissed-and-gone, and never blocks
+// the UI. The statusbar's persistent unread badge is what makes that
+// discoverable; see cmd/tui-builder's OutputKey.
 func (m *Model) Layout() layout.Node {
 	body := m.tree.RenderNode()
 	switch {
-	case m.alertModal != nil:
-		// Autosize is on (see newAlertModal) so the alert measures its
-		// own content and picks a centered rect within the outer bounds
-		// — no fixed-size Center wrapper. tuilib caps at 80%×60% and
-		// scrolls internally past that.
-		return layout.ZStack(body, layout.Sized(m.alertModal))
 	case m.confirmModal != nil:
 		// Fitted size (see newConfirmModal) so long confirm messages wrap
 		// and stay fully visible instead of clipping at the 60-col edge.
@@ -396,7 +395,7 @@ func (m *Model) Layout() layout.Node {
 	case m.formModal != nil:
 		// Height scales with the field count: 3 rows per field (input
 		// is bordered) + 3 for title + submit button + breathing room.
-		h := 3 + 3*len(m.pendingAction.Prompts)
+		h := 3 + 3*m.pendingFields
 		if h < 9 {
 			h = 9
 		}
@@ -407,38 +406,32 @@ func (m *Model) Layout() layout.Node {
 
 // Update routes KeyMsgs to the focused component (with tab/shift+tab
 // intercepted for focus cycling and enter intercepted when the focused
-// component has an on_key binding). Non-key messages fan out so
+// component has an action bound to enter). Non-key messages fan out so
 // spinner ticks reach every component.
 func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
-	// Alert modal takes precedence — single OK button, dismiss is the
-	// only meaningful outcome. Other messages pass through to it so its
-	// cursor blink etc. still ticks.
-	if m.alertModal != nil {
-		if _, ok := msg.(alert.DismissedMsg); ok {
-			m.alertModal = nil
-			return m, nil
-		}
-		next, cmd := m.alertModal.Update(msg)
-		m.alertModal = &next
-		return m, cmd
-	}
-	// Form modal — opened when an action declares prompts. On submit,
-	// pull values out and proceed to confirm/dispatch via
-	// actionAfterPrompts. On cancel, abort the action entirely.
+	// Form modal — opened when a fired action had inputs nobody bound.
+	// On submit, merge the collected values into the inputs already
+	// resolved from bind: and resume. On cancel, abort the action.
 	if m.formModal != nil {
 		switch x := msg.(type) {
 		case form.SubmittedMsg:
-			prompts := stringifyFormValues(x.Values)
-			action := m.pendingAction
+			b := m.pendingBinding
 			sel := m.pendingSel
-			m.formModal = nil
-			m.pendingAction = cfg.Action{}
-			m.pendingSel = build.Selection{}
-			return m, m.actionAfterPrompts(action, sel, prompts)
+			inputs := m.pendingInputs
+			if inputs == nil {
+				inputs = action.Inputs{}
+			}
+			for k, v := range stringifyFormValues(x.Values) {
+				inputs[k] = v
+			}
+			def := m.actionDefs[b.Action]
+			m.clearPendingForm()
+			if def == nil {
+				return m, app.Error(fmt.Sprintf("action %q is not defined", b.Action))
+			}
+			return m, m.actionAfterInputs(b, def, sel, m.pendingSels, inputs)
 		case form.CancelledMsg:
-			m.formModal = nil
-			m.pendingAction = cfg.Action{}
-			m.pendingSel = build.Selection{}
+			m.clearPendingForm()
 			return m, nil
 		}
 		next, cmd := m.formModal.Update(msg)
@@ -451,18 +444,20 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 	if m.confirmModal != nil {
 		switch msg.(type) {
 		case confirm.ConfirmedMsg:
-			argv := m.pendingArgv
+			resolved := m.pendingResolved
 			notice := m.pendingNotice
 			interactive := m.pendingInteractive
-			m.confirmModal = nil
-			m.pendingArgv = nil
-			m.pendingNotice = ""
-			m.pendingInteractive = false
-			return m, m.dispatch(argv, notice, interactive)
+			fan := m.pendingFan
+			m.clearPendingConfirm()
+			if fan != nil {
+				return m, fan()
+			}
+			if resolved == nil {
+				return m, nil
+			}
+			return m, m.dispatchResolved(resolved, notice, interactive)
 		case confirm.CancelledMsg:
-			m.confirmModal = nil
-			m.pendingArgv = nil
-			m.pendingNotice = ""
+			m.clearPendingConfirm()
 			return m, nil
 		}
 		next, cmd := m.confirmModal.Update(msg)
@@ -478,21 +473,13 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 			m.cycleFocus(-1)
 			return m, nil
 		case "enter":
+			// The only key an action still fires from. Everything else
+			// goes through the menu — `enter` is exempt because it is
+			// not a shortcut competing for the letter budget, it is
+			// activation, which is why tuilib emits ActivatedMsg for it
+			// and for a double click rather than treating it as a
+			// binding. See plans/tuilib-0.24.md.
 			if cmd, handled := m.activate(); handled {
-				return m, cmd
-			}
-		default:
-			// on_key bindings fire before actions
-			// so a screen author can bind `d → describe` (push) without
-			// colliding with an action on the same key (which would also
-			// have matched). Uniqueness is enforced at validate time on
-			// the push side; collision with an action is still possible
-			// and picks push-first (deliberate — pushes are lower risk
-			// than firing a subprocess).
-			if cmd, handled := m.tryPush(k.String()); handled {
-				return m, cmd
-			}
-			if cmd, handled := m.tryAction(k); handled {
 				return m, cmd
 			}
 		}
@@ -547,14 +534,33 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 	case windowTickMsg:
 		return m, m.handleWindowTick(x)
 	case runner.Result:
-		captured := ""
-		if m.inFlightStderr != nil {
-			captured = strings.TrimSpace(m.inFlightStderr.String())
-			m.inFlightStderr = nil
+		// Interactive handoff finished. There's no captured output —
+		// the subprocess owned the terminal and printed straight to it —
+		// so the exit status is the whole report.
+		return m, m.actionOutcome(x.Err)
+	case runner.Captured:
+		// A non-interactive run finished. Its stdout/stderr already
+		// streamed into the console line by line via the app shell; what
+		// we add is the head line, built with the action's own message: /
+		// error_message: so the summary says something better than an
+		// exit code.
+		r := m.pendingRun
+		m.pendingRun = nil
+		if r == nil {
+			return m, m.actionOutcome(x.Err)
 		}
-		return m, m.actionOutcome(captured, x.Err)
-	case nonInteractiveResult:
-		return m, m.actionOutcome(strings.TrimSpace(x.stderr), x.err)
+		return m, reportResult(r.Finish(exitCode(x.Err), ""))
+	case actionResultMsg:
+		return m, reportResult(x.res)
+	case actionPickedMsg:
+		// A menu pick that needs input first. The shell ran the action's
+		// Do, which handed control back here rather than running
+		// anything — see menuAction. From this point it is the same path
+		// a key press takes.
+		if cmd, ok := m.startAction(x.binding); ok {
+			return m, cmd
+		}
+		return m, nil
 	case list.ActivatedMsg, table.ActivatedMsg:
 		// A double click is the mouse spelling of enter. The message names
 		// its sender by token, so we activate the component that was
@@ -598,7 +604,70 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 			cmds = append(cmds, tagCursorFocused(cmd, m.tree.Order[i]))
 		}
 	}
+	cmds = m.syncFocusAfterPress(msg, cmds)
 	return m, tea.Batch(cmds...)
+}
+
+// syncFocusAfterPress applies a mouse press's focus change immediately,
+// instead of waiting for the component's focus.RequestMsg to arrive as a
+// command on the next Update.
+//
+// Right-click is why this has to be synchronous. The shell forwards the
+// press and opens the action menu in the SAME Update, so by the time it
+// calls Actions() the request has not been delivered — and the menu
+// would describe whichever pane was focused before the click, which is
+// exactly the question the gesture asked. A left click has a frame to
+// spare, but running one rule for both beats two rules.
+//
+// It cannot read the flag off the component: a list sets its own focus
+// on press, a table only emits the request, so "who thinks it is
+// focused" is not a reliable answer. What is reliable is the request
+// itself, so the fan-out's commands are run here and their messages
+// re-wrapped. Each command still runs exactly once and every message is
+// still delivered — only the timing moves, by one Update, within the
+// press that caused it.
+func (m *Model) syncFocusAfterPress(msg tea.Msg, cmds []tea.Cmd) []tea.Cmd {
+	e, ok := msg.(mouse.Msg)
+	if !ok || !e.IsPointPress() {
+		return cmds
+	}
+	out := make([]tea.Cmd, 0, len(cmds))
+	for _, cmd := range cmds {
+		out = append(out, m.flushForFocus(cmd)...)
+	}
+	return out
+}
+
+// flushForFocus runs one command, applies any focus request it produced,
+// and returns commands that re-deliver whatever it produced.
+func (m *Model) flushForFocus(cmd tea.Cmd) []tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	produced := cmd()
+	if produced == nil {
+		return nil
+	}
+	if batch, ok := produced.(tea.BatchMsg); ok {
+		var out []tea.Cmd
+		for _, c := range batch {
+			out = append(out, m.flushForFocus(c)...)
+		}
+		return out
+	}
+	if req, ok := produced.(focus.RequestMsg); ok {
+		for i, c := range m.tree.All() {
+			if !focusRequested(c, req) {
+				continue
+			}
+			if i != m.focus {
+				m.focus = i
+				m.applyFocus()
+			}
+			break
+		}
+	}
+	return []tea.Cmd{func() tea.Msg { return produced }}
 }
 
 // startFetch returns a Cmd that runs the fetch in a goroutine. The
@@ -651,22 +720,25 @@ func (m *Model) handleFetch(msg fetchMsg) tea.Cmd {
 	}
 	// Track whether this fetch is the FIRST attempt (entry.loaded was
 	// false going in). The "still false after this fetch" case is the
-	// "I just opened the screen and nothing works" path — surface
-	// errors in an alert modal there, since the empty table gives no
-	// visual clue why. Later transient failures during polling stay in
-	// the statusbar (we don't want a modal popping every 5s if a
-	// cluster briefly disconnects).
+	// "I just opened the screen and nothing works" path — it gets the
+	// full error as console detail under an explicit headline, since an
+	// empty table gives no visual clue why. Later transient failures
+	// during polling are one summary line: the pane still has data on
+	// it, and a flapping cluster shouldn't bury the log.
+	//
+	// Neither blocks. Both land in the output console, where the
+	// statusbar's unread badge keeps them findable after the summary
+	// line has been wiped by the next keypress.
 	firstFetch := !entry.loaded
 	if msg.data != nil {
 		entry.loaded = true
 	}
 	if msg.err != nil {
-		if firstFetch && msg.data == nil && m.alertModal == nil {
-			a := m.newAlertModal(
+		if firstFetch && msg.data == nil {
+			cmds = append(cmds, app.ErrorDetail(
 				fmt.Sprintf("%s: initial fetch failed", msg.source),
 				msg.err.Error(),
-			)
-			m.alertModal = &a
+			))
 		} else {
 			cmds = append(cmds, app.Error(fmt.Sprintf("%s: %v", msg.source, msg.err)))
 		}
@@ -722,7 +794,7 @@ func setLoading(c *build.Component, on bool) tea.Cmd {
 // keystrokes (filter typing). Also true while any modal is showing so
 // q/t/esc-pop are routed to the modal, not the app shell.
 func (m *Model) IsCapturingKeys() bool {
-	if m.alertModal != nil || m.confirmModal != nil || m.formModal != nil {
+	if m.confirmModal != nil || m.formModal != nil {
 		return true
 	}
 	c := m.current()
@@ -732,16 +804,12 @@ func (m *Model) IsCapturingKeys() bool {
 	return componentCapturing(c)
 }
 
-// Default headings for the two kinds of binding a config can author.
-// Both are overridable per binding with `section:`.
-const (
-	helpSectionOpen    = "Open"
-	helpSectionActions = "Actions"
-)
+// helpSectionOpen heads the one action binding that still reaches the
+// help overlay.
+const helpSectionOpen = "Open"
 
 // Help returns the bindings the focused component currently exposes,
-// plus one entry per on_key push binding for the focused component,
-// plus any action keys bound to the focused source.
+// plus the `enter` verb if this screen has one.
 //
 // Flat, because that is what the statusbar strip wants. The key overlay
 // takes HelpSections instead.
@@ -767,7 +835,7 @@ func (m *Model) Help() []key.Binding {
 // has, so "Pods" ends up as the heading above a table's scroll keys.
 // Headings are supposed to name what the keys DO. The focused component
 // already describes itself that way (Navigate / Scroll / Filter / Sort /
-// Select / …); this adds the groups the config authored on top.
+// Select / …); this adds the screen's own activation verb on top.
 //
 // Only the focused component contributes, matching Help() — which is
 // also why nothing here calls help.Qualify: a qualifier earns its noise
@@ -784,63 +852,27 @@ func (m *Model) HelpSections() []help.Section {
 	return help.Sections(append(secs, m.verbSections(m.tree.Order[m.focus])...)...)
 }
 
-// verbSections groups the config-authored bindings for one source by
-// their `section:`, in first-appearance order so a config's own
-// ordering is what the reader sees.
+// verbSections is the screen's own contribution to the help list: the
+// `enter` binding, and only that.
 //
-// Shared by Help and HelpSections so the flat strip and the overlay
-// can't disagree about which keys exist.
+// Every other verb is reached through the action menu, and tuilib
+// deliberately keeps a menu shortcut out of Help() — moving discovery
+// off the footer and into the menu is most of the point, and a footer
+// listing nine verbs it can no longer fire would be actively wrong.
+// `enter` is the exception because it is still a real direct key.
 func (m *Model) verbSections(source string) []help.Section {
-	var order []string
-	byTitle := map[string][]key.Binding{}
-	add := func(title string, b key.Binding) {
-		if _, seen := byTitle[title]; !seen {
-			order = append(order, title)
-		}
-		byTitle[title] = append(byTitle[title], b)
-	}
-
-	if m.multi != nil {
-		for _, b := range m.bindings {
-			if b.Source != source {
-				continue
-			}
-			glyph := b.Key
-			if b.Key == "enter" {
-				glyph = "⏎"
-			}
-			label := b.Label
-			if label == "" {
-				label = "open"
-			}
-			add(sectionOr(b.Section, helpSectionOpen),
-				key.NewBinding(key.WithKeys(b.Key), key.WithHelp(glyph, label)))
-		}
-	}
-	for _, a := range m.actions {
-		if a.Source != source {
+	for _, b := range m.actions {
+		if b.Key != "enter" {
 			continue
 		}
-		label := a.Label
-		if label == "" {
-			label = "action"
+		if b.From != "" && b.From != source {
+			continue
 		}
-		add(sectionOr(a.Section, helpSectionActions),
-			key.NewBinding(key.WithKeys(a.Key), key.WithHelp(a.Key, label)))
+		return []help.Section{help.Group(helpSectionOpen,
+			key.NewBinding(key.WithKeys("enter"),
+				key.WithHelp("⏎", labelOr(b.Label, b.Action))))}
 	}
-
-	out := make([]help.Section, 0, len(order))
-	for _, title := range order {
-		out = append(out, help.Group(title, byTitle[title]...))
-	}
-	return out
-}
-
-func sectionOr(s, fallback string) string {
-	if s == "" {
-		return fallback
-	}
-	return s
+	return nil
 }
 
 // componentHelpSections asks the focused component to describe its own
@@ -997,157 +1029,408 @@ func componentHelp(c *build.Component) []key.Binding {
 	return nil
 }
 
-// tryAction handles a KeyMsg that may match one of this screen's actions.
-// Returns (cmd, true) when the action fired so the caller can short-
-// circuit; otherwise (nil, false) to fall through to component routing.
-// Suppressed while a component is capturing keys so action keys don't
-// hijack filter typing.
-func (m *Model) tryAction(k tea.KeyMsg) (tea.Cmd, bool) {
-	if len(m.actions) == 0 || m.focus < 0 {
+// activate runs the verb bound to `enter` against the focused
+// component. Keyboard enter and a double click both route through here,
+// so the two spellings of the same gesture can't drift apart.
+//
+// This is the whole of the direct-key path now. Every other verb is
+// reached through the action menu, which is where discovery belongs: a
+// footer holds one row and a screen can easily have nine verbs.
+//
+// Suppressed while a component is capturing keys, so enter inside a
+// filter stays a filter key. A binding with `from:` only fires while
+// that pane holds focus — that's what lets enter mean different things
+// in different panes.
+func (m *Model) activate() (tea.Cmd, bool) {
+	if len(m.actions) == 0 {
 		return nil, false
 	}
 	cur := m.current()
-	if cur == nil || componentCapturing(cur) {
+	if cur != nil && componentCapturing(cur) {
 		return nil, false
 	}
-	focusedName := m.tree.Order[m.focus]
-	keyStr := k.String()
-	for _, a := range m.actions {
-		if a.Key != keyStr || a.Source != focusedName {
+	focusedName := ""
+	if m.focus >= 0 && m.focus < len(m.tree.Order) {
+		focusedName = m.tree.Order[m.focus]
+	}
+	for _, b := range m.actions {
+		if b.Key != "enter" {
 			continue
 		}
-		sel := selectionFrom(cur)
-		// Three possible paths, top-down:
-		//   1. prompts: → form modal collects values, then continues
-		//   2. confirm: → confirm modal (with substituted message)
-		//   3. dispatch
-		// We capture the action and selection into pendingAction so
-		// the form's onSubmit can resume the flow with the same data.
-		if len(a.Prompts) > 0 {
-			form := m.newPromptForm(a.Prompts)
-			m.formModal = &form
-			m.pendingAction = a
-			m.pendingSel = sel
-			return form.Init(), true
+		if b.From != "" && b.From != focusedName {
+			continue
 		}
-		return m.actionAfterPrompts(a, sel, nil), true
+		return m.startAction(b)
 	}
 	return nil, false
 }
 
-// actionAfterPrompts is the second leg of action dispatch — runs after
-// any prompts have been collected (or immediately, if there were no
-// prompts). Performs final substitution with the prompt values and
-// either pops the confirm modal or dispatches directly.
-func (m *Model) actionAfterPrompts(a cfg.Action, sel build.Selection, prompts map[string]string) tea.Cmd {
-	argv := build.SubstituteAll(a.Run, sel, prompts)
-	if len(argv) == 0 {
-		return nil
+// startAction runs one binding, from wherever it was picked — a direct
+// key or the action menu. Splitting it out is what keeps the two entry
+// points honest: they cannot drift on binding resolution, input
+// collection, confirm or dispatch, because there is only one copy.
+func (m *Model) startAction(b cfg.ActionBinding) (tea.Cmd, bool) {
+	cur := m.current()
+	focusedName := ""
+	if m.focus >= 0 && m.focus < len(m.tree.Order) {
+		focusedName = m.tree.Order[m.focus]
 	}
-	if a.Confirm != "" {
-		msg := build.SubstituteAll([]string{a.Confirm}, sel, prompts)[0]
-		modal := m.newConfirmModal(a.Label, msg)
-		m.confirmModal = &modal
-		m.pendingArgv = argv
-		m.pendingNotice = build.SubstituteAll([]string{a.Notice}, sel, prompts)[0]
-		m.pendingInteractive = a.InteractiveDefault()
-		return nil
+	def := m.actionDefs[b.Action]
+	if def == nil {
+		// Unreachable via Load (the validator resolves every reference),
+		// so this only fires for a hand-built Model in a test. Report
+		// rather than panic.
+		return app.Error(fmt.Sprintf("action %q is not defined", b.Action)), true
 	}
-	notice := build.SubstituteAll([]string{a.Notice}, sel, prompts)[0]
-	return m.dispatch(argv, notice, a.InteractiveDefault())
+	var sels []build.Selection
+	if b.From == "" || b.From == focusedName {
+		sels = m.selectionsFor(b, cur)
+	}
+	sel := build.Selection{}
+	if len(sels) > 0 {
+		sel = sels[0]
+	}
+	if def.Kind() == "push" {
+		return m.pushAction(b, def, sel)
+	}
+	inputs := resolveBinds(b, def, sel)
+
+	// Anything the call site didn't bind gets collected from the user.
+	// The form is generated from the action's own declared inputs —
+	// there is no separate prompts: schema to keep in sync.
+	if missing := unboundInputs(def, inputs); len(missing) > 0 {
+		f := m.newInputForm(def, missing)
+		m.formModal = &f
+		m.pendingBinding = b
+		m.pendingInputs = inputs
+		m.pendingSel = sel
+		m.pendingSels = sels
+		m.pendingFields = len(missing)
+		return f.Init(), true
+	}
+	return m.actionAfterInputs(b, def, sel, sels, inputs), true
 }
 
-// dispatch routes a fully-substituted argv to either pkg/runner
-// (interactive — suspends the alt-screen, hands the TTY to the
-// subprocess) or to a goroutine-based exec (non-interactive — captures
-// stdout/stderr, never suspends, no flicker). nil argv is a no-op.
+// actionAfterInputs is the second leg of dispatch — runs once every
+// input has a value, whether from bind: or from the generated form.
+// Resolves the action into something concrete, then either pops the
+// confirm modal or dispatches.
+func (m *Model) actionAfterInputs(b cfg.ActionBinding, def *cfg.Action, sel build.Selection, sels []build.Selection, inputs action.Inputs) tea.Cmd {
+	// Fan-out after the form: the answers just typed apply to every
+	// marked row, while each row's bind: templates still resolve against
+	// that row. Confirm once, then N runs.
+	if def.Multi && len(sels) > 1 {
+		a := m.menuAction(b, def, m.current(), b.From)
+		fan := func() tea.Cmd { return m.fanOut(b, def, a, sels, inputs) }
+		if b.Confirm != "" {
+			msg := build.SubstituteAll([]string{b.Confirm}, sel, inputs)[0]
+			msg = fmt.Sprintf("%s\n\nRuns %d times, once per marked row.", msg, len(sels))
+			modal := m.newConfirmModal(labelOr(b.Label, b.Action), msg)
+			m.confirmModal = &modal
+			m.pendingFan = fan
+			return nil
+		}
+		return fan()
+	}
+
+	resolved, err := action.Resolve(def, inputs)
+	if err != nil {
+		return app.Error(fmt.Sprintf("%s: %v", b.Action, err))
+	}
+	// Preview text substitutes the RESOLVED values, not the raw bind map:
+	// defaults are applied inside Resolve, so an input with a default
+	// would otherwise render empty in the confirm while the argv got the
+	// real value — a confirm that disagrees with what runs.
+	vals := resolved.Values()
+	notice := build.SubstituteAll([]string{b.Notice}, sel, vals)[0]
+
+	if b.Confirm != "" {
+		msg := build.SubstituteAll([]string{b.Confirm}, sel, vals)[0]
+		modal := m.newConfirmModal(labelOr(b.Label, b.Action), msg)
+		m.confirmModal = &modal
+		m.pendingResolved = resolved
+		m.pendingNotice = notice
+		m.pendingInteractive = b.IsInteractive()
+		return nil
+	}
+	return m.dispatchResolved(resolved, notice, b.IsInteractive())
+}
+
+// dispatchResolved routes a resolved action to the right runner. Exec
+// goes through the process paths in dispatch(); http runs here, since
+// there is no terminal involved and nothing to stream.
+func (m *Model) dispatchResolved(r *action.Resolved, notice string, interactive bool) tea.Cmd {
+	if r.Kind == "http" {
+		// Tracked so the summary can be built with the action's
+		// message: / error_message: when the response lands.
+		return func() tea.Msg {
+			return actionResultMsg{res: r.Do(context.Background())}
+		}
+	}
+	m.trackRun(r)
+	return m.dispatch(r.Argv, notice, interactive)
+}
+
+// trackRun remembers the resolved action behind the next capture so
+// runner.Captured can be turned back into a Result with the action's own
+// message: / error_message: applied.
 //
-// Stderr is always captured for the alert; on the interactive path it
-// stays out of the terminal too (the live shell renders via stdout/pty,
-// not stderr, so hiding stderr doesn't hurt any interactive flow we've
-// encountered while keeping kubectl-level errors clean).
+// Keyed by nothing: runner assigns the RunID inside the Cmd, after we
+// return. Since a keypress can only start one action and Captured
+// arrives before any realistic second keypress completes, the pending
+// slot is sufficient and avoids threading an ID we don't have yet.
+func (m *Model) trackRun(r *action.Resolved) {
+	m.pendingRun = r
+}
+
+// actionResultMsg carries a normalised action Result back into Update.
+type actionResultMsg struct{ res action.Result }
+
+// reportResult sends a Result to the app-wide console. The summary
+// paints the statusbar and heads the console entry; the body carries
+// whatever wouldn't fit in a footer.
+//
+// There is deliberately nothing else here — no modal, no refresh of the
+// views the action touched. A view owns its own refresh cycle: one that
+// wants to converge declares `refresh:`, and one that doesn't is asking
+// to be told to reload. Coupling a mutation to a repaint would make
+// every action responsible for knowing which panes it invalidated.
+func reportResult(res action.Result) tea.Cmd {
+	body := strings.TrimSpace(res.Output)
+	if res.OK {
+		return app.InfoDetail(res.Summary, body)
+	}
+	return app.ErrorDetail(res.Summary, body)
+}
+
+// exitCode pulls the process exit status out of a run error. A non-
+// ExitError (the binary was missing, say) has no status of its own; 1 is
+// the conventional stand-in and keeps `success:` expressions comparing
+// against a number either way.
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	return 1
+}
+
+// clearPendingConfirm drops the confirm modal and the action it was
+// gating.
+func (m *Model) clearPendingConfirm() {
+	m.confirmModal = nil
+	m.pendingResolved = nil
+	m.pendingNotice = ""
+	m.pendingInteractive = false
+	m.pendingFan = nil
+}
+
+// clearPendingForm drops the form modal and every piece of action
+// context it was carrying.
+func (m *Model) clearPendingForm() {
+	m.formModal = nil
+	m.pendingBinding = cfg.ActionBinding{}
+	m.pendingInputs = nil
+	m.pendingSel = build.Selection{}
+	m.pendingSels = nil
+	m.pendingFields = 0
+}
+
+// resolveBinds turns a binding's bind: templates into concrete input
+// values. Templates see the focused row (${selection.*}) and the
+// environment (${env.*}) — the same substitution every other call site
+// uses, so there's one set of rules to learn.
+func resolveBinds(b cfg.ActionBinding, def *cfg.Action, sel build.Selection) action.Inputs {
+	inputs := make(action.Inputs, len(b.Bind))
+	for name, tmpl := range b.Bind {
+		inputs[name] = build.SubstituteAll([]string{tmpl}, sel, nil)[0]
+	}
+	return inputs
+}
+
+// unboundInputs lists the declared inputs with no value yet, in form
+// order: Order first, then alphabetically. Inputs live in a map, so
+// without the sort a two-field form would render in a different order
+// run to run.
+//
+// An input with a Default is NOT considered missing — the default is the
+// answer, and prompting for something the author already decided is
+// friction. Bind explicitly or drop the default if you want to be asked.
+func unboundInputs(def *cfg.Action, have action.Inputs) []string {
+	var missing []string
+	for name, p := range def.Inputs {
+		if p == nil {
+			continue
+		}
+		if _, ok := have[name]; ok {
+			continue
+		}
+		if p.Default != "" {
+			continue
+		}
+		missing = append(missing, name)
+	}
+	sort.Slice(missing, func(i, j int) bool {
+		pi, pj := def.Inputs[missing[i]], def.Inputs[missing[j]]
+		if pi.Order != pj.Order {
+			return pi.Order < pj.Order
+		}
+		return missing[i] < missing[j]
+	})
+	return missing
+}
+
+// dispatch routes a fully-substituted argv down one of two paths that
+// have nothing in common but an *exec.Cmd. nil argv is a no-op.
+//
+// Interactive (pkg/runner) is a whole-program state transition, not a
+// goroutine: tea.Exec releases the terminal, the subprocess owns the
+// TTY outright, and the alt-screen resumes on exit. Exactly one process
+// can own a TTY, so vim / kubectl exec / ssh cannot be run concurrently
+// with the UI at any price. Output goes to the real terminal, so there
+// is nothing for us to capture — the console gets the exit status via
+// runner.Result and that is the whole story.
+//
+// Non-interactive is runner.CaptureWith, which streams the subprocess
+// line-by-line into the app-wide output console (CaptureStarted →
+// CapturedLine* → Captured). We deliberately do NOT hand-roll this with
+// cmd.Run() into a bytes.Buffer: Capture uses real os.Pipes so the child
+// gets an *os.File and os/exec spawns no copy goroutine for Wait to
+// block on. With a buffer, any descendant outliving the process keeps
+// the write end open, the copy never sees EOF, and Wait never returns —
+// the action hangs forever with no way out. Capture also caps memory
+// (ring buffer), preserves stdout/stderr interleaving per line, sets a
+// process group, and gives the console's kill picker a handle.
 func (m *Model) dispatch(argv []string, notice string, interactive bool) tea.Cmd {
 	if len(argv) == 0 {
 		return nil
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	if interactive {
-		var buf bytes.Buffer
-		cmd.Stderr = &buf
-		m.inFlightStderr = &buf
 		if notice != "" {
 			return runner.RunWithNotice(cmd, notice)
 		}
 		return runner.Run(cmd)
 	}
-	return func() tea.Msg {
-		var stdoutBuf, stderrBuf bytes.Buffer
-		cmd.Stdout = &stdoutBuf
-		cmd.Stderr = &stderrBuf
-		err := cmd.Run()
-		return nonInteractiveResult{
-			stdout: stdoutBuf.String(),
-			stderr: stderrBuf.String(),
-			err:    err,
-		}
-	}
+	return runner.CaptureWith(runner.CaptureOptions{Cmd: cmd})
 }
 
-// actionOutcome turns a captured-stderr + error pair into the right
-// follow-up command: alert on error, statusbar info on success.
-func (m *Model) actionOutcome(captured string, err error) tea.Cmd {
+// actionOutcome reports an interactive action's exit status. The captured
+// output of non-interactive actions doesn't come through here at all —
+// runner.Capture streams it straight into the console — so this only has
+// an error to report, never a body.
+func (m *Model) actionOutcome(err error) tea.Cmd {
 	if err != nil {
-		msg := captured
-		if msg == "" {
-			msg = err.Error()
-		} else {
-			msg = fmt.Sprintf("%s\n\n(%v)", captured, err)
-		}
-		a := m.newAlertModal("Action failed", msg)
-		m.alertModal = &a
-		return nil
+		return app.Error(fmt.Sprintf("action failed: %v", err))
 	}
 	return app.Info("action complete")
 }
 
-// newPromptForm builds the form modal for an action's prompts. Maps
-// each cfg.Prompt to the matching tuilib form.Field constructor.
-func (m *Model) newPromptForm(prompts []cfg.Prompt) form.Model {
-	fields := make([]form.Field, len(prompts))
-	for i, p := range prompts {
-		switch p.Type {
-		case "select":
+// newInputForm builds the modal that collects an action's unbound
+// inputs. Fields are generated from each input's own Parameter — the
+// data type picks the widget (bool → toggle, anything with Options →
+// select, otherwise a text input), so there is no second widget schema
+// to keep in step with the type system.
+func (m *Model) newInputForm(def *cfg.Action, names []string) form.Model {
+	fields := make([]form.Field, len(names))
+	for i, name := range names {
+		p := def.Inputs[name]
+		switch {
+		case len(p.Options) > 0:
 			fields[i] = form.Select(form.SelectOptions{
-				Key:     p.Key,
-				Label:   labelOr(p.Label, p.Key),
+				Key:     name,
+				Label:   labelOr(p.Label, name),
 				Options: append([]string(nil), p.Options...),
-				Initial: p.InitialIdx,
+				Initial: indexOf(p.Options, p.Default),
 			})
-		case "confirm":
+		case p.Type == "bool":
 			fields[i] = form.Confirm(form.ConfirmOptions{
-				Key:     p.Key,
-				Label:   labelOr(p.Label, p.Key),
-				Initial: p.InitialBool,
+				Key:     name,
+				Label:   labelOr(p.Label, name),
+				Initial: p.Default == "true",
 			})
-		case "password":
+		case p.Mask:
+			// Display-only, like the boot form: the value substitutes
+			// into the argv as the real string. Required/Validate are
+			// deliberately not wired here — a masked field showing a
+			// validation reason next to bullets is worse than the load
+			// -time check the binding already gets.
 			fields[i] = form.Password(form.PasswordOptions{
-				Key:         p.Key,
-				Label:       labelOr(p.Label, p.Key),
+				Key:         name,
+				Label:       labelOr(p.Label, name),
 				Placeholder: p.Placeholder,
-				Initial:     p.Initial,
+				Initial:     p.Default,
 			})
-		default: // text
+		default:
+			// Required and Validate are the form's own enforcement:
+			// submit refuses, the label gains a "*", and the offending
+			// field's border tints with the reason written on it. Without
+			// wiring these, `required: true` would be checked at load
+			// (the binding must bind it or make it promptable) and then
+			// silently pass an empty string into the argv at runtime.
 			fields[i] = form.Text(form.TextOptions{
-				Key:         p.Key,
-				Label:       labelOr(p.Label, p.Key),
+				Key:         name,
+				Label:       labelOr(p.Label, name),
 				Placeholder: p.Placeholder,
-				Initial:     p.Initial,
+				Initial:     p.Default,
+				Required:    p.Required,
+				Validate:    validatorFor(p.Type),
 			})
 		}
 	}
 	opts := m.th.Form().With(fields)
 	opts.SubmitText = "Run"
 	return form.New(opts)
+}
+
+// validatorFor turns an input's declared data type into the form's
+// per-field validator. Returns nil for types with nothing to check —
+// the form treats a nil Validate as "always acceptable".
+//
+// An empty value is left to Required: this runs after it, so a blank
+// optional field stays blank rather than failing a format check it was
+// never obliged to satisfy.
+func validatorFor(typ string) func(any) error {
+	switch typ {
+	case "int":
+		return func(v any) error {
+			s, _ := v.(string)
+			if s == "" {
+				return nil
+			}
+			if _, err := strconv.Atoi(s); err != nil {
+				return fmt.Errorf("must be a whole number")
+			}
+			return nil
+		}
+	case "duration":
+		return func(v any) error {
+			s, _ := v.(string)
+			if s == "" {
+				return nil
+			}
+			if _, err := time.ParseDuration(s); err != nil {
+				return fmt.Errorf("must be a duration, e.g. 30s or 5m")
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+// indexOf finds want in opts, or 0. Used to turn a select input's
+// Default (an option string) into the starting index the widget wants,
+// so authors express the default the same way for every input type.
+func indexOf(opts []string, want string) int {
+	for i, o := range opts {
+		if o == want {
+			return i
+		}
+	}
+	return 0
 }
 
 func labelOr(s, fallback string) string {
@@ -1226,39 +1509,9 @@ func (m *Model) newConfirmModal(label, message string) confirm.Model {
 	return confirm.New(opts)
 }
 
-// newAlertModal builds an error-tinted alert dialog. Autosize is on so
-// the modal caps at 80%×60% of the screen (per tuilib) and word-wraps
-// the full message with internal scroll — kubectl-describe-shape errors
-// no longer clip to five lines. tuilib's convention is to override
-// ActiveColor with the theme's ErrorBG to get the red-edge "something
-// went wrong" look. Layout() pairs this with layout.Sized(...) instead
-// of layout.Center(w, h, ...) since the alert measures itself.
-func (m *Model) newAlertModal(title, message string) alert.Model {
-	opts := m.th.Alert()
-	opts.Title = title
-	opts.Message = message
-	opts.OK = "OK"
-	opts.ActiveColor = m.th.ErrorBG
-	opts.Autosize = true
-	return alert.New(opts)
-}
-
-// activate runs the "open the selection" verb against the focused
-// component: an on_key binding for enter first, then an action bound to
-// enter. Keyboard enter and a double click both route through here so the
-// two spellings of the same verb can't drift apart.
-//
-// Push-before-action matches the ordering the other keys use in Update.
-func (m *Model) activate() (tea.Cmd, bool) {
-	if cmd, handled := m.tryPush("enter"); handled {
-		return cmd, true
-	}
-	return m.tryAction(tea.KeyMsg{Type: tea.KeyEnter})
-}
-
-// componentActivated reports whether msg is c's own activation. Only lists
-// and tables emit one, which is also all the validator allows as an on_key
-// or action source.
+// componentActivated reports whether msg is c's own activation. Only
+// lists and tables emit one, which is also all the validator allows as
+// an action source.
 //
 // Call this only for ActivatedMsg: tuilib's IsActivate also answers true for
 // a plain enter KeyMsg regardless of which component it belongs to, and the
@@ -1278,40 +1531,22 @@ func componentActivated(c *build.Component, msg tea.Msg) bool {
 // — "enter" for the Enter key, "d" / "l" / "ctrl+r" / etc. for arbitrary
 // bindings. Returns (cmd, true) when a matching binding fires; (nil, false)
 // to fall through to actions or normal component forwarding.
-func (m *Model) tryPush(press string) (tea.Cmd, bool) {
-	if m.multi == nil || m.focus < 0 {
-		return nil, false
+func (m *Model) pushAction(b cfg.ActionBinding, def *cfg.Action, sel build.Selection) (tea.Cmd, bool) {
+	if m.multi == nil {
+		return app.Error(fmt.Sprintf("%s: push actions need a multi-screen config", b.Action)), true
 	}
-	cur := m.current()
-	if cur == nil || componentCapturing(cur) {
-		return nil, false
-	}
-	name := m.tree.Order[m.focus]
-	var binding *cfg.OnKeyBinding
-	for i := range m.bindings {
-		b := &m.bindings[i]
-		if b.Source == name && b.Key == press {
-			binding = b
-			break
-		}
-	}
-	if binding == nil {
-		return nil, false
-	}
-	sel := selectionFrom(cur)
-	// Resolve the push-site bind: block against the focused row's
-	// selection. We always pass a non-nil map (possibly empty) — the
-	// push IS a binding context, even if the user forgot to declare
-	// bind:. That lets applyBindParams enforce required params with a
-	// clean "missing required" error instead of silently constructing
-	// a screen that 404s on first fetch.
-	params := make(map[string]string, len(binding.Bind))
-	for k, v := range binding.Bind {
+	// Resolve the bind: block against the focused row. Always a non-nil
+	// map, even when empty — a push IS a binding context whether or not
+	// the author declared one, which lets applyBindParams report a
+	// missing required param instead of silently building a screen that
+	// 404s on its first fetch.
+	params := make(map[string]string, len(b.Bind))
+	for k, v := range b.Bind {
 		params[k] = build.Substitute(v, sel)
 	}
-	child, err := NewMulti(binding.Push, m.multi, sel, params, m.th)
+	child, err := NewMulti(def.Push, m.multi, sel, params, m.th)
 	if err != nil {
-		return app.Error(fmt.Sprintf("%s: %v", binding.Push, err)), true
+		return app.Error(fmt.Sprintf("%s: %v", def.Push, err)), true
 	}
 	return tscreen.Push(child), true
 }
@@ -1460,14 +1695,14 @@ type cursorFetchMsg struct {
 // which driver's cursor moved. Selection shape per driver kind:
 //
 //   - table.RowFocusedMsg  → String = first cell, Cells = row cells,
-//                            Columns = column titles
+//     Columns = column titles
 //   - list.SelectedChangedMsg → String = item, Cells = [item],
-//                            Columns = ["item"] (so ${cursor.item}
-//                            reads naturally alongside bare ${cursor})
+//     Columns = ["item"] (so ${cursor.item}
+//     reads naturally alongside bare ${cursor})
 //   - tree.SelectedChangedMsg → String = label, Cells = path,
-//                            Columns = nil (numeric ${cursor.N} indexes
-//                            into path; ${cursor.depth} is special-cased
-//                            in the resolver; bare ${cursor} = label)
+//     Columns = nil (numeric ${cursor.N} indexes
+//     into path; ${cursor.depth} is special-cased
+//     in the resolver; bare ${cursor} = label)
 func tagCursorFocused(cmd tea.Cmd, name string) tea.Cmd {
 	if cmd == nil {
 		return nil

@@ -22,6 +22,15 @@ type Config struct {
 	App  App       `yaml:"app"`
 	Data DataBlock `yaml:"data,omitempty"`
 	TUI  TUIBlock  `yaml:"tui,omitempty"`
+	// Actions is the write side: named units of work bound to keys by
+	// `tui.screens.*.actions`. Peer to `data.sources:` rather than an
+	// entry in it — see action.go for why a mutation must never live in
+	// the polled source graph.
+	//
+	// Inline action declarations are hoisted into this map at load time,
+	// so post-Load it holds every action the config can perform
+	// regardless of how it was written.
+	Actions map[string]*Action `yaml:"actions,omitempty"`
 
 	// envSubstituted records that SubstituteEnv has already run, so a
 	// second call is a no-op rather than a second pass over values that
@@ -64,8 +73,6 @@ type TUIBlock struct {
 
 
 
-
-
 // JoinDriver names the iterable whose rows seed the join.
 type JoinDriver struct {
 	// From references a source or pipeline that returns an iterable.
@@ -88,7 +95,6 @@ type JoinLookup struct {
 	//     port:      "1000 + spec.containerPort"
 	On map[string]string `yaml:"on"`
 }
-
 
 
 
@@ -251,6 +257,15 @@ type App struct {
 	// choice of vocabulary, and cycling themes at runtime (`t`) should
 	// not change the vocabulary halfway through.
 	Borders Borders `yaml:"borders,omitempty"`
+	// ActionsKey opens the action menu — the picker listing every verb
+	// this screen has, with its shortcut and a visible reason next to
+	// anything unavailable.
+	//
+	// Defaults to "a"; set it to "-" to turn the menu off, which also
+	// turns off right-click targeting and the menu-scoped shortcuts,
+	// since all three are the one switch on tuilib's side. Like the
+	// other two globals, no action may bind it.
+	ActionsKey string `yaml:"actions_key,omitempty"`
 	// ThemeKey cycles the palette, live, through every built-in theme
 	// — the same list Theme picks the initial one from.
 	//
@@ -396,77 +411,29 @@ type EnvSpec struct {
 }
 
 // Screen describes one screen — its breadcrumb title, its layout tree,
-// and any on_key bindings that push other screens.
+// and any action bindings that push other screens.
 type Screen struct {
 	// Title shows in the breadcrumb. May contain ${selection} tokens
-	// when this screen is reachable via an on_key push.
+	// when this screen is reachable via a push action.
 	Title string `yaml:"title,omitempty"`
 	// Layout is the root of the layout tree. Required.
 	Layout Node `yaml:"layout"`
-	// OnKey declares which components — when the given key is pressed
-	// on them and they're focused — push another screen. Multi-screen
-	// only. Each binding must spell out its key explicitly (`key:
-	// enter`, `key: d`, `key: ctrl+r`); there is no implicit default.
-	OnKey []OnKeyBinding `yaml:"on_key,omitempty"`
-	// Actions hand a key off to a subprocess (kubectl exec, $EDITOR, open,
-	// etc.) with the focused row's selection substituted into the argv.
-	Actions []Action `yaml:"actions,omitempty"`
+	// Actions bind keys to entries in the top-level `actions:`
+	// registry, or declare one inline. See ActionBinding.
+	Actions []ActionBinding `yaml:"actions,omitempty"`
 }
 
-// Action binds a key to a subprocess executed via tuilib's pkg/runner.
-// While the subprocess runs the TUI is suspended and the terminal is
-// handed over to the subprocess (so kubectl exec, ssh, $EDITOR, etc.
-// work as expected). Run argv elements support ${selection.*} (resolved
-// against the focused list/table row at fire time) and ${env.*} (always).
-type Action struct {
-	// Key is the dispatch key. Common choices: "x", "d", "o", "e". Don't
-	// collide with reserved keys (q, t, ?, tab, esc, /, j, k, r).
-	//
-	// "enter" is allowed and is also what a double click sends. An on_key
-	// enter push on the same source takes precedence — see Model.activate.
-	Key string `yaml:"key"`
-	// Label appears in the help strip / panel.
-	Label string `yaml:"label,omitempty"`
-	// Source is the list or table component whose focused row's selection
-	// is substituted into Run.
-	Source string `yaml:"source"`
-	// Run is the argv. Must be non-empty.
-	Run []string `yaml:"run"`
-	// Notice, when non-empty, is printed once after the TUI suspends and
-	// before the subprocess starts — useful for slow handoffs ("connecting…").
-	Notice string `yaml:"notice,omitempty"`
-	// Confirm, when non-empty, shows a yes/no modal with this message
-	// before dispatching the subprocess. ${selection.*}/${env.*} resolve
-	// in the message the same way they do in Run. Yes runs the action,
-	// No (or esc) dismisses the modal.
-	Confirm string `yaml:"confirm,omitempty"`
-	// Interactive controls how the subprocess is launched.
-	//   true  (default): hand the TTY off via pkg/runner — needed for
-	//                     vim, kubectl exec, ssh, htop, anything that
-	//                     wants raw input or full-screen redraws.
-	//                     The alt-screen suspends + resumes around the
-	//                     subprocess (visible as a brief flicker).
-	//   false: cmd.Run() in a goroutine, capture stdout+stderr, never
-	//          suspend the alt-screen — right for non-interactive
-	//          actions (`kubectl scale`, `kubectl delete`, `open URL`,
-	//          one-shot scripts). Subprocess output appears in an alert
-	//          on error, statusbar on success.
-	Interactive *bool `yaml:"interactive,omitempty"`
-	// Prompts collects user input before the action dispatches. Each
-	// prompt becomes a form field; on submit, values are exposed as
-	// ${prompt.<key>} tokens substituted into Run argv, Confirm
-	// message, and Notice. Order: prompts → confirm (with substituted
-	// preview) → dispatch. Cancel from the form aborts the action.
-	Prompts []Prompt `yaml:"prompts,omitempty"`
-	// Section is the heading this action sits under in the key overlay
-	// (`?`). Defaults to "Actions". Same vocabulary as
-	// OnKeyBinding.Section.
-	//
-	// Deliberately temporary. Actions are help-strip bindings today; the
-	// pkg/action work moves them into the menu, where a help heading
-	// means nothing. Delete this field in that cut — see
-	// plans/tuilib-0.24.md, "on_key: folds into the registry".
-	Section string `yaml:"section,omitempty"`
+// ActionMenuKey returns the action-menu key with the default applied,
+// or "" when the config turned the menu off with "-". Same shape as
+// OutputConsoleKey and ThemeCycleKey.
+func (a *App) ActionMenuKey() string {
+	switch a.ActionsKey {
+	case "":
+		return "a"
+	case "-":
+		return ""
+	}
+	return a.ActionsKey
 }
 
 // ThemeCycleKey returns the theme-cycle key with the default applied,
@@ -524,99 +491,80 @@ type MergeChild struct {
 // rules, complex types, and computed defaults are deferred until a
 // concrete need surfaces.
 type Parameter struct {
-	// Type is informational today: string (default), int, bool, duration.
-	// Future use: form widget selection at TUI binding sites, basic
-	// validation in wrangl (--param port=abc against type:int rejects).
-	Type string `yaml:"type,omitempty"`
-	// Required means callers MUST bind a value before the source can
-	// run. Mutually exclusive with Default.
-	Required bool `yaml:"required,omitempty"`
-	// Default is the value used when no caller supplies one. Setting
-	// Default implies the param is optional.
-	Default string `yaml:"default,omitempty"`
-	// Description shows up in --list / launcher prompts / future
-	// --help output. One-line summary.
-	Description string `yaml:"description,omitempty"`
-}
-
-// Prompt is one field in an action's input form. Types map 1:1 to
-// tuilib pkg/form field kinds:
-//
-//	text     (default) — single-line text input
-//	password — like text, but typed characters render masked
-//	select   — pick one of `options`
-//	confirm  — yes/no toggle (value is "true" / "false")
-//
-// A password prompt masks only the display: Substitute sees the real
-// text, and an app.prompts password lands in the environment like any
-// other value. It exists so an API token isn't typed in the clear on a
-// screen someone may be sharing — not as a secret-storage mechanism.
-type Prompt struct {
-	Key         string   `yaml:"key"`
-	Label       string   `yaml:"label,omitempty"`
-	Type        string   `yaml:"type,omitempty"`          // text | password | select | confirm
-	Placeholder string   `yaml:"placeholder,omitempty"`   // text / password only
-	Initial     string   `yaml:"initial,omitempty"`       // text / password default value
-	Options     []string `yaml:"options,omitempty"`       // select choices
-	InitialIdx  int      `yaml:"initial_index,omitempty"` // select default
-	InitialBool bool     `yaml:"initial_bool,omitempty"`  // confirm default
-}
-
-// InteractiveDefault reports whether an action with no explicit
-// Interactive field should run via pkg/runner. The default is true so
-// the most common case (drop into a shell, edit a file) Just Works.
-func (a Action) InteractiveDefault() bool {
-	if a.Interactive == nil {
-		return true
-	}
-	return *a.Interactive
-}
-
-// OnKeyBinding wires "pressing Key on Source pushes Push." The source
-// must be a list or table component referenced in this screen's layout;
-// Push names a screen in Config.Screens. The source component's current
-// selection becomes the ${selection} token in the pushed screen.
-//
-// Bind maps destination-screen parameter names to templates evaluated
-// against the focused row's Selection. Use this when the destination
-// screen has data sources that declare `parameters:` — the values
-// resolve at push time and feed into each parameterized source's
-// BindParams call. Without Bind, parameterized sources on the
-// destination won't have their required params filled and will error
-// at fetch (or push, depending on how strict we make it).
-//
-//	bind:
-//	  namespace: ${selection.Namespace}
-//	  name:      ${selection.Name}
-//
-// Values support the same ${selection.*} / ${env.*} / ${prompt.*}
-// substitutions as everywhere else.
-type OnKeyBinding struct {
-	Source string            `yaml:"source"`
-	Push   string            `yaml:"push"`
-	Bind   map[string]string `yaml:"bind,omitempty"`
-	// Key is the trigger. Required — spell out `key: enter` for the
-	// classic drilldown, `key: d` for describe, `key: l` for logs,
-	// `key: ctrl+r` for a resource reload push. Any tea.KeyMsg.String()
-	// name works. Multiple bindings on the same source are allowed as
-	// long as their (source, key) pairs are distinct.
-	Key string `yaml:"key"`
-	// Label is an optional custom label for the help strip. When empty,
-	// the strip shows the key + "open". Handy for kubectl-shape UIs
-	// that want "d → describe", "l → logs", etc.
-	Label string `yaml:"label,omitempty"`
-	// Section is the heading this binding sits under in the key overlay
-	// (`?`). Defaults to "Open".
+	// Type is the value's data type: string (default), int, bool,
+	// duration. It also PICKS THE FORM WIDGET when this parameter has
+	// to be collected from the user (an action input nobody bound):
+	// bool renders a yes/no toggle, everything else a text input,
+	// unless Options is set — then it's a select regardless of type.
 	//
-	// Headings name what the keys DO, never what holds them — that is
-	// tuilib's rule and the reason the overlay is worth opening. The
-	// component's own keys arrive already grouped that way (Navigate,
-	// Scroll, Filter, Search, Select, Sort, Expand, View); reuse one of
-	// those names to file a push alongside them, or invent one for a
-	// group of your own. Bindings sharing a name share a heading, in
-	// first-appearance order.
-	Section string `yaml:"section,omitempty"`
+	// Note this is the data type, not the widget name. There is
+	// deliberately no `type: select`: "one of these strings" is a
+	// string that happens to have Options, and conflating the two axes
+	// is what made the old Prompt schema need both a Type and an
+	// InitialIdx.
+	Type string `yaml:"type,omitempty"`
+	// Required means callers MUST supply a value before the source or
+	// action can run. Mutually exclusive with Default. For an action
+	// input, "supply" means either a bind: entry at the call site or a
+	// value typed into the generated form.
+	Required bool `yaml:"required,omitempty"`
+	// Default is the value used when no caller supplies one, and the
+	// value a generated form field starts on. Setting Default implies
+	// the param is optional. For type: bool use "true" / "false"; for
+	// a param with Options, one of the option strings.
+	Default string `yaml:"default,omitempty"`
+	// Description shows up in --list / --describe / --list-actions
+	// output. One-line summary.
+	Description string `yaml:"description,omitempty"`
+
+	// The remaining fields matter only when this parameter is rendered
+	// as a form field. They're inert for wrangl --param binding.
+
+	// Label is the form field's caption. Defaults to the param name.
+	Label string `yaml:"label,omitempty"`
+	// Placeholder is the empty-state hint inside a text input.
+	Placeholder string `yaml:"placeholder,omitempty"`
+	// Options turns the field into a select over these choices. Legal
+	// for any Type; the chosen option is the value.
+	Options []string `yaml:"options,omitempty"`
+	// Mask renders typed characters as bullets. Display only: the value
+	// substitutes, binds and os.Setenv's as the real string everywhere
+	// else. It exists so an API token isn't typed in the clear on a
+	// screen someone may be sharing — not as a secret-storage mechanism.
+	//
+	// A field rather than a Type, because Type is the DATA type and
+	// masking is a rendering choice on a string. `type: password` would
+	// put a widget name on the axis that otherwise holds string / int /
+	// bool / duration, which is the conflation the Parameter schema
+	// exists to avoid.
+	Mask bool `yaml:"mask,omitempty"`
+	// Order sorts fields in a generated form. Inputs live in a map, and
+	// map iteration has no order — without this, a two-field form would
+	// render its fields in a different sequence run to run. Ties break
+	// alphabetically, so leaving Order unset everywhere is stable, just
+	// alphabetical.
+	Order int `yaml:"order,omitempty"`
 }
+
+// Prompt is one field in the boot-time form (`app.prompts:`), which
+// runs before any screen renders and os.Setenv's each value under its
+// Key so ${env.<KEY>} resolves downstream.
+//
+// It is an ordered list rather than a map because a form has a reading
+// order and boot prompts are usually a short deliberate sequence. The
+// field vocabulary is Parameter's, inlined — one widget schema for boot
+// prompts and action inputs alike.
+//
+// Action inputs are NOT prompts. An action declares typed `inputs:`;
+// anything the call site doesn't bind is collected in a generated form
+// built from those same Parameter fields. There is no separate
+// ${prompt.*} namespace.
+type Prompt struct {
+	// Key names the env var the collected value is written to.
+	Key       string `yaml:"key"`
+	Parameter `yaml:",inline"`
+}
+
 
 // Node is a tagged-union layout node. Exactly one of VStack / HStack /
 // ZStack / Component must be non-empty. Component is the name of a

@@ -119,8 +119,9 @@ func loadScreen(path string, th theme.Theme) (tscreen.Screen, error) {
 			Screens:    c.TUI.Screens,
 			Components: c.TUI.Components,
 			Sources:    c.Data.Sources,
+			Actions:    c.Actions,
 		}
 		return tqscreen.NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, th)
 	}
-	return tqscreen.New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, th)
+	return tqscreen.New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, th)
 }

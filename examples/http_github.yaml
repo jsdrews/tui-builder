@@ -94,14 +94,14 @@ tui:
     users:
       title: Users
       layout: {component: users}
-      on_key:
-        - {source: users, push: repos, key: enter}
+      actions:
+        - {key: enter, name: open_repos, push: repos, from: users}
 
     repos:
       title: ${selection}
       layout: {component: repos_table}
-      on_key:
-        - {source: repos_table, push: detail, key: enter}
+      actions:
+        - {key: enter, name: open_detail, push: detail, from: repos_table}
 
     detail:
       title: ${selection.Repo}

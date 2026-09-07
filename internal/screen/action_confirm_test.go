@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
@@ -50,17 +51,20 @@ func podsWithDeleteConfig(marker string) *cfg.Config {
 			},
 			Screen: cfg.Screen{
 				Layout: cfg.Node{Component: "pods_table"},
-				Actions: []cfg.Action{
+				Actions: []cfg.ActionBinding{
 					{
-						Key:         "D",
+						Key:         "enter",
+						Action:      "delete_pod",
 						Label:       "delete",
-						Source:      "pods_table",
+						From:        "pods_table",
 						Interactive: &no,
 						Confirm:     "Delete pod ${selection.Name} in ${selection.Namespace}? This cannot be undone.",
-						Run:         []string{"sh", "-c", "touch " + marker},
 					},
 				},
 			},
+		},
+		Actions: map[string]*cfg.Action{
+			"delete_pod": {Run: []string{"sh", "-c", "touch " + marker}},
 		},
 	}
 }
@@ -78,12 +82,16 @@ func deleteScreen(t *testing.T, c *cfg.Config) *Model {
 // TestActionConfirm_MessageNotTruncated pins the reported bug: the delete
 // confirm message ("… This cannot be undone.") is wider than the old
 // 60-col modal and clipped its tail. The fitted modal must now show it all.
+// `enter` rather than a letter: it is the only key an action still
+// fires from directly. Every other verb goes through the menu, whose
+// confirm the shell owns — the screen's own modal, which these tests
+// cover, is reached via enter and via the post-form path.
 func TestActionConfirm_MessageNotTruncated(t *testing.T) {
 	m := deleteScreen(t, podsWithDeleteConfig(filepath.Join(t.TempDir(), "marker")))
 
-	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.confirmModal == nil {
-		t.Fatalf("expected confirm modal after pressing D")
+		t.Fatalf("expected confirm modal after pressing enter")
 	}
 	plain := xansi.Strip(m.Layout().Render(geom.New(0, 0, 100, 40)))
 	if !strings.Contains(plain, "This cannot be undone.") {
@@ -101,9 +109,9 @@ func TestActionConfirm_WrapsMultiLine(t *testing.T) {
 		"undone; the owning controller may immediately recreate it under a new name."
 	m := deleteScreen(t, c)
 
-	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.confirmModal == nil {
-		t.Fatalf("expected confirm modal after pressing D")
+		t.Fatalf("expected confirm modal after pressing enter")
 	}
 	plain := xansi.Strip(m.Layout().Render(geom.New(0, 0, 100, 40)))
 	for _, want := range []string{"new name.", "[ No ]", "[ Yes ]"} {
@@ -121,12 +129,28 @@ func TestActionConfirm_YesDispatches(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "marker")
 	m := deleteScreen(t, podsWithDeleteConfig(marker))
 
-	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 
-	if _, err := os.Stat(marker); err != nil {
-		t.Errorf("delete dispatch did not run the command; marker missing: %v", err)
+	// Non-interactive dispatch goes through runner.CaptureWith, which
+	// Start()s the process and returns CaptureStarted immediately so its
+	// output can stream into the console. The subprocess therefore
+	// outlives the message pump — poll rather than assuming it finished.
+	waitForFile(t, marker)
+}
+
+// waitForFile blocks until path exists or the deadline passes. Used for
+// asserting that an async (captured) dispatch actually ran.
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+	t.Errorf("dispatch did not run the command; marker never appeared: %s", path)
 }
 
 // TestActionConfirm_EnterDefaultsToNo documents the safe default: with the
@@ -136,7 +160,7 @@ func TestActionConfirm_EnterDefaultsToNo(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "marker")
 	m := deleteScreen(t, podsWithDeleteConfig(marker))
 
-	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 
 	if m.confirmModal != nil {

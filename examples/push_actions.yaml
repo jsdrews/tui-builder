@@ -1,25 +1,24 @@
-# on_key_push.yaml — key-bound screen pushes (feature D).
+# push_actions.yaml — screen pushes as actions.
 #
-# `on_key:` is the push-binding block on a multi-screen config. Every
-# entry declares a specific `key:` that, when pressed on the focused
-# `source:` component, pushes the named `push:` screen. `key:` is
-# required — spell out `key: enter` for the classic drilldown; use any
-# other tea.KeyMsg name (`d`, `l`, `ctrl+r`, ...) for parallel
-# drilldowns. Multiple entries per source are fine as long as their
-# (source, key) pairs are distinct.
+# A push is an action: `push:` names a screen in `tui.screens:`, and the
+# binding's `bind:` fills that screen's declared `parameters:`. There is
+# no separate `on_key:` block any more — one registry, one place a key
+# can come from.
 #
-# kubectl-shape UX pattern this enables:
+# How a push is reached:
 #
-#   enter → open detail
-#   d     → describe
-#   l     → logs
-#   e     → edit (via action, not push — see other examples)
+#   key: enter   fires directly (double-click is its mouse spelling).
+#                The classic drilldown.
+#   key: <other> a MENU shortcut — dispatches while `a` is open, does
+#                nothing pressed on the screen itself.
+#   no key       menu-only. A parallel drilldown no longer has to earn
+#                a letter to exist.
 #
 # This demo uses the same GitHub users → repo drilldown as the vanilla
 # http example but exposes TWO push targets on the same list:
 #
 #   users  enter → repo table (all this user's public repos)
-#          s     → starred (what THIS user has starred)
+#          (menu) → starred (what THIS user has starred)
 #   repos  enter → repo detail (inspector over one repo)
 #
 # Both destinations bind `${selection}` = the focused login into their
@@ -136,38 +135,37 @@ tui:
     users:
       title: Users
       layout: {component: users_list}
-      on_key:
+      actions:
         # enter → user's own repos (classic drilldown; spell key explicitly)
-        - source: users_list
+        - key:    enter
+          name:   open_repos
           push:   repos
-          key:    enter
+          from:   users_list
           bind:
             login: ${selection}
-        # `s` → what the user has starred. `label:` is what the help
-        # strip and the key overlay (`?`) show next to the key;
-        # `section:` is the heading it sits under in the overlay.
-        # Both default sensibly — an unlabelled push reads "open" under
-        # a heading called "Open" — so set them when the verb has a
-        # better name than that.
-        - source: users_list
-          push:    starred
-          key:     s
-          label:   starred
-          section: Drill down
+        # What the user has starred — NO key at all. Press `a` and pick
+        # it. A parallel drilldown no longer has to earn a letter to
+        # exist, which is the whole point of the menu. `label:` is what
+        # the menu shows.
+        - name:   open_starred
+          push:   starred
+          from:   users_list
+          label:  starred
           bind:
             login: ${selection}
 
     repos:
       title: ${selection} — repos
       layout: {component: repos_table}
-      on_key:
+      actions:
         # Third level: enter on a repo row opens its detail. Each screen
         # binds only from the row IT shows — the login picked two screens
         # back is long out of scope here, which is why the slug travels
         # in the Repo column rather than being reassembled from parts.
-        - source: repos_table
+        - key:    enter
+          name:   open_repo_detail
           push:   repo_detail
-          key:    enter
+          from:   repos_table
           bind:
             full_name: ${selection.Repo}
 

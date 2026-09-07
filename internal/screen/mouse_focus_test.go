@@ -28,7 +28,7 @@ func TestClickFocusesClickedPane(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestDoubleClickActivatesLikeEnter(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	multi := &Multi{Screens: c.TUI.Screens, Components: c.TUI.Components, Sources: c.Data.Sources}
+	multi := &Multi{Screens: c.TUI.Screens, Components: c.TUI.Components, Sources: c.Data.Sources, Actions: c.Actions}
 	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
@@ -147,17 +147,20 @@ func TestDoubleClickActivatesLikeEnter(t *testing.T) {
 // never fired.
 func TestEnterFiresActionBoundToEnter(t *testing.T) {
 	c := twoPaneConfig()
-	c.TUI.Screen.Actions = []cfg.Action{{
+	c.TUI.Screen.Actions = []cfg.ActionBinding{{
 		Key:     "enter",
+		Action:  "order",
 		Label:   "order",
-		Source:  "names",
+		From:    "names",
 		Confirm: "Order ${selection}?",
-		Run:     []string{"echo", "${selection}"},
 	}}
+	c.Actions = map[string]*cfg.Action{
+		"order": {Run: []string{"echo", "hello"}},
+	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,14 +242,15 @@ func pushConfig() cfg.Config {
 				"list": {
 					Title:  "List",
 					Layout: cfg.Node{Component: "names"},
-					OnKey: []cfg.OnKeyBinding{
-						{Source: "names", Push: "detail", Key: "enter"},
+					Actions: []cfg.ActionBinding{
+						{Key: "enter", Action: "open_detail", From: "names"},
 					},
 				},
 				"detail": {Title: "Detail", Layout: cfg.Node{Component: "detail"}},
 			},
 			Initial: "list",
 		},
+		Actions: map[string]*cfg.Action{"open_detail": {Push: "detail"}},
 	}
 }
 

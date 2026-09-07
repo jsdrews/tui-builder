@@ -1,27 +1,70 @@
-# action_prompts.yaml — actions that gather user input before running.
+# action_prompts.yaml — the action menu, and actions that ask first.
 #
-# Each action can declare a `prompts:` list. When the action fires, a
-# form modal opens, collects values, and exposes them as ${prompt.<key>}
-# tokens substituted into the run argv (and the confirm message, and
-# the notice). Submit → continue the action; cancel (esc) → abort.
+# Press `a` for the menu. That is where verbs live now: it lists every
+# action this screen has, with its shortcut in the right column and a
+# reason next to anything unavailable. `enter` is the only key that
+# still fires an action directly, because it is activation rather than a
+# shortcut — which is why a verb needs no key at all unless you want
+# one. See `taste` below: no key, menu only.
 #
-# Prompt types map to tuilib form fields:
-#   text     single-line text — placeholder, initial value
-#   select   pick from options (Initial picks the starting index)
-#   confirm  yes/no toggle (value is the string "true" / "false")
+# There is no `prompts:` schema. An action declares typed `inputs:`, and
+# anything the binding doesn't fill via `bind:` is collected in a form
+# generated from those same declarations. One vocabulary, one namespace
+# (${inputs.*}), and the form can't drift out of step with the argv
+# because it is derived from it.
+#
+# The widget follows the data type:
+#   (default)          single-line text input
+#   options: [...]     select, whatever the type
+#   type: bool         yes/no toggle
+#   mask: true         bullets instead of characters
 #
 # Flow when an action fires:
-#   1. (if prompts:) form modal opens
-#   2. user fills fields, tab between them, enter on submit
-#   3. (if confirm:) confirm modal opens, message can reference
-#      ${prompt.*} for a preview
-#   4. dispatch runs the subprocess with all substitutions baked in
+#   1. bind: templates resolve against the focused row
+#   2. any input still unset (and without a default) opens a form
+#   3. (if confirm:) a modal, which can preview ${inputs.*}
+#   4. dispatch — output streams into the output console (press `o`)
 #
-# This example doesn't require any external setup — every action runs
-# `echo` so you can see the substituted argv in the alert/statusbar.
+# Every action here runs `echo`, so nothing external is needed.
 app:
-  title: Action prompts demo
+  title: Action inputs demo
   theme: nord
+
+# The actions themselves — reusable, inspectable without a TTY:
+#   wrangl --list-actions examples/action_prompts.yaml
+#   wrangl --describe-action examples/action_prompts.yaml order --param fruit=Apple
+actions:
+  request:
+    description: Ask for a quantity, then echo it
+    inputs:
+      # Bound from the selected row, so it never reaches the form.
+      fruit:  {type: string, required: true}
+      # Not bound by the binding below → this is what gets prompted for.
+      amount: {label: "How many?", placeholder: "1", order: 1}
+    run: [echo, "${inputs.amount} ${inputs.fruit}(s) requested"]
+
+  order:
+    description: Multi-field order form
+    inputs:
+      fruit:    {type: string, required: true}
+      amount:   {label: Quantity, placeholder: "1", order: 1}
+      # Options make it a select regardless of type; `default:` names the
+      # starting choice by value rather than by index.
+      priority: {label: Priority, options: [low, normal, high], default: normal, order: 2}
+      # A bool renders the yes/no toggle.
+      gift:     {label: "Gift wrap?", type: bool, default: "false", order: 3}
+    run:
+      - sh
+      - -c
+      - 'echo "ordered: ${inputs.amount} × ${inputs.fruit}, priority=${inputs.priority}, gift=${inputs.gift}"'
+    message: "ordered ${inputs.amount} × ${inputs.fruit}"
+
+  taste:
+    description: A verb with no key, to prove one isn't needed
+    inputs:
+      fruit: {type: string, required: true}
+    run: [echo, "tasting ${inputs.fruit}"]
+    message: "tasted ${inputs.fruit}"
 
 tui:
   components:
@@ -35,31 +78,32 @@ tui:
         - Cherry
         - Date
   screen:
-    title: Prompts
+    title: Inputs
     layout:
       component: fruits
     actions:
-      # Single text prompt — ask for a quantity then echo it.
-      - key: q
-        label: quantity
-        source: fruits
-        interactive: false
-        prompts:
-          - {key: amount, label: "How many?", placeholder: "1", initial: "1"}
-        run: [echo, "${prompt.amount} ${selection}(s) requested"]
-
-      # Multiple fields — text + select. The submit button confirms
-      # everything atomically; cancel aborts without running.
+      # `enter` — the one key that still fires directly. Everything else
+      # is reached through the menu.
       - key: enter
+        action: order
         label: order
-        source: fruits
-        interactive: false
-        confirm: "Order ${prompt.amount} ${selection}(s) as ${prompt.priority} priority?"
-        prompts:
-          - {key: amount,   label: "Quantity",        placeholder: "1", initial: "1"}
-          - {key: priority, label: "Priority",        type: select, options: [low, normal, high], initial_index: 1}
-          - {key: gift,     label: "Gift wrap?",      type: confirm, initial_bool: false}
-        run:
-          - sh
-          - -c
-          - 'echo "ordered: ${prompt.amount} × ${selection}, priority=${prompt.priority}, gift=${prompt.gift}"'
+        from: fruits
+        # The confirm message previews values the form just collected.
+        confirm: "Order ${inputs.amount} ${selection}(s) as ${inputs.priority} priority?"
+        bind: {fruit: "${selection}"}
+
+      # `n` is a MENU shortcut, not a direct key: it dispatches while the
+      # menu is open. Pressing `n` on the list does nothing.
+      - key: n
+        action: request
+        label: request
+        from: fruits
+        bind: {fruit: "${selection}"}
+
+      # No key at all — reachable only from the menu. This is the payoff:
+      # the alphabet stops being the ceiling on how many verbs a screen
+      # can have, so a verb no longer has to earn a letter to exist.
+      - action: taste
+        label: taste
+        from: fruits
+        bind: {fruit: "${selection}"}

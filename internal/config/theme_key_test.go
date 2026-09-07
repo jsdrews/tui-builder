@@ -24,9 +24,7 @@ func TestThemeCycleKeyDefaults(t *testing.T) {
 // sees it, so the binding would read correctly and never fire.
 func TestActionKeyCannotShadowThemeCycle(t *testing.T) {
 	c := promptConfig()
-	c.TUI.Screen.Actions = []Action{{
-		Key: "t", Source: "items", Run: []string{"echo", "hi"},
-	}}
+	bindKey(c, "t")
 	err := c.Validate()
 	if err == nil {
 		t.Fatal("expected an error binding an action to the theme key")
@@ -39,9 +37,7 @@ func TestActionKeyCannotShadowThemeCycle(t *testing.T) {
 func TestActionKeyFreeWhenThemeCyclePinned(t *testing.T) {
 	c := promptConfig()
 	c.App.ThemeKey = "-"
-	c.TUI.Screen.Actions = []Action{{
-		Key: "t", Source: "items", Run: []string{"echo", "hi"},
-	}}
+	bindKey(c, "t")
 	if err := c.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
@@ -50,9 +46,7 @@ func TestActionKeyFreeWhenThemeCyclePinned(t *testing.T) {
 func TestActionKeyCollidesWithCustomThemeKey(t *testing.T) {
 	c := promptConfig()
 	c.App.ThemeKey = "P"
-	c.TUI.Screen.Actions = []Action{{
-		Key: "P", Source: "items", Run: []string{"echo", "hi"},
-	}}
+	bindKey(c, "P")
 	if err := c.Validate(); err == nil {
 		t.Fatal("expected a collision against the custom theme key")
 	}

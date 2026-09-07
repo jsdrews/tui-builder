@@ -38,9 +38,28 @@
 # A surprise worth knowing: marks survive filtering. A key does not care
 # whether its row is on screen, so you can mark a row, filter it away,
 # and still be holding it.
+# Marks are what `multi: true` acts on. Press `a` with rows marked and
+# the menu titles itself "3 items"; a verb without `multi: true` shows
+# up disabled with a reason rather than silently picking one of them.
+# A multi verb fans out into one run per row — separately tracked,
+# separately cancellable, each logged under its own name in `o`.
 app:
   title: Marking
   theme: nord
+
+actions:
+  touch:
+    description: Echo one pod's name — fans out over marked rows
+    multi: true
+    inputs:
+      name: {type: string, required: true}
+    run: [echo, "touched ${inputs.name}"]
+
+  count:
+    description: Not multi — disabled while more than one row is marked
+    inputs:
+      name: {type: string, required: true}
+    run: [echo, "only ${inputs.name}"]
 
 data:
   sources:
@@ -101,6 +120,20 @@ tui:
               - {label: chrome.yaml}
 
   screen:
+    actions:
+      - action: touch
+        label:  touch
+        from:   pods
+        # One confirm gates the whole fan-out, not one per row. The
+        # count is appended automatically — the author's template
+        # resolved against a single row, so alone it would name one pod
+        # while touching three.
+        confirm: "Touch ${selection.Name}?"
+        bind:   {name: "${selection.Name}"}
+      - action: count
+        label:  count
+        from:   pods
+        bind:   {name: "${selection.Name}"}
     title: Multi-select
     layout:
       hstack:
