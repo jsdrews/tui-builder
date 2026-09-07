@@ -560,8 +560,12 @@ screens:
                                # A double click on a row is the mouse
                                # spelling of `enter`, so an `enter`
                                # binding is reachable both ways.
-        label:  <string>       # optional — custom help-strip label.
+        label:  <string>       # optional — the text shown next to the key
+                               # in the help strip AND the key overlay.
                                # Defaults to "open".
+        section: <string>      # optional — the heading it sits under in
+                               # the key overlay (`?`). Defaults to
+                               # "Open". See "Help sections" below.
         bind:                  # optional — templated params forwarded to
                                # the pushed screen's parameterized sources.
           <param>: ${selection.*}
@@ -683,6 +687,59 @@ initial: <screen-name>         # required when `screens:` is set
 #   {flex: <int>,  vstack|hstack|zstack|component: ...}
 #   {fixed: <int>, ...}
 ```
+
+## Help sections
+
+`?` opens the key overlay: every binding the focused component exposes,
+grouped, searchable. The groups are named by what the keys **do**, never
+by what holds them — a heading naming the owner ends up sitting above
+every binding that owner has, which is how a screen called "Pods" came
+to be the heading over a table's scroll keys.
+
+Most of it is automatic. Each component describes its own bindings using
+tuilib's shared vocabulary, so a group means the same thing everywhere:
+
+| Section | What lands there |
+|---|---|
+| `Navigate` | cursor / line movement |
+| `Scroll` | the horizontal axis |
+| `Filter` | narrowing what is displayed |
+| `Search` | finding within it (logview, tree) |
+| `Select` | marking — `markable:` puts `x` / `X` / `A` / `D` here |
+| `Sort` | column sorting |
+| `Expand` | opening branches (tree, inspector) |
+| `View` | wrap, follow — how content renders |
+
+A group appears only when the feature is configured: an unmarkable table
+contributes no `Select` heading rather than an empty one.
+
+What the config authors is the **verbs** — `on_key:` pushes and
+`actions:`. Each takes:
+
+```yaml
+on_key:
+  - source:  users_list
+    push:    starred
+    key:     s
+    label:   starred        # the text beside the key
+    section: Drill down     # the heading it sits under (default "Open")
+
+actions:
+  - key:     d
+    source:  pods
+    label:   describe
+    section: Inspect        # default "Actions"
+    run:     [kubectl, describe, pod, "${selection}"]
+```
+
+Both default sensibly, so `section:` is worth setting only when the verb
+has a better home than "Open" / "Actions". Bindings naming the same
+section share one heading, in the order the config lists them — and a
+section name matching a component's (`Filter`, `Select`, …) files the
+verb alongside those keys rather than starting a new group.
+
+Only the **focused** component contributes, which matches the help strip
+and keeps the overlay about the pane you are actually in.
 
 ## Example index
 

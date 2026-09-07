@@ -25,6 +25,7 @@ import (
 	"github.com/jsdrews/tuilib/pkg/confirm"
 	"github.com/jsdrews/tuilib/pkg/focus"
 	"github.com/jsdrews/tuilib/pkg/form"
+	"github.com/jsdrews/tuilib/pkg/help"
 	"github.com/jsdrews/tuilib/pkg/layout"
 	"github.com/jsdrews/tuilib/pkg/runner"
 	"github.com/jsdrews/tuilib/pkg/list"
@@ -731,9 +732,19 @@ func (m *Model) IsCapturingKeys() bool {
 	return componentCapturing(c)
 }
 
+// Default headings for the two kinds of binding a config can author.
+// Both are overridable per binding with `section:`.
+const (
+	helpSectionOpen    = "Open"
+	helpSectionActions = "Actions"
+)
+
 // Help returns the bindings the focused component currently exposes,
 // plus one entry per on_key push binding for the focused component,
 // plus any action keys bound to the focused source.
+//
+// Flat, because that is what the statusbar strip wants. The key overlay
+// takes HelpSections instead.
 func (m *Model) Help() []key.Binding {
 	c := m.current()
 	if c == nil {
@@ -743,10 +754,55 @@ func (m *Model) Help() []key.Binding {
 	if m.focus < 0 || componentCapturing(c) {
 		return out
 	}
-	name := m.tree.Order[m.focus]
+	for _, sec := range m.verbSections(m.tree.Order[m.focus]) {
+		out = append(out, sec.Bindings...)
+	}
+	return out
+}
+
+// HelpSections is the grouped form, for tuilib's key overlay (`?`).
+//
+// Without it the shell wraps Help() in one unnamed group and titles it
+// with the owner — which puts the screen's name over every binding it
+// has, so "Pods" ends up as the heading above a table's scroll keys.
+// Headings are supposed to name what the keys DO. The focused component
+// already describes itself that way (Navigate / Scroll / Filter / Sort /
+// Select / …); this adds the groups the config authored on top.
+//
+// Only the focused component contributes, matching Help() — which is
+// also why nothing here calls help.Qualify: a qualifier earns its noise
+// only when more than one owner is on screen at once.
+func (m *Model) HelpSections() []help.Section {
+	c := m.current()
+	if c == nil {
+		return nil
+	}
+	secs := componentHelpSections(c)
+	if m.focus < 0 || componentCapturing(c) {
+		return help.Sections(secs...)
+	}
+	return help.Sections(append(secs, m.verbSections(m.tree.Order[m.focus])...)...)
+}
+
+// verbSections groups the config-authored bindings for one source by
+// their `section:`, in first-appearance order so a config's own
+// ordering is what the reader sees.
+//
+// Shared by Help and HelpSections so the flat strip and the overlay
+// can't disagree about which keys exist.
+func (m *Model) verbSections(source string) []help.Section {
+	var order []string
+	byTitle := map[string][]key.Binding{}
+	add := func(title string, b key.Binding) {
+		if _, seen := byTitle[title]; !seen {
+			order = append(order, title)
+		}
+		byTitle[title] = append(byTitle[title], b)
+	}
+
 	if m.multi != nil {
 		for _, b := range m.bindings {
-			if b.Source != name {
+			if b.Source != source {
 				continue
 			}
 			glyph := b.Key
@@ -757,20 +813,56 @@ func (m *Model) Help() []key.Binding {
 			if label == "" {
 				label = "open"
 			}
-			out = append(out, key.NewBinding(key.WithKeys(b.Key), key.WithHelp(glyph, label)))
+			add(sectionOr(b.Section, helpSectionOpen),
+				key.NewBinding(key.WithKeys(b.Key), key.WithHelp(glyph, label)))
 		}
 	}
 	for _, a := range m.actions {
-		if a.Source != name {
+		if a.Source != source {
 			continue
 		}
 		label := a.Label
 		if label == "" {
 			label = "action"
 		}
-		out = append(out, key.NewBinding(key.WithKeys(a.Key), key.WithHelp(a.Key, label)))
+		add(sectionOr(a.Section, helpSectionActions),
+			key.NewBinding(key.WithKeys(a.Key), key.WithHelp(a.Key, label)))
+	}
+
+	out := make([]help.Section, 0, len(order))
+	for _, title := range order {
+		out = append(out, help.Group(title, byTitle[title]...))
 	}
 	return out
+}
+
+func sectionOr(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
+}
+
+// componentHelpSections asks the focused component to describe its own
+// bindings as groups. Every tuilib component implements it, so this is a
+// pure dispatch — the vocabulary lives upstream, which is what makes
+// "Navigate" mean the same thing in a list, a table and a tree.
+func componentHelpSections(c *build.Component) []help.Section {
+	switch c.Kind {
+	case build.KList:
+		return c.List.HelpSections()
+	case build.KTable:
+		return c.Table.HelpSections()
+	case build.KLogview:
+		return c.Logview.HelpSections()
+	case build.KTree:
+		return c.Tree.HelpSections()
+	case build.KInspector:
+		return c.Inspector.HelpSections()
+	case build.KTextview:
+		return c.Textview.HelpSections()
+	}
+	return nil
 }
 
 // SetTheme rebuilds each component against the new palette, preserving

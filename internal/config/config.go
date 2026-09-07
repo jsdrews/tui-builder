@@ -458,6 +458,10 @@ type Action struct {
 	// message, and Notice. Order: prompts → confirm (with substituted
 	// preview) → dispatch. Cancel from the form aborts the action.
 	Prompts []Prompt `yaml:"prompts,omitempty"`
+	// Section is the heading this action sits under in the key overlay
+	// (`?`). Defaults to "Actions". Same vocabulary as
+	// OnKeyBinding.Section.
+	Section string `yaml:"section,omitempty"`
 }
 
 // ThemeCycleKey returns the theme-cycle key with the default applied,
@@ -596,6 +600,17 @@ type OnKeyBinding struct {
 	// the strip shows the key + "open". Handy for kubectl-shape UIs
 	// that want "d → describe", "l → logs", etc.
 	Label string `yaml:"label,omitempty"`
+	// Section is the heading this binding sits under in the key overlay
+	// (`?`). Defaults to "Open".
+	//
+	// Headings name what the keys DO, never what holds them — that is
+	// tuilib's rule and the reason the overlay is worth opening. The
+	// component's own keys arrive already grouped that way (Navigate,
+	// Scroll, Filter, Search, Select, Sort, Expand, View); reuse one of
+	// those names to file a push alongside them, or invent one for a
+	// group of your own. Bindings sharing a name share a heading, in
+	// first-appearance order.
+	Section string `yaml:"section,omitempty"`
 }
 
 // Node is a tagged-union layout node. Exactly one of VStack / HStack /
