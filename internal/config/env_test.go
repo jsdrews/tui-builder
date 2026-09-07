@@ -132,7 +132,7 @@ func TestCheckEnvTreatsAppPromptsAsDeclared(t *testing.T) {
 	c := &Config{
 		App: App{
 			Title:   "test",
-			Prompts: []Prompt{{Key: "TEST_ENV_PROMPTED", Label: "value"}},
+			Prompts: []Prompt{{Key: "TEST_ENV_PROMPTED", Parameter: Parameter{Label: "value"}}},
 		},
 		Data: DataBlock{Sources: map[string]*Source{
 			"x": {Type: "http", URL: "https://x/${env.TEST_ENV_PROMPTED}/foo"},
@@ -228,11 +228,17 @@ func TestCollectEnvRefsWalksAllTemplatedFields(t *testing.T) {
 				InitialMessages: []string{"${env.WS_INIT}"},
 			},
 		}},
+		// The action's argv lives in the top-level registry now, so this
+		// also covers visitActions — a binding carries only the TUI-side
+		// templates (confirm / notice / bind).
+		Actions: map[string]*Action{
+			"a": {Run: []string{"${env.ACTION_ARG}"}},
+		},
 		TUI: TUIBlock{
 			Screen: Screen{
 				Title: "${env.SCREEN_TITLE}",
-				Actions: []Action{
-					{Run: []string{"${env.ACTION_ARG}"}, Confirm: "${env.CONFIRM_MSG}", Notice: "${env.NOTICE_MSG}"},
+				Actions: []ActionBinding{
+					{Key: "x", Action: "a", Confirm: "${env.CONFIRM_MSG}", Notice: "${env.NOTICE_MSG}"},
 				},
 			},
 			Components: map[string]*Component{

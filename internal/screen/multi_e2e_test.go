@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jsdrews/tuilib/pkg/app"
@@ -65,7 +66,7 @@ func TestKubeMultiEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +148,7 @@ func TestKubeMultiAllClustersDown(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,41 +156,58 @@ func TestKubeMultiAllClustersDown(t *testing.T) {
 		Root:       root,
 		Themes:     []theme.Theme{theme.Nord()},
 		SkipConfig: true,
+		// The failure sink under test. Without this the whole console
+		// feature is off and app.ErrorDetail's Body has nowhere to go.
+		OutputKey: key.NewBinding(key.WithKeys("o")),
 	})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 
-	queue := []tea.Cmd{m.Init()}
-	for steps := 0; len(queue) > 0 && steps < 200; steps++ {
-		c := queue[0]
-		queue = queue[1:]
-		if c == nil {
-			continue
-		}
-		msg := c()
-		if msg == nil {
-			continue
-		}
-		if bm, ok := msg.(tea.BatchMsg); ok {
-			for _, sub := range bm {
-				queue = append(queue, sub)
+	pump := func(seed tea.Cmd) {
+		queue := []tea.Cmd{seed}
+		for steps := 0; len(queue) > 0 && steps < 200; steps++ {
+			c := queue[0]
+			queue = queue[1:]
+			if c == nil {
+				continue
 			}
-			continue
+			msg := c()
+			if msg == nil {
+				continue
+			}
+			if bm, ok := msg.(tea.BatchMsg); ok {
+				for _, sub := range bm {
+					queue = append(queue, sub)
+				}
+				continue
+			}
+			var next tea.Cmd
+			m, next = m.Update(msg)
+			if next != nil {
+				queue = append(queue, next)
+			}
 		}
-		var next tea.Cmd
-		m, next = m.Update(msg)
-		if next != nil {
-			queue = append(queue, next)
-		}
+	}
+	pump(m.Init())
+
+	// Nothing blocks: the failed first fetch leaves an empty table and a
+	// one-line summary, not a modal. The full error is recoverable from
+	// the console, which is what the statusbar's unread badge advertises.
+	if v := m.View(); strings.Contains(v, "[ OK ]") {
+		t.Errorf("expected no blocking modal after an all-clusters-down fetch\n--- view ---\n%s", v)
 	}
 
+	// Open the console — the error should be there in full, summary line
+	// plus the merge detail that never fits in a footer.
+	var next tea.Cmd
+	m, next = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	pump(next)
+
 	view := m.View()
-	// The alert modal title should appear, naming the failed source.
 	if !strings.Contains(view, "pods_all: initial fetch failed") {
-		t.Errorf("expected alert modal naming the all-clusters-down failure\n--- view ---\n%s", view)
+		t.Errorf("expected the console to name the all-clusters-down failure\n--- view ---\n%s", view)
 	}
-	// And the error body should name the unreachable children.
 	if !strings.Contains(view, "merge") {
-		t.Errorf("expected merge error message in the alert body\n--- view ---\n%s", view)
+		t.Errorf("expected the merge error detail in the console body\n--- view ---\n%s", view)
 	}
 }
 

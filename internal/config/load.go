@@ -24,6 +24,11 @@ func Load(path string) (*Config, error) {
 	if err := ExpandSourcesPipe(c.Data.Sources); err != nil {
 		return nil, fmt.Errorf("expand %s: %w", path, err)
 	}
+	// Hoist inline action declarations into the top-level registry, so
+	// validation (and everything after it) sees exactly one shape.
+	if err := hoistInlineActions(&c); err != nil {
+		return nil, fmt.Errorf("expand %s: %w", path, err)
+	}
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("validate %s: %w", path, err)
 	}
@@ -69,7 +74,12 @@ func (c *Config) Validate() error {
 	if err := validateJoinLookups(c.Data.Sources); err != nil {
 		return err
 	}
-	// 4. Component bindings: `source:` must name an entry.
+	// 4. Action definitions (post-hoist, so inline declarations are
+	//    covered too).
+	if err := validateActionDefs(c.Actions); err != nil {
+		return err
+	}
+	// 5. Component bindings: `source:` must name an entry.
 	for name, comp := range c.TUI.Components {
 		if comp == nil {
 			return fmt.Errorf("tui.components.%s: empty definition", name)
@@ -118,7 +128,7 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("tui.components.%s: referenced %d times in tui.screen.layout — each component may be placed only once per screen", name, n)
 			}
 		}
-		if err := validateActions(c.TUI.Screen.Actions, refs, c.TUI.Components, "tui.screen", c.App.OutputConsoleKey(), c.App.ThemeCycleKey()); err != nil {
+		if err := validateActionBindings(c.TUI.Screen.Actions, refs, c.TUI.Components, c.Actions, "tui.screen", c.App.OutputConsoleKey(), c.App.ThemeCycleKey()); err != nil {
 			return err
 		}
 		if err := validateOnCursor(refs, c.TUI.Components, "tui.screen"); err != nil {
@@ -174,7 +184,7 @@ func (c *Config) Validate() error {
 			}
 			seenKeys[dedupKey] = i
 		}
-		if err := validateActions(s.Actions, refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name), c.App.OutputConsoleKey(), c.App.ThemeCycleKey()); err != nil {
+		if err := validateActionBindings(s.Actions, refs, c.TUI.Components, c.Actions, fmt.Sprintf("tui.screens.%s", name), c.App.OutputConsoleKey(), c.App.ThemeCycleKey()); err != nil {
 			return err
 		}
 		if err := validateOnCursor(refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name)); err != nil {
@@ -223,64 +233,6 @@ func validateOnCursor(refs map[string]int, components map[string]*Component, pat
 		}
 		if comp.Source == "" {
 			return fmt.Errorf("%s.components.%s.on_cursor: target component has no `source:` — nothing to rebind on cursor moves", path, name)
-		}
-	}
-	return nil
-}
-
-func validateActions(actions []Action, refs map[string]int, components map[string]*Component, path, outputKey, themeKey string) error {
-	for i, a := range actions {
-		if a.Key == "" {
-			return fmt.Errorf("%s.actions[%d]: key is required", path, i)
-		}
-		// The console key is claimed by the app shell, so a component
-		// never sees it. Binding an action to it would look right in the
-		// config and do nothing at runtime.
-		if outputKey != "" && a.Key == outputKey {
-			return fmt.Errorf("%s.actions[%d]: key %q is the output console key (app.output_key) — pick another, or set app.output_key to disable the console", path, i, a.Key)
-		}
-		if themeKey != "" && a.Key == themeKey {
-			return fmt.Errorf("%s.actions[%d]: key %q is the theme-cycle key (app.theme_key) — pick another, or set app.theme_key to \"-\" to pin the palette", path, i, a.Key)
-		}
-		if a.Source == "" {
-			return fmt.Errorf("%s.actions[%d]: source is required", path, i)
-		}
-		if len(a.Run) == 0 {
-			return fmt.Errorf("%s.actions[%d]: run is required (non-empty argv)", path, i)
-		}
-		if refs[a.Source] == 0 {
-			return fmt.Errorf("%s.actions[%d]: source %q not used in this screen's layout", path, i, a.Source)
-		}
-		src := components[a.Source]
-		if src.Type != "list" && src.Type != "table" {
-			return fmt.Errorf("%s.actions[%d]: source %q must be a list or table (got %s)", path, i, a.Source, src.Type)
-		}
-		if err := validatePrompts(a.Prompts, fmt.Sprintf("%s.actions[%d].prompts", path, i)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// validatePrompts checks one list of form prompts — app.prompts and an
-// action's prompts: share the shape, so they share the rules.
-//
-// An unknown type is an error rather than a fall-through to text. It used
-// to be harmless (a typo'd select rendered as a text box), but `password`
-// makes it dangerous: `passwrod:` silently renders the token in the clear,
-// which is the one thing the field exists to prevent.
-func validatePrompts(prompts []Prompt, path string) error {
-	for i, p := range prompts {
-		if p.Key == "" {
-			return fmt.Errorf("%s[%d]: key is required", path, i)
-		}
-		switch p.Type {
-		case "", "text", "password", "select", "confirm":
-		default:
-			return fmt.Errorf("%s[%d]: unknown type %q (want text|password|select|confirm)", path, i, p.Type)
-		}
-		if p.Type == "select" && len(p.Options) == 0 {
-			return fmt.Errorf("%s[%d]: select prompt needs options", path, i)
 		}
 	}
 	return nil
@@ -375,6 +327,35 @@ func validateChrome(a *App) error {
 	}
 	if v := a.Borders.SlotBrackets; v != "" && !slices.Contains(SlotBracketNames, v) {
 		return fmt.Errorf("app.borders.slot_brackets: unknown style %q (want %s)", v, strings.Join(SlotBracketNames, "|"))
+	}
+	return nil
+}
+
+// validatePrompts checks the boot-time form (`app.prompts:`).
+//
+// A prompt is a Key plus an inlined Parameter, so the rules are
+// Parameter's: the type is the DATA type and the widget follows from it
+// (bool renders a toggle, Options a select, everything else a text
+// input). An unknown type is an error rather than a fall-through,
+// because the fall-through is a plain text box — which for a `mask:`
+// field would put a token on screen in the clear, the one thing that
+// field exists to prevent.
+func validatePrompts(prompts []Prompt, path string) error {
+	for i, p := range prompts {
+		if p.Key == "" {
+			return fmt.Errorf("%s[%d]: key is required", path, i)
+		}
+		switch p.Type {
+		case "", "string", "int", "bool", "duration":
+		default:
+			return fmt.Errorf("%s[%d]: unknown type %q (want string|int|bool|duration — the data type, not the widget: `options:` makes it a select and `mask: true` masks it)", path, i, p.Type)
+		}
+		if p.Required && p.Default != "" {
+			return fmt.Errorf("%s[%d]: `required: true` and `default:` are mutually exclusive — defaults imply optional", path, i)
+		}
+		if p.Mask && len(p.Options) > 0 {
+			return fmt.Errorf("%s[%d]: `mask: true` and `options:` conflict — a select shows every choice on screen, so there is nothing to mask", path, i)
+		}
 	}
 	return nil
 }

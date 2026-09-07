@@ -104,7 +104,7 @@ func newTestModel(t *testing.T, c *cfg.Config) *Model {
 	if err := c.Validate(); err != nil {
 		t.Fatalf("config validate: %v", err)
 	}
-	m, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, theme.Nord())
+	m, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
 	if err != nil {
 		t.Fatalf("build model: %v", err)
 	}
@@ -615,7 +615,7 @@ func TestOnCursorFsExample_YAML(t *testing.T) {
 	if err != nil {
 		t.Skipf("skip: cannot load fs example: %v", err)
 	}
-	m, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, theme.Nord())
+	m, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
 	if err != nil {
 		t.Fatalf("build model from fs example: %v", err)
 	}

@@ -8,8 +8,9 @@ import (
 	cfg "github.com/jsdrews/tui-builder/internal/config"
 )
 
-// helpModel builds a one-table screen with the given actions.
-func helpModel(t *testing.T, actions []cfg.Action) *Model {
+// helpModel builds a one-table screen with the given action bindings,
+// each resolved against a one-entry registry.
+func helpModel(t *testing.T, bindings []cfg.ActionBinding) *Model {
 	t.Helper()
 	comps := map[string]*cfg.Component{
 		"pods": {
@@ -21,8 +22,12 @@ func helpModel(t *testing.T, actions []cfg.Action) *Model {
 	sources := map[string]*cfg.Source{
 		"pods": cfg.NewEntry(&cfg.Source{Type: "static", Data: []any{}}),
 	}
-	sc := &cfg.Screen{Title: "Pods", Layout: cfg.Node{Component: "pods"}, Actions: actions}
-	m, err := New(sc, comps, sources, theme.Nord())
+	registry := map[string]*cfg.Action{}
+	for _, b := range bindings {
+		registry[b.Action] = &cfg.Action{Run: []string{"echo", b.Action}}
+	}
+	sc := &cfg.Screen{Title: "Pods", Layout: cfg.Node{Component: "pods"}, Actions: bindings}
+	m, err := New(sc, comps, sources, registry, theme.Nord())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -77,7 +82,7 @@ func TestHelpSectionsOmitUnconfiguredGroups(t *testing.T) {
 	sources := map[string]*cfg.Source{
 		"pods": cfg.NewEntry(&cfg.Source{Type: "static", Data: []any{}}),
 	}
-	m, err := New(&cfg.Screen{Title: "Pods", Layout: cfg.Node{Component: "pods"}}, comps, sources, theme.Nord())
+	m, err := New(&cfg.Screen{Title: "Pods", Layout: cfg.Node{Component: "pods"}}, comps, sources, nil, theme.Nord())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -91,8 +96,8 @@ func TestHelpSectionsOmitUnconfiguredGroups(t *testing.T) {
 
 // Config-authored verbs get their own heading, defaulting to "Actions".
 func TestActionsGetTheirOwnSection(t *testing.T) {
-	m := helpModel(t, []cfg.Action{
-		{Key: "d", Source: "pods", Label: "describe", Run: []string{"echo", "d"}},
+	m := helpModel(t, []cfg.ActionBinding{
+		{Key: "d", Action: "describe", Label: "describe"},
 	})
 	got := titles(t, m)
 	if !has(got, "Actions") {
@@ -112,8 +117,8 @@ func TestActionsGetTheirOwnSection(t *testing.T) {
 // `section:` overrides the default heading, so a config can file a verb
 // next to the component keys it belongs with.
 func TestActionSectionOverridesTheDefault(t *testing.T) {
-	m := helpModel(t, []cfg.Action{
-		{Key: "d", Source: "pods", Label: "describe", Section: "Inspect", Run: []string{"echo", "d"}},
+	m := helpModel(t, []cfg.ActionBinding{
+		{Key: "d", Action: "describe", Label: "describe", Section: "Inspect"},
 	})
 	got := titles(t, m)
 	if !has(got, "Inspect") {
@@ -127,9 +132,9 @@ func TestActionSectionOverridesTheDefault(t *testing.T) {
 // Two verbs naming the same section share one heading, in the order the
 // config lists them.
 func TestActionsShareASection(t *testing.T) {
-	m := helpModel(t, []cfg.Action{
-		{Key: "d", Source: "pods", Label: "describe", Section: "Inspect", Run: []string{"echo", "d"}},
-		{Key: "l", Source: "pods", Label: "logs", Section: "Inspect", Run: []string{"echo", "l"}},
+	m := helpModel(t, []cfg.ActionBinding{
+		{Key: "d", Action: "describe", Label: "describe", Section: "Inspect"},
+		{Key: "l", Action: "logs", Label: "logs", Section: "Inspect"},
 	})
 	for _, s := range m.HelpSections() {
 		if s.Title != "Inspect" {
@@ -149,8 +154,8 @@ func TestActionsShareASection(t *testing.T) {
 // The flat strip and the grouped overlay must agree about which keys
 // exist — they share verbSections precisely so they can't drift.
 func TestHelpAndHelpSectionsAgree(t *testing.T) {
-	m := helpModel(t, []cfg.Action{
-		{Key: "d", Source: "pods", Label: "describe", Run: []string{"echo", "d"}},
+	m := helpModel(t, []cfg.ActionBinding{
+		{Key: "d", Action: "describe", Label: "describe"},
 	})
 	flat := len(m.Help())
 	grouped := 0

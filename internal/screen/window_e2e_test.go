@@ -118,7 +118,7 @@ func newWindowHarness(t *testing.T, srv *windowStub, pageSize int) *windowHarnes
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,8 +431,15 @@ func TestWindowFetchErrorSurfaces(t *testing.T) {
 	h := newWindowHarness(t, srv, 20)
 	h.drain(h.model.Init())
 
-	if h.root.alertModal == nil {
-		t.Error("no alert modal after the first window fetch failed — an empty table gives the user no clue why")
+	// This used to assert an alert modal. The action work replaced that
+	// path with the output console, so the first failure now goes out as
+	// app.ErrorDetail: the summary lands in the statusbar and the body
+	// stays readable behind the console's unread badge. Assert on what
+	// the user sees rather than on which modal field is non-nil.
+	// Match a substring that survives the statusbar's truncation: at
+	// this width the slot renders "books: window fetch fail".
+	if got := h.view(); !strings.Contains(got, "window fetch") {
+		t.Error("nothing surfaced after the first window fetch failed — an empty table gives the user no clue why")
 	}
 }
 
@@ -488,7 +495,7 @@ printf '{"total":%s,"rows":[%s]}' "$TOTAL" "$ROWS"
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
 	}
