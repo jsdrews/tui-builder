@@ -383,6 +383,38 @@ components:
     initial_query:   <string> # logview/tree — pre-populate search query
     initial_cursor:  <int>    # list, table, tree
 
+    # list / table / tree — multi-select
+    markable: <bool>          # adds a mark gutter and binds x (toggle),
+                              # X (extend range from the last mark),
+                              # A (all), D (none). list, table, tree only.
+    mark_key: <dot-path>      # REQUIRED on a source-bound markable table.
+                              # Read from the ORIGINAL source item, not the
+                              # rendered cells, so the identity can be a
+                              # field the table never displays (metadata.uid,
+                              # id, a self-link) — usually the right one.
+                              #
+                              # Not defaulted to the first column on purpose.
+                              # A non-unique one (Name repeating across
+                              # namespaces) collapses two rows onto one mark;
+                              # a volatile one (AGE, STATUS, RESTARTS) changes
+                              # on the next poll and the marks evaporate.
+                              # Both fail silently and data-dependently.
+                              #
+                              # Not accepted on list (keys on its item
+                              # string), tree (keys on the node path), or a
+                              # static table (rows are fixed at load, so
+                              # position is the identity).
+                              #
+                              # Distinct from row_key below, which changes how
+                              # a STREAMING table inserts rows.
+                              #
+                              # Marks are held by key, never index — so they
+                              # survive a poll that reorders rows, and they
+                              # survive filtering (a key doesn't care whether
+                              # its row is on screen).
+                              # `markable` + a windowed source is a load error:
+                              # a window carries rows without keys.
+
     # list
     items: [string, ...]
 
@@ -666,6 +698,7 @@ initial: <screen-name>         # required when `screens:` is set
 | `examples/layout.yaml` | Nested layouts, mixed flex weights |
 | `examples/themes.yaml` | Built-in theme picker reference |
 | `examples/chrome.yaml` | `app.glyphs` + `app.borders` — ASCII-safe glyph vocabulary, rounded panes, a double-bordered overlay and `slot_brackets: corners`. Press `t` to confirm the chrome survives a palette swap |
+| `examples/marking.yaml` | **Multi-select** (`markable:`): a pods table keyed on a `uid` column it never renders, beside a markable list and tree. The fixture reverses its row order every 3s poll — mark a row with `x` and watch the mark stay on the pod, not the slot |
 | `examples/multi.yaml` | Multi-screen drilldown (Regions → Cities → Detail) with breadcrumbing and `${selection}` substitution |
 | `examples/on_key_push.yaml` | `on_key:` block — GitHub users list where `key: enter` pushes to repos and `key: s` pushes to starred, both binding `${selection}`; the repos table then pushes a repo-detail inspector, binding `${selection.Repo}` |
 | `examples/http_countries.yaml` | Table backed by restcountries.com REST API; `refresh: 5m` polling; per-column `value:` dot-paths |

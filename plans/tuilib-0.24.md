@@ -242,7 +242,7 @@ native — but it can trail the first cut.
 
 ---
 
-## Workstream 2 — multi-select
+## Workstream 2 — multi-select (done)
 
 ### Row keys
 
@@ -314,6 +314,33 @@ set resolved through that map, or the focused row when nothing is
 marked (mirroring tuilib's `Selection()` contract, and for the same
 reason — a hand-written branch that someone forgets is how a verb
 quietly acts on one row when the user marked six).
+
+### What landed, and three corrections
+
+- **`mark_key:`, not `key:`.** `Component` already has `row_key:`
+  (streaming keyed-upsert). Two adjacent fields called `key` and
+  `row_key`, meaning different things, is how an author sets the wrong
+  one. `mark_key:` also pairs visibly with `markable:`. Reusing
+  `row_key:` itself was rejected: on a streaming table it *also* flips
+  insert mode from ring-buffer to keyed-upsert, so turning marking on
+  would silently change how rows arrive.
+- **Static components need the keyed setters too.** `Options.Items` and
+  `Options.Rows` seed cells but leave the key slices nil, so a static
+  markable list or table would draw a gutter that never responds.
+  `buildList` / `buildTable` call `SetKeyedItems` / `SetKeyedRows` after
+  `New`. A static table keys on row position — the rows are fixed at
+  load, so position cannot drift.
+- **Streaming tables mark fine; no restriction needed.** The plan worried
+  about the `SetRows` path. Routing it through `SetKeyedRows` covers both
+  stream modes: keyed-upsert rows are stable by construction, and
+  ring-buffer rows slide down as events arrive while the mark travels
+  with its row. When a marked row falls off the end, tuilib simply stops
+  reporting it — `Marks()` returns only keys the table still holds.
+
+One thing the plan assumed that isn't quite true: `Rebuild` does **not**
+re-deliver a source-bound table's rows, so right after a theme swap
+`Marks()` reports nothing. The mark *set* is carried by `SetMarks` and
+reattaches on the next fetch; `MarkCount()` is what survives in between.
 
 ### Fan-out semantics
 
@@ -481,8 +508,9 @@ and closes a real hole.
    `tryAction` and the screen's confirm/dispatch/alert path; rewrite the
    `examples/` configs off direct keys. Prompts via `Do` + form +
    `runner.GoWith`.
-5. **Multi-select.** `markable:` + `key:`, keyed setters, the key→row
-   map, `Multi` fan-out, validator constraints.
+5. ~~**Multi-select.**~~ **Done**, minus the fan-out half, which is
+   actions. `markable:` + `mark_key:`, keyed setters on all three data
+   paths, the key→row map, validator constraints.
 6. **Right-click retargeting.** Small, follows naturally from 4.
 7. ~~**Glyphs and border shapes.**~~ **Done** — independent of 3-6, so
    it landed while actions are parked.
@@ -503,10 +531,16 @@ without them, but its fan-out half and most of its payoff aren't.
   both stream into the console; interactive still suspends the
   alt-screen; a bare `d` press no longer fires the action bound to `d`
   (menu-only), and does reach the focused component instead.
-- **Marking:** marks survive a poll that reorders rows; marks survive a
-  filter; marks survive a theme rebuild; `markable:` + `window:` is a
-  load error; a non-`Multi` action is disabled under a multi-selection.
+- ~~**Marking:**~~ **Done.** Marks survive a poll that reorders rows
+  (and resolve to the row's *refreshed* cells); marks survive a filter;
+  the key set survives a theme rebuild and reattaches on the next fetch;
+  `markable:` + `window:` is a load error, as are the unsupported kinds
+  and every `mark_key:` misuse. Plus: static list and table are markable
+  (their keyed setters run at build time, since `Options.Items` /
+  `Options.Rows` seed cells but no keys — a detail the plan missed);
+  selections are ANSI-stripped; a non-markable component is untouched.
 - **Fan-out:** N marked rows produce N runs with distinct `RunKey`s.
+  *Blocked on actions.*
 - ~~**Glyphs/borders:**~~ **Done.** A partial `glyphs:` block resolves the
   rest from defaults; unknown border name is a load error. Plus: the
   overrides land on every palette (not just the initial one); every one

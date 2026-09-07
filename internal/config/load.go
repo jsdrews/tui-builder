@@ -86,6 +86,11 @@ func (c *Config) Validate() error {
 				return err
 			}
 		}
+		// After bindWindowed: the windowed check below needs the flag
+		// it sets.
+		if err := validateMarkable(comp, "tui.components."+name); err != nil {
+			return err
+		}
 	}
 	// 5. Windowed sources can't be fed through operators — see
 	//    validateWindowedUpstreams.
@@ -274,6 +279,49 @@ func validatePrompts(prompts []Prompt, path string) error {
 		if p.Type == "select" && len(p.Options) == 0 {
 			return fmt.Errorf("%s[%d]: select prompt needs options", path, i)
 		}
+	}
+	return nil
+}
+
+// validateMarkable checks `markable:` and `mark_key:`.
+//
+// Every rule here exists because the alternative is an affordance that
+// renders and silently does nothing — a mark gutter you can move a
+// cursor through, press x on, and watch not respond. tuilib holds marks
+// by key, so a component that can't supply keys can't mark, and the
+// only honest place to say so is load time.
+//
+// Runs after bindWindowed, which is what sets Windowed.
+func validateMarkable(c *Component, path string) error {
+	if !c.Markable {
+		if len(c.MarkKey) > 0 {
+			return fmt.Errorf("%s: `mark_key:` set without `markable: true` — it does nothing on its own", path)
+		}
+		return nil
+	}
+	switch c.Type {
+	case "list", "table", "tree":
+	default:
+		return fmt.Errorf("%s: `markable: true` is not supported on %s (want list|table|tree) — no verb acts on a set of its rows and tuilib draws no mark gutter there", path, c.Type)
+	}
+	if c.Type != "table" {
+		if len(c.MarkKey) > 0 {
+			return fmt.Errorf("%s: `mark_key:` is not accepted on %s — a list keys on its item string and a tree on a node's path", path, c.Type)
+		}
+		return nil
+	}
+	// Tables from here down.
+	if c.Windowed {
+		return fmt.Errorf("%s: `markable: true` and a windowed source are mutually exclusive — a window holds one page of rows without keys, so marking there is inert", path)
+	}
+	if c.Source == "" {
+		if len(c.MarkKey) > 0 {
+			return fmt.Errorf("%s: `mark_key:` is not accepted on a table with static `rows:` — the rows are fixed at load, so their position is their identity", path)
+		}
+		return nil
+	}
+	if len(c.MarkKey) == 0 || c.MarkKey[0] == "" {
+		return fmt.Errorf("%s: `markable: true` on a source-bound table needs `mark_key:` (dot-path to a stable per-row identity, e.g. metadata.uid). It is not defaulted to the first column on purpose: a non-unique one collapses two rows onto one mark, and a volatile one (AGE, STATUS) loses the marks on the next poll", path)
 	}
 	return nil
 }

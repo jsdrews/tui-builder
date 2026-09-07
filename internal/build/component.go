@@ -54,6 +54,12 @@ type Component struct {
 	// (defaulted to 100 for streaming bindings) on every append. nil
 	// for non-streaming tables and non-table kinds.
 	StreamRows []any
+
+	// RowsByKey resolves a markable table's mark key back to the row it
+	// names. Rebuilt on every data application, alongside the rows
+	// themselves, so it can't describe a set the table no longer holds.
+	// nil unless Cfg.Markable is set on a table.
+	RowsByKey map[string]Selection
 }
 
 // NewComponent builds a Component from a config leaf and the active theme.
@@ -87,7 +93,14 @@ func (c *Component) Rebuild(th theme.Theme) {
 	switch c.Kind {
 	case KList:
 		cursor, value := c.List.Cursor(), c.List.Value()
+		marks := c.List.Marks()
 		m := buildList(c.Cfg, th)
+		// Marks are a set of keys, so they carry independently of the
+		// rows themselves: reinstate them now and they light up again
+		// when the next fetch reinstalls the keys they name.
+		if len(marks) > 0 {
+			m.SetMarks(marks)
+		}
 		if value != "" {
 			m.SetValue(value)
 		}
@@ -99,6 +112,7 @@ func (c *Component) Rebuild(th theme.Theme) {
 		sortCol, sortDesc := c.Table.SortColumn(), c.Table.SortDescending()
 		off, _, total := c.Table.Window()
 		rows := c.Table.Rows()
+		marks := c.Table.Marks()
 		m := buildTable(c.Cfg, th)
 		if c.Cfg.Windowed {
 			// The fresh table holds nothing, and nothing else will
@@ -106,6 +120,9 @@ func (c *Component) Rebuild(th theme.Theme) {
 			// user scrolls or filters, and a theme change is neither.
 			// Reinstall it so a rebuild doesn't blank the page.
 			m.SetWindow(rows, off, total)
+		}
+		if len(marks) > 0 {
+			m.SetMarks(marks)
 		}
 		m.SetValue(value)
 		m.SetCursor(cursor)
@@ -127,7 +144,11 @@ func (c *Component) Rebuild(th theme.Theme) {
 		cursor := c.Tree.Cursor()
 		query := c.Tree.Query()
 		filterMode := c.Tree.FilterMode()
+		marks := c.Tree.Marks()
 		m := buildTree(c.Cfg, th)
+		if len(marks) > 0 {
+			m.SetMarks(marks)
+		}
 		if query != "" {
 			m.SetQuery(query)
 		}
@@ -171,6 +192,7 @@ func buildList(c *cfg.Component, th theme.Theme) list.Model {
 		}
 	}
 	opts.Filterable = c.Filterable
+	opts.Markable = c.Markable
 	if c.FilterPlaceholder != "" {
 		opts.Filter.Placeholder = c.FilterPlaceholder
 	}
@@ -189,6 +211,12 @@ func buildList(c *cfg.Component, th theme.Theme) list.Model {
 		}
 	}
 	m := list.New(opts)
+	// Options.Items seeds display strings but no keys, and marks are
+	// held by key — so a static markable list has to go back through
+	// the keyed setter or its gutter would never respond.
+	if c.Markable && c.Source == "" {
+		m.SetKeyedItems(keyedItems(opts.Items))
+	}
 	if c.InitialFilter != "" {
 		m.SetValue(c.InitialFilter)
 	}
@@ -204,6 +232,7 @@ func buildTable(c *cfg.Component, th theme.Theme) table.Model {
 	opts := th.Table()
 	opts.Title = c.Title
 	opts.Filterable = c.Filterable
+	opts.Markable = c.Markable
 	if c.FilterPlaceholder != "" {
 		opts.Filter.Placeholder = c.FilterPlaceholder
 	}
@@ -278,6 +307,12 @@ func buildTable(c *cfg.Component, th theme.Theme) table.Model {
 		}
 	}
 	m := table.New(opts)
+	// Same reason as buildList: Options.Rows carries cells but no
+	// keys. A static table's rows are fixed at load, so position is a
+	// legitimate identity — nothing repolls them into a new order.
+	if c.Markable && c.Source == "" {
+		m.SetKeyedRows(indexKeyedRows(opts.Rows))
+	}
 	if c.InitialFilter != "" {
 		m.SetValue(c.InitialFilter)
 	}
@@ -424,6 +459,7 @@ func buildTree(c *cfg.Component, th theme.Theme) tree.Model {
 	opts := th.Tree()
 	opts.Title = c.Title
 	opts.Searchable = c.Searchable
+	opts.Markable = c.Markable
 	opts.InitialDepth = c.InitialDepth
 	if c.Source != "" {
 		// Source-bound trees start empty until the first fetch fills

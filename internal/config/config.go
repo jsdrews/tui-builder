@@ -660,6 +660,45 @@ type Component struct {
 	// ansi.CellColor.
 	ColorRules []ColorRule `yaml:"color_rules,omitempty"`
 
+	// Markable turns on multi-select: the component grows a mark
+	// gutter and binds x / X / A / D (toggle, range-extend from the
+	// last mark, all, none). Supported on list, table and tree; a
+	// load error anywhere else, because tuilib ships no marking there
+	// and a mark key that quietly did nothing would read as broken.
+	//
+	// Marks are held by KEY, never by index, so a poll that reorders
+	// rows between marking and acting can't slide the selection onto
+	// neighbours. Where that key comes from depends on the kind — see
+	// MarkKey.
+	Markable bool `yaml:"markable,omitempty"`
+	// MarkKey is the dot-path to a stable per-row identity, and is
+	// REQUIRED on a source-bound markable table. It is read from the
+	// original source item, not the rendered cells, so the identity
+	// can be a field the table never displays (`metadata.uid`, `id`,
+	// a self-link) — usually the right one.
+	//
+	// It is deliberately not defaulted to the first column. That
+	// fails two ways, both silent and data-dependent: a non-unique
+	// first column (pods named the same across namespaces) collapses
+	// two rows onto one key, so marking one marks both; and a
+	// volatile one (AGE, STATUS, RESTARTS) changes on the next poll,
+	// so the user's marks evaporate. tuilib protects against index
+	// drift; nothing can protect against a key that isn't stable.
+	// One load error the author fixes once beats a selection that
+	// goes wrong at 2am.
+	//
+	// Not accepted on the kinds that already have an identity: a
+	// list keys on its item string, a tree on a node's path (the
+	// same path it uses for expansion state), and a static table on
+	// the row's position, which cannot drift because nothing
+	// repolls it. Setting it there means the author expected it to
+	// do something.
+	//
+	// Distinct from RowKey below, which changes how a STREAMING
+	// table inserts rows. They can differ, and setting one must not
+	// silently do the other's job.
+	MarkKey Path `yaml:"mark_key,omitempty"`
+
 	// list fields
 	Items []string `yaml:"items,omitempty"`
 
