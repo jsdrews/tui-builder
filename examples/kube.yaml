@@ -39,7 +39,7 @@ data:
       timeout: 10s
 
     # pods takes one required parameter (namespace). At push time, the
-    # parent screen's `bind:` block (see screens.namespaces.on_key)
+    # parent screen's `bind:` block (see screens.namespaces.actions)
     # resolves ${selection} → the picked namespace name and feeds it
     # into ${params.namespace}. From wrangl: `--param namespace=default`.
     pods:

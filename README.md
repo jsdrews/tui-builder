@@ -149,7 +149,7 @@ column, `q` quits, and `o` opens the output console.
 
 The mouse works too: click a pane to focus it, click a row to move its
 cursor, scroll with the wheel, and double-click a row for `enter` — the
-same `on_key: {key: enter}` push or `enter` action the keyboard fires.
+same action the keyboard fires. Right-click opens the action menu.
 Mouse reporting takes over the terminal's own click-drag text selection —
 hold `shift` (or `alt` in iTerm2) while dragging to select text for a copy.
 
@@ -326,8 +326,8 @@ tui:
   screens:
     pods:
       layout: {component: pods_table}
-      on_key:
-        - {source: pods_table, push: detail, key: enter}
+      actions:
+        - {key: enter, name: open_detail, push: detail, from: pods_table}
     detail:
       title: ${selection.Name}
       layout: {component: pod_inspector}
@@ -369,8 +369,20 @@ tui:
 
 An action never mentions `${selection.*}` — that keeps it reusable from
 any screen. `from:` is required exactly when a template reads a
-selection and rejected otherwise, so an action needing no row simply
-omits it and its key fires from anywhere on the screen.
+selection (or the action is a push) and rejected otherwise, so a verb
+needing no row simply omits it.
+
+**Press `a` for the menu.** That is where verbs live: it lists every
+action the screen has, with a reason next to anything unavailable, and
+owns the confirm modal, cancellation, and the console entry. `key:` is
+optional — `enter` still fires directly (double-click is its mouse
+spelling), any other key is a shortcut that works *while the menu is
+open*, and a binding with no key at all is menu-only. That last one is
+the point: the alphabet stops capping how many verbs a screen can have.
+
+**Pushes are actions too.** `push: <screen>` opens another screen; the
+binding's `bind:` fills the destination's `parameters:` rather than the
+action's inputs. There is one registry, not a separate `on_key:` block.
 
 Actions are also addressable from the CLI, which makes them testable
 without a TTY:
@@ -482,7 +494,8 @@ via `task examples`.
 | `examples/stream_trades_table.yaml` | `websocket` source → live table (`max_rows: 100` ring buffer of bitstamp BTC/USD trades) |
 | `examples/stream_l1.yaml` | L1 ticker JOINED from two Binance.us streams (`bookTicker` for fast bid/ask + `@ticker` for last price + 24h stats), merged by symbol via `row_key: data.s`. Deep-merge composes both sources' fields onto each row |
 | `examples/prompts_boot.yaml` | Boot-time form collects params (`app.prompts`) before the main screen renders; values become env vars, feed into the source URL via `${env.USER}`. Includes a `mask: true` field for a token |
-| `examples/action_prompts.yaml` | Action `inputs:` the binding doesn't fill are collected in a generated form; `${inputs.<key>}` substitutes into run argv + confirm message at fire time |
+| `examples/action_prompts.yaml` | The action menu (`a`): one verb on `enter`, one as a menu shortcut, one with no key at all. Unbound `inputs:` open a generated form. All `echo`, so it runs anywhere |
+| `examples/push_actions.yaml` | Pushes as actions — `enter` drills GitHub users → repos; a keyless verb opens starred from the menu |
 | `examples/action_http_argocd.yaml` | `type: http` actions against the Argo CD API — bearer auth, `success:` for a 409-is-fine API, `error_message: ${body.message}` |
 | `examples/kube.yaml` | Single-cluster kube: namespaces → pods → pod detail + logs |
 | `examples/kube_multi.yaml` | Multi-cluster kube: 3 clusters merged into one table |

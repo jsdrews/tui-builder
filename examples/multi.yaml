@@ -8,7 +8,7 @@
 # Breadcrumb fills as you push:    My-App › Regions › Europe › London
 # esc pops back; q at the root quits.
 #
-# `on_key:` on a screen wires a keystroke on <source> to push <target>.
+# A push action wires a keystroke on <from> to open <push>.
 # The source component's selection is captured and substituted into the
 # target screen's config as ${selection} (and ${selection.COLNAME} or
 # ${selection.N} for table sources).
