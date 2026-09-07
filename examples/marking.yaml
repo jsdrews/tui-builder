@@ -124,6 +124,11 @@ tui:
       - action: touch
         label:  touch
         from:   pods
+        # One confirm gates the whole fan-out, not one per row. The
+        # count is appended automatically — the author's template
+        # resolved against a single row, so alone it would name one pod
+        # while touching three.
+        confirm: "Touch ${selection.Name}?"
         bind:   {name: "${selection.Name}"}
       - action: count
         label:  count

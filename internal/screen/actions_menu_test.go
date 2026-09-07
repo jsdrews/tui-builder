@@ -369,7 +369,7 @@ func TestFanOutConfirmStatesTheArity(t *testing.T) {
 
 	markRows(t, m, "web")
 	a, _ := find(m.Actions(), "restart")
-	if strings.Contains(a.Confirm, "Runs") {
+	if strings.Contains(a.Confirm, "rows)") {
 		t.Errorf("a single target needs no arity note, got %q", a.Confirm)
 	}
 
@@ -378,7 +378,48 @@ func TestFanOutConfirmStatesTheArity(t *testing.T) {
 	if !strings.Contains(a.Confirm, "Restart ") {
 		t.Errorf("the author's wording should survive, got %q", a.Confirm)
 	}
-	if !strings.Contains(a.Confirm, "Runs 3 times") {
+	if !strings.Contains(a.Confirm, "(3 rows)") {
 		t.Errorf("confirm should state the arity, got %q", a.Confirm)
+	}
+}
+
+// The shell centres its confirm at a fixed 52x7 and does not wrap, so a
+// long message loses its tail — and the tail of a confirm is where
+// "cannot be undone" lives.
+func TestShellConfirmIsWrappedToFit(t *testing.T) {
+	long := "Delete pod nginx-abc-12345 in namespace production? This cannot be undone."
+	got := fitShellConfirm(long)
+	for _, ln := range strings.Split(got, "\n") {
+		if len(ln) > shellConfirmWidth {
+			t.Errorf("line wider than the modal: %q", ln)
+		}
+	}
+	if !strings.Contains(got, "cannot be undone") {
+		t.Errorf("the tail is the part that matters; it was lost: %q", got)
+	}
+	if n := len(strings.Split(got, "\n")); n > shellConfirmLines {
+		t.Errorf("%d lines, modal fits %d", n, shellConfirmLines)
+	}
+}
+
+// Something genuinely too long says so rather than stopping mid-word.
+func TestOverlongConfirmSaysItWasTruncated(t *testing.T) {
+	got := fitShellConfirm(strings.Repeat("word ", 80))
+	if n := len(strings.Split(got, "\n")); n > shellConfirmLines {
+		t.Errorf("%d lines, modal fits %d", n, shellConfirmLines)
+	}
+	if !strings.Contains(got, "truncated") {
+		t.Errorf("should admit the truncation, got %q", got)
+	}
+}
+
+// The real kube.yaml delete confirm, at its longest realistic
+// substitution, must survive the shell modal intact.
+func TestKubeDeleteConfirmFits(t *testing.T) {
+	msg := "Delete pod nginx-deployment-7c64f5d in kube-system? This cannot be undone. (3 rows)"
+	got := fitShellConfirm(msg)
+	t.Logf("rendered:\n%s", got)
+	if strings.Contains(got, "truncated") {
+		t.Errorf("kube's own confirm does not fit the shell modal:\n%s", got)
 	}
 }

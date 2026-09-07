@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	xansi "github.com/charmbracelet/x/ansi"
 
 	taction "github.com/jsdrews/tuilib/pkg/action"
 	"github.com/jsdrews/tuilib/pkg/app"
@@ -137,15 +138,16 @@ func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Comp
 		// Substituted against the RESOLVED values, so an input carrying
 		// a default previews what will actually run rather than an
 		// empty string.
-		a.Confirm = build.SubstituteAll([]string{b.Confirm}, sel, vals)[0]
+		msg := build.SubstituteAll([]string{b.Confirm}, sel, vals)[0]
 		// Under a fan-out the author's template resolved against ONE
 		// row, so on its own it would say "Delete web?" while deleting
 		// three. Say the arity rather than rewriting their sentence:
 		// the count is the part they can't have written, since they
-		// didn't know it.
+		// didn't know it. Inline and short, because of the budget below.
 		if def.Multi && len(sels) > 1 {
-			a.Confirm = fmt.Sprintf("%s\n\nRuns %d times, once per marked row.", a.Confirm, len(sels))
+			msg = fmt.Sprintf("%s (%d rows)", msg, len(sels))
 		}
+		a.Confirm = fitShellConfirm(msg)
 	}
 
 	// Fan-out. One run per marked row rather than one run over a joined
@@ -287,4 +289,33 @@ func (m *Model) fanOut(b cfg.ActionBinding, def *cfg.Action, a taction.Action, s
 		}))
 	}
 	return tea.Batch(cmds...)
+}
+
+// The shell centres its confirm modal at a fixed 52x7 (pkg/app), which
+// leaves 48 columns and three lines of message once the border, the
+// spacer and the button row are taken out. It does not wrap, so a long
+// message loses its tail — and the tail of a confirm is where "cannot be
+// undone" lives.
+const (
+	shellConfirmWidth = 48
+	shellConfirmLines = 3
+)
+
+// fitShellConfirm wraps a confirm message to the shell modal's budget,
+// and folds any overflow into a final line rather than letting it fall
+// off the bottom.
+//
+// Our own modal (newConfirmModal) sizes itself to the text and needs
+// none of this; it is only the shell's fixed one that has to be fitted.
+func fitShellConfirm(msg string) string {
+	wrapped := xansi.Wrap(msg, shellConfirmWidth, " -")
+	lines := strings.Split(wrapped, "\n")
+	if len(lines) <= shellConfirmLines {
+		return wrapped
+	}
+	// Keep the opening, which carries the verb and the target, and say
+	// plainly that there is more rather than truncating mid-sentence.
+	kept := lines[:shellConfirmLines-1]
+	kept = append(kept, "… (message truncated to fit)")
+	return strings.Join(kept, "\n")
 }
