@@ -99,7 +99,7 @@ func TestDoubleClickActivatesLikeEnter(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	multi := &Multi{Screens: c.TUI.Screens, Components: c.TUI.Components, Sources: c.Data.Sources}
+	multi := &Multi{Screens: c.TUI.Screens, Components: c.TUI.Components, Sources: c.Data.Sources, Actions: c.Actions}
 	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.Nord())
 	if err != nil {
 		t.Fatal(err)
@@ -242,14 +242,15 @@ func pushConfig() cfg.Config {
 				"list": {
 					Title:  "List",
 					Layout: cfg.Node{Component: "names"},
-					OnKey: []cfg.OnKeyBinding{
-						{Source: "names", Push: "detail", Key: "enter"},
+					Actions: []cfg.ActionBinding{
+						{Key: "enter", Action: "open_detail", From: "names"},
 					},
 				},
 				"detail": {Title: "Detail", Layout: cfg.Node{Component: "detail"}},
 			},
 			Initial: "list",
 		},
+		Actions: map[string]*cfg.Action{"open_detail": {Push: "detail"}},
 	}
 }
 

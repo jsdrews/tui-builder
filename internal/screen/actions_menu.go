@@ -82,7 +82,7 @@ func (m *Model) selectionTarget(c *build.Component) (string, int) {
 // bound, which has to ask before it can run at all.
 func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Component, focused string) taction.Action {
 	a := taction.Action{
-		Label: labelOr(b.Label, b.Action),
+		Label: menuLabel(b, def),
 		Desc:  def.Description,
 	}
 
@@ -97,6 +97,19 @@ func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Comp
 	if b.From != "" && cur != nil {
 		sel = selectionFrom(cur)
 	}
+	// A push is navigation: nothing to stream, nothing to cancel, and
+	// the destination's parameters come from bind: rather than from the
+	// action's inputs. Do is the right shape, and tuilib says so —
+	// navigational Do actions are one-at-a-time by construction, since
+	// pushing a screen replaces what is on top.
+	if def.Kind() == "push" {
+		a.Do = func() tea.Cmd {
+			cmd, _ := m.pushAction(b, def, sel)
+			return cmd
+		}
+		return a
+	}
+
 	inputs := resolveBinds(b, def, sel)
 
 	// Inputs the call site didn't fill have to be asked for, and the
@@ -136,6 +149,20 @@ func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Comp
 	}
 	a.Run = runFunc(resolved)
 	return a
+}
+
+// menuLabel names the verb in the menu. An explicit `label:` wins; a
+// push falls back to "open <screen>", which reads as a verb where the
+// bare action name ("open_cities") reads as an identifier; anything else
+// falls back to the action's name, which is all there is.
+func menuLabel(b cfg.ActionBinding, def *cfg.Action) string {
+	if b.Label != "" {
+		return b.Label
+	}
+	if def.Kind() == "push" && def.Push != "" {
+		return "open " + def.Push
+	}
+	return b.Action
 }
 
 // actionPickedMsg carries a menu pick that needs input before it can

@@ -411,18 +411,13 @@ type EnvSpec struct {
 }
 
 // Screen describes one screen — its breadcrumb title, its layout tree,
-// and any on_key bindings that push other screens.
+// and any action bindings that push other screens.
 type Screen struct {
 	// Title shows in the breadcrumb. May contain ${selection} tokens
-	// when this screen is reachable via an on_key push.
+	// when this screen is reachable via a push action.
 	Title string `yaml:"title,omitempty"`
 	// Layout is the root of the layout tree. Required.
 	Layout Node `yaml:"layout"`
-	// OnKey declares which components — when the given key is pressed
-	// on them and they're focused — push another screen. Multi-screen
-	// only. Each binding must spell out its key explicitly (`key:
-	// enter`, `key: d`, `key: ctrl+r`); there is no implicit default.
-	OnKey []OnKeyBinding `yaml:"on_key,omitempty"`
 	// Actions bind keys to entries in the top-level `actions:`
 	// registry, or declare one inline. See ActionBinding.
 	Actions []ActionBinding `yaml:"actions,omitempty"`
@@ -570,51 +565,6 @@ type Prompt struct {
 	Parameter `yaml:",inline"`
 }
 
-// OnKeyBinding wires "pressing Key on Source pushes Push." The source
-// must be a list or table component referenced in this screen's layout;
-// Push names a screen in Config.Screens. The source component's current
-// selection becomes the ${selection} token in the pushed screen.
-//
-// Bind maps destination-screen parameter names to templates evaluated
-// against the focused row's Selection. Use this when the destination
-// screen has data sources that declare `parameters:` — the values
-// resolve at push time and feed into each parameterized source's
-// BindParams call. Without Bind, parameterized sources on the
-// destination won't have their required params filled and will error
-// at fetch (or push, depending on how strict we make it).
-//
-//	bind:
-//	  namespace: ${selection.Namespace}
-//	  name:      ${selection.Name}
-//
-// Values support the same ${selection.*} / ${env.*} / ${prompt.*}
-// substitutions as everywhere else.
-type OnKeyBinding struct {
-	Source string            `yaml:"source"`
-	Push   string            `yaml:"push"`
-	Bind   map[string]string `yaml:"bind,omitempty"`
-	// Key is the trigger. Required — spell out `key: enter` for the
-	// classic drilldown, `key: d` for describe, `key: l` for logs,
-	// `key: ctrl+r` for a resource reload push. Any tea.KeyMsg.String()
-	// name works. Multiple bindings on the same source are allowed as
-	// long as their (source, key) pairs are distinct.
-	Key string `yaml:"key"`
-	// Label is an optional custom label for the help strip. When empty,
-	// the strip shows the key + "open". Handy for kubectl-shape UIs
-	// that want "d → describe", "l → logs", etc.
-	Label string `yaml:"label,omitempty"`
-	// Section is the heading this binding sits under in the key overlay
-	// (`?`). Defaults to "Open".
-	//
-	// Headings name what the keys DO, never what holds them — that is
-	// tuilib's rule and the reason the overlay is worth opening. The
-	// component's own keys arrive already grouped that way (Navigate,
-	// Scroll, Filter, Search, Select, Sort, Expand, View); reuse one of
-	// those names to file a push alongside them, or invent one for a
-	// group of your own. Bindings sharing a name share a heading, in
-	// first-appearance order.
-	Section string `yaml:"section,omitempty"`
-}
 
 // Node is a tagged-union layout node. Exactly one of VStack / HStack /
 // ZStack / Component must be non-empty. Component is the name of a

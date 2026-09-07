@@ -320,13 +320,6 @@ func visitScreen(s *Screen, fn func(*string)) {
 			s.Actions[i].Bind[k] = str
 		}
 	}
-	for i := range s.OnKey {
-		for k, v := range s.OnKey[i].Bind {
-			str := v
-			fn(&str)
-			s.OnKey[i].Bind[k] = str
-		}
-	}
 }
 
 // visitActions walks the templated fields of every defined action: the

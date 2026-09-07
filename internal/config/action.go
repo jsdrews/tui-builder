@@ -57,6 +57,24 @@ type Action struct {
 	// so the quoting is visible in the config rather than implied.
 	Run []string `yaml:"run,omitempty"`
 
+	// ---- push ----
+
+	// Push names a screen in `tui.screens:` to open. It is what the old
+	// `on_key:` block used to be, folded in here so there is one
+	// registry rather than two mechanisms binding keys to the same
+	// components.
+	//
+	// A push is navigation, not background work, so it maps onto
+	// tuilib's Do rather than Run — the same escape hatch an
+	// interactive command uses, and for the same reason: there is
+	// nothing to stream and nothing to cancel.
+	//
+	// The binding's `bind:` supplies the DESTINATION SCREEN's declared
+	// `parameters:`, not this action's `inputs:`. Both are "fill in the
+	// callee's declared interface"; a screen's interface is its
+	// parameters and an action's is its inputs.
+	Push string `yaml:"push,omitempty"`
+
 	// --- type: http ---
 
 	// Method defaults to POST for http actions. GET is legal but suspect:
@@ -104,10 +122,16 @@ type Action struct {
 // switch on this rather than on Type so the empty-string default lives
 // in exactly one place.
 func (a *Action) Kind() string {
-	if a.Type == "" {
-		return "exec"
+	if a.Type != "" {
+		return a.Type
 	}
-	return a.Type
+	// `push:` is unambiguous on its own — there is no other reason to
+	// name a screen — so it doesn't need `type: push` spelled out. That
+	// keeps a drilldown as short as it was under `on_key:`.
+	if a.Push != "" {
+		return "push"
+	}
+	return "exec"
 }
 
 // ActionBinding wires a key on a screen to an action. It carries every
@@ -162,15 +186,6 @@ type ActionBinding struct {
 	Bind map[string]string `yaml:"bind,omitempty"`
 	// Label appears in the help strip. Defaults to the action name.
 	Label string `yaml:"label,omitempty"`
-	// Section is the heading this binding sits under in the key overlay
-	// (`?`). Defaults to "Actions".
-	//
-	// Deliberately temporary, and now on a shorter clock: actions are
-	// still key-bound at this point, so they still appear in the
-	// overlay. The pkg/action step moves them into the menu, where a
-	// help heading means nothing — delete this field there. See
-	// plans/tuilib-0.24.md, "on_key: folds into the registry".
-	Section string `yaml:"section,omitempty"`
 	// Confirm, when non-empty, shows a yes/no modal before dispatch.
 	// Substituted the same way Bind templates are, plus ${inputs.*} so
 	// the message can preview values the form just collected.

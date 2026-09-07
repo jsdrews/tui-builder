@@ -53,7 +53,7 @@ func podsWithDeleteConfig(marker string) *cfg.Config {
 				Layout: cfg.Node{Component: "pods_table"},
 				Actions: []cfg.ActionBinding{
 					{
-						Key:         "D",
+						Key:         "enter",
 						Action:      "delete_pod",
 						Label:       "delete",
 						From:        "pods_table",
@@ -82,12 +82,16 @@ func deleteScreen(t *testing.T, c *cfg.Config) *Model {
 // TestActionConfirm_MessageNotTruncated pins the reported bug: the delete
 // confirm message ("… This cannot be undone.") is wider than the old
 // 60-col modal and clipped its tail. The fitted modal must now show it all.
+// `enter` rather than a letter: it is the only key an action still
+// fires from directly. Every other verb goes through the menu, whose
+// confirm the shell owns — the screen's own modal, which these tests
+// cover, is reached via enter and via the post-form path.
 func TestActionConfirm_MessageNotTruncated(t *testing.T) {
 	m := deleteScreen(t, podsWithDeleteConfig(filepath.Join(t.TempDir(), "marker")))
 
-	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.confirmModal == nil {
-		t.Fatalf("expected confirm modal after pressing D")
+		t.Fatalf("expected confirm modal after pressing enter")
 	}
 	plain := xansi.Strip(m.Layout().Render(geom.New(0, 0, 100, 40)))
 	if !strings.Contains(plain, "This cannot be undone.") {
@@ -105,9 +109,9 @@ func TestActionConfirm_WrapsMultiLine(t *testing.T) {
 		"undone; the owning controller may immediately recreate it under a new name."
 	m := deleteScreen(t, c)
 
-	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.confirmModal == nil {
-		t.Fatalf("expected confirm modal after pressing D")
+		t.Fatalf("expected confirm modal after pressing enter")
 	}
 	plain := xansi.Strip(m.Layout().Render(geom.New(0, 0, 100, 40)))
 	for _, want := range []string{"new name.", "[ No ]", "[ Yes ]"} {
@@ -125,7 +129,7 @@ func TestActionConfirm_YesDispatches(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "marker")
 	m := deleteScreen(t, podsWithDeleteConfig(marker))
 
-	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 
 	// Non-interactive dispatch goes through runner.CaptureWith, which
@@ -156,7 +160,7 @@ func TestActionConfirm_EnterDefaultsToNo(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "marker")
 	m := deleteScreen(t, podsWithDeleteConfig(marker))
 
-	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 
 	if m.confirmModal != nil {

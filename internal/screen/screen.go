@@ -44,7 +44,7 @@ import (
 // Multi is the shared context for a multi-screen app: every named
 // screen, the top-level components map, and the unified data
 // sources map. Passed once to every Model so any screen can build +
-// push its on_key targets, and so pushed screens get the same
+// push its push-action targets, and so pushed screens get the same
 // data layer.
 type Multi struct {
 	Screens    map[string]*cfg.Screen
@@ -94,7 +94,7 @@ type streamMsg struct {
 }
 
 // Model is the config-driven screen. Construct with New (single-screen)
-// or NewMulti (multi-screen with on_key push support) and pass as the
+// or NewMulti (multi-screen, with push actions) and pass as the
 // root to app.New.
 type Model struct {
 	title string
@@ -102,11 +102,7 @@ type Model struct {
 	tree  *build.Tree
 	focus int    // index into tree.All(); -1 means no component focused
 	multi *Multi // nil for single-screen mode
-	// bindings holds every on_key push for this screen. A single source
-	// may declare multiple bindings distinguished by Key, so lookups
-	// scan linearly per keystroke.
-	bindings []cfg.OnKeyBinding
-	// actions holds this screen's key bindings; actionDefs is the
+	// actions holds this screen's action bindings; actionDefs is the
 	// config-wide registry they reference by name. Post-hoist the
 	// registry holds inline declarations too, so there is exactly one
 	// place to look an action up.
@@ -221,7 +217,7 @@ func New(s *cfg.Screen, components map[string]*cfg.Component, entries map[string
 // params carries the push-site `bind:` block's resolved values for the
 // destination screen's parameterized sources. Pass nil on the initial
 // multi-screen construction (no push has fired yet) and on screens
-// whose on_key has no Bind: map. Missing required params surface as
+// whose binding has no Bind: map. Missing required params surface as
 // a build error so tryPush can pop an alert instead of constructing
 // a half-broken screen.
 func NewMulti(screenName string, multi *Multi, sel build.Selection, params map[string]string, th theme.Theme) (*Model, error) {
@@ -246,7 +242,6 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, entries map[str
 		m.focus = 0
 	}
 	if multi != nil {
-		m.bindings = append([]cfg.OnKeyBinding(nil), s.OnKey...)
 	}
 	m.actions = append([]cfg.ActionBinding(nil), s.Actions...)
 	m.actionDefs = actions
@@ -406,7 +401,7 @@ func (m *Model) Layout() layout.Node {
 
 // Update routes KeyMsgs to the focused component (with tab/shift+tab
 // intercepted for focus cycling and enter intercepted when the focused
-// component has an on_key binding). Non-key messages fan out so
+// component has an action bound to enter). Non-key messages fan out so
 // spinner ticks reach every component.
 func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 	// Form modal — opened when a fired action had inputs nobody bound.
@@ -469,21 +464,13 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 			m.cycleFocus(-1)
 			return m, nil
 		case "enter":
+			// The only key an action still fires from. Everything else
+			// goes through the menu — `enter` is exempt because it is
+			// not a shortcut competing for the letter budget, it is
+			// activation, which is why tuilib emits ActivatedMsg for it
+			// and for a double click rather than treating it as a
+			// binding. See plans/tuilib-0.24.md.
 			if cmd, handled := m.activate(); handled {
-				return m, cmd
-			}
-		default:
-			// on_key bindings fire before actions
-			// so a screen author can bind `d → describe` (push) without
-			// colliding with an action on the same key (which would also
-			// have matched). Uniqueness is enforced at validate time on
-			// the push side; collision with an action is still possible
-			// and picks push-first (deliberate — pushes are lower risk
-			// than firing a subprocess).
-			if cmd, handled := m.tryPush(k.String()); handled {
-				return m, cmd
-			}
-			if cmd, handled := m.tryAction(k); handled {
 				return m, cmd
 			}
 		}
@@ -745,16 +732,12 @@ func (m *Model) IsCapturingKeys() bool {
 	return componentCapturing(c)
 }
 
-// Default headings for the two kinds of binding a config can author.
-// Both are overridable per binding with `section:`.
-const (
-	helpSectionOpen    = "Open"
-	helpSectionActions = "Actions"
-)
+// helpSectionOpen heads the one action binding that still reaches the
+// help overlay.
+const helpSectionOpen = "Open"
 
 // Help returns the bindings the focused component currently exposes,
-// plus one entry per on_key push binding for the focused component,
-// plus any action keys bound to the focused source.
+// plus the `enter` verb if this screen has one.
 //
 // Flat, because that is what the statusbar strip wants. The key overlay
 // takes HelpSections instead.
@@ -780,7 +763,7 @@ func (m *Model) Help() []key.Binding {
 // has, so "Pods" ends up as the heading above a table's scroll keys.
 // Headings are supposed to name what the keys DO. The focused component
 // already describes itself that way (Navigate / Scroll / Filter / Sort /
-// Select / …); this adds the groups the config authored on top.
+// Select / …); this adds the screen's own activation verb on top.
 //
 // Only the focused component contributes, matching Help() — which is
 // also why nothing here calls help.Qualify: a qualifier earns its noise
@@ -797,62 +780,27 @@ func (m *Model) HelpSections() []help.Section {
 	return help.Sections(append(secs, m.verbSections(m.tree.Order[m.focus])...)...)
 }
 
-// verbSections groups the config-authored bindings for one source by
-// their `section:`, in first-appearance order so a config's own
-// ordering is what the reader sees.
+// verbSections is the screen's own contribution to the help list: the
+// `enter` binding, and only that.
 //
-// Shared by Help and HelpSections so the flat strip and the overlay
-// can't disagree about which keys exist.
+// Every other verb is reached through the action menu, and tuilib
+// deliberately keeps a menu shortcut out of Help() — moving discovery
+// off the footer and into the menu is most of the point, and a footer
+// listing nine verbs it can no longer fire would be actively wrong.
+// `enter` is the exception because it is still a real direct key.
 func (m *Model) verbSections(source string) []help.Section {
-	var order []string
-	byTitle := map[string][]key.Binding{}
-	add := func(title string, b key.Binding) {
-		if _, seen := byTitle[title]; !seen {
-			order = append(order, title)
-		}
-		byTitle[title] = append(byTitle[title], b)
-	}
-
-	if m.multi != nil {
-		for _, b := range m.bindings {
-			if b.Source != source {
-				continue
-			}
-			glyph := b.Key
-			if b.Key == "enter" {
-				glyph = "⏎"
-			}
-			label := b.Label
-			if label == "" {
-				label = "open"
-			}
-			add(sectionOr(b.Section, helpSectionOpen),
-				key.NewBinding(key.WithKeys(b.Key), key.WithHelp(glyph, label)))
-		}
-	}
-	// The registry's bindings scope by `from:` rather than `source:`, and
-	// one with no `from:` isn't scoped to a pane at all — it belongs
-	// under its heading whichever component holds focus.
 	for _, b := range m.actions {
+		if b.Key != "enter" {
+			continue
+		}
 		if b.From != "" && b.From != source {
 			continue
 		}
-		add(sectionOr(b.Section, helpSectionActions),
-			key.NewBinding(key.WithKeys(b.Key), key.WithHelp(b.Key, labelOr(b.Label, b.Action))))
+		return []help.Section{help.Group(helpSectionOpen,
+			key.NewBinding(key.WithKeys("enter"),
+				key.WithHelp("⏎", labelOr(b.Label, b.Action))))}
 	}
-
-	out := make([]help.Section, 0, len(order))
-	for _, title := range order {
-		out = append(out, help.Group(title, byTitle[title]...))
-	}
-	return out
-}
-
-func sectionOr(s, fallback string) string {
-	if s == "" {
-		return fallback
-	}
-	return s
+	return nil
 }
 
 // componentHelpSections asks the focused component to describe its own
@@ -1009,17 +957,19 @@ func componentHelp(c *build.Component) []key.Binding {
 	return nil
 }
 
-// tryAction handles a KeyMsg that may match one of this screen's action
-// bindings. Returns (cmd, true) when the action fired so the caller can
-// short-circuit; otherwise (nil, false) to fall through to component
-// routing. Suppressed while a component is capturing keys so action keys
-// don't hijack filter typing.
+// activate runs the verb bound to `enter` against the focused
+// component. Keyboard enter and a double click both route through here,
+// so the two spellings of the same gesture can't drift apart.
 //
-// A binding with `from:` only fires while that pane holds focus — that's
-// what lets the same key mean different things in different panes. A
-// binding without one needs no selection and fires anywhere on the
-// screen, which is how an action that takes no row input works.
-func (m *Model) tryAction(k tea.KeyMsg) (tea.Cmd, bool) {
+// This is the whole of the direct-key path now. Every other verb is
+// reached through the action menu, which is where discovery belongs: a
+// footer holds one row and a screen can easily have nine verbs.
+//
+// Suppressed while a component is capturing keys, so enter inside a
+// filter stays a filter key. A binding with `from:` only fires while
+// that pane holds focus — that's what lets enter mean different things
+// in different panes.
+func (m *Model) activate() (tea.Cmd, bool) {
 	if len(m.actions) == 0 {
 		return nil, false
 	}
@@ -1028,12 +978,11 @@ func (m *Model) tryAction(k tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, false
 	}
 	focusedName := ""
-	if m.focus >= 0 {
+	if m.focus >= 0 && m.focus < len(m.tree.Order) {
 		focusedName = m.tree.Order[m.focus]
 	}
-	keyStr := k.String()
 	for _, b := range m.actions {
-		if b.Key != keyStr {
+		if b.Key != "enter" {
 			continue
 		}
 		if b.From != "" && b.From != focusedName {
@@ -1064,6 +1013,9 @@ func (m *Model) startAction(b cfg.ActionBinding) (tea.Cmd, bool) {
 	sel := build.Selection{}
 	if b.From != "" && b.From == focusedName && cur != nil {
 		sel = selectionFrom(cur)
+	}
+	if def.Kind() == "push" {
+		return m.pushAction(b, def, sel)
 	}
 	inputs := resolveBinds(b, def, sel)
 
@@ -1461,22 +1413,9 @@ func (m *Model) newConfirmModal(label, message string) confirm.Model {
 	return confirm.New(opts)
 }
 
-// activate runs the "open the selection" verb against the focused
-// component: an on_key binding for enter first, then an action bound to
-// enter. Keyboard enter and a double click both route through here so the
-// two spellings of the same verb can't drift apart.
-//
-// Push-before-action matches the ordering the other keys use in Update.
-func (m *Model) activate() (tea.Cmd, bool) {
-	if cmd, handled := m.tryPush("enter"); handled {
-		return cmd, true
-	}
-	return m.tryAction(tea.KeyMsg{Type: tea.KeyEnter})
-}
-
-// componentActivated reports whether msg is c's own activation. Only lists
-// and tables emit one, which is also all the validator allows as an on_key
-// or action source.
+// componentActivated reports whether msg is c's own activation. Only
+// lists and tables emit one, which is also all the validator allows as
+// an action source.
 //
 // Call this only for ActivatedMsg: tuilib's IsActivate also answers true for
 // a plain enter KeyMsg regardless of which component it belongs to, and the
@@ -1496,40 +1435,22 @@ func componentActivated(c *build.Component, msg tea.Msg) bool {
 // — "enter" for the Enter key, "d" / "l" / "ctrl+r" / etc. for arbitrary
 // bindings. Returns (cmd, true) when a matching binding fires; (nil, false)
 // to fall through to actions or normal component forwarding.
-func (m *Model) tryPush(press string) (tea.Cmd, bool) {
-	if m.multi == nil || m.focus < 0 {
-		return nil, false
+func (m *Model) pushAction(b cfg.ActionBinding, def *cfg.Action, sel build.Selection) (tea.Cmd, bool) {
+	if m.multi == nil {
+		return app.Error(fmt.Sprintf("%s: push actions need a multi-screen config", b.Action)), true
 	}
-	cur := m.current()
-	if cur == nil || componentCapturing(cur) {
-		return nil, false
-	}
-	name := m.tree.Order[m.focus]
-	var binding *cfg.OnKeyBinding
-	for i := range m.bindings {
-		b := &m.bindings[i]
-		if b.Source == name && b.Key == press {
-			binding = b
-			break
-		}
-	}
-	if binding == nil {
-		return nil, false
-	}
-	sel := selectionFrom(cur)
-	// Resolve the push-site bind: block against the focused row's
-	// selection. We always pass a non-nil map (possibly empty) — the
-	// push IS a binding context, even if the user forgot to declare
-	// bind:. That lets applyBindParams enforce required params with a
-	// clean "missing required" error instead of silently constructing
-	// a screen that 404s on first fetch.
-	params := make(map[string]string, len(binding.Bind))
-	for k, v := range binding.Bind {
+	// Resolve the bind: block against the focused row. Always a non-nil
+	// map, even when empty — a push IS a binding context whether or not
+	// the author declared one, which lets applyBindParams report a
+	// missing required param instead of silently building a screen that
+	// 404s on its first fetch.
+	params := make(map[string]string, len(b.Bind))
+	for k, v := range b.Bind {
 		params[k] = build.Substitute(v, sel)
 	}
-	child, err := NewMulti(binding.Push, m.multi, sel, params, m.th)
+	child, err := NewMulti(def.Push, m.multi, sel, params, m.th)
 	if err != nil {
-		return app.Error(fmt.Sprintf("%s: %v", binding.Push, err)), true
+		return app.Error(fmt.Sprintf("%s: %v", def.Push, err)), true
 	}
 	return tscreen.Push(child), true
 }

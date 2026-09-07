@@ -272,10 +272,11 @@ tui:
       # Push site: when the user hits enter on a namespace row, push the
       # `pods` screen with the selected namespace name fed into the
       # destination's `pods` source via its declared `namespace` param.
-      on_key:
-        - source: namespaces_list
+      actions:
+        - key:    enter
+          name:   open_pods
           push:   pods
-          key:    enter
+          from:   namespaces_list
           bind:
             namespace: ${selection}
 
@@ -286,22 +287,21 @@ tui:
       # (Namespace, Name) of the selected row feed into the destination
       # screen's `pod_detail` AND `pod_logs` params. Same map, both
       # destinations see the same values.
-      on_key:
-        - source: pods_table
+      actions:
+        - key:    enter
+          name:   open_detail
           push:   detail
-          key:    enter
+          from:   pods_table
           bind:
             namespace: ${selection.Namespace}
             name:      ${selection.Name}
-      # Actions: each key binds to a NAMED action from the top-level
-      # `actions:` block. The binding owns the TUI-side concerns — which
-      # key, which pane's row feeds it (`from:`), whether to confirm —
-      # while the action itself owns what actually runs.
+      # The rest bind to NAMED actions from the top-level `actions:`
+      # block. The binding owns the TUI-side concerns — which key, which
+      # pane's row feeds it (`from:`), whether to confirm — while the
+      # action itself owns what actually runs.
       #
-      # `from:` is required here only because the bind templates read
-      # ${selection.*}. An action needing no row would omit it, and its
-      # key would then fire regardless of which pane holds focus.
-      actions:
+      # Only `enter` above fires from a keypress. These are reached
+      # through the action menu (`a`); `key:` is their menu shortcut.
         - key: x
           action: pod_shell
           label: exec

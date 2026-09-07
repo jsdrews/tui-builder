@@ -35,7 +35,7 @@ func orderConfig() *cfg.Config {
 			Screen: cfg.Screen{
 				Layout: cfg.Node{Component: "fruits"},
 				Actions: []cfg.ActionBinding{{
-					Key:     "b",
+					Key:     "enter",
 					Action:  "order",
 					Label:   "order",
 					From:    "fruits",
@@ -60,7 +60,7 @@ func TestConfirmSubstitutesCollectedInputs(t *testing.T) {
 
 	// Fire the action. `amount` has a default and `priority` doesn't, so
 	// the form opens for the inputs the binding left unfilled.
-	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.formModal == nil {
 		t.Fatal("expected the input form to open for the unbound inputs")
 	}
@@ -94,7 +94,7 @@ func TestNoFormWhenEveryInputIsBoundOrDefaulted(t *testing.T) {
 	c.Actions["order"].Inputs["priority"].Default = "normal"
 	m := deleteScreen(t, c)
 
-	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.formModal != nil {
 		t.Error("no input should be prompted for when all are bound or defaulted")
 	}

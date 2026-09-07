@@ -25,8 +25,9 @@ import (
 //
 // Deliberately NOT reserved:
 //
-//   - enter: routed through activate(), which tries an on_key push and
-//     then an action. Binding it is the documented drilldown idiom.
+//   - enter: routed through activate(), the one direct key an action
+//     still fires from. Binding it is the documented drilldown idiom;
+//     every other key is a menu shortcut.
 //   - j / k / /: component-internal keys. They only matter while a list
 //     or table holds focus, and an action on a different pane has every
 //     right to them. componentCapturing already keeps filter typing
@@ -128,8 +129,18 @@ func validateActionDefs(actions map[string]*Action) error {
 			if len(a.Run) > 0 {
 				return fmt.Errorf("%s: `run:` is not valid on an http action", path)
 			}
+		case "push":
+			if a.Push == "" {
+				return fmt.Errorf("%s: `push:` is required for a push action — name a screen in tui.screens", path)
+			}
+			if len(a.Run) > 0 || a.URL != "" {
+				return fmt.Errorf("%s: a push action opens a screen; `run:` and `url:` are not valid on it", path)
+			}
+			if len(a.Inputs) > 0 {
+				return fmt.Errorf("%s: a push action has no `inputs:` — the binding's `bind:` fills the DESTINATION screen's parameters, which the destination declares", path)
+			}
 		default:
-			return fmt.Errorf("%s: unknown type %q (want exec or http)", path, a.Type)
+			return fmt.Errorf("%s: unknown type %q (want exec, http or push)", path, a.Type)
 		}
 		for pname, p := range a.Inputs {
 			if p == nil {
@@ -198,7 +209,10 @@ func validateActionBindings(bindings []ActionBinding, refs map[string]int, compo
 		// when nothing consumes it would silently narrow the binding to
 		// one focused pane, which is the surprising half of the old
 		// required-`source:` behaviour.
-		needsSel := false
+		// A push always reads the selection, declared templates or not:
+		// the focused row is what the drilldown is drilling into, and
+		// the destination's title and sources see it as ${selection}.
+		needsSel := a.Kind() == "push"
 		for _, tmpl := range b.Bind {
 			if strings.Contains(tmpl, "${selection") {
 				needsSel = true
@@ -233,7 +247,16 @@ func validateActionBindings(bindings []ActionBinding, refs map[string]int, compo
 		//
 		// The reverse typo does need catching: binding a name the action
 		// never declared would otherwise vanish silently.
+		//
+		// A push is the exception: its bind: fills the DESTINATION
+		// screen's `parameters:`, which that screen's sources declare,
+		// not this action's inputs. Those are checked at push time by
+		// applyBindParams, which is the only place that knows what the
+		// destination wants.
 		for pname := range b.Bind {
+			if a.Kind() == "push" {
+				break
+			}
 			if _, declared := a.Inputs[pname]; !declared {
 				return fmt.Errorf("%s: binds %q, which action %q does not declare as an input", bp, pname, b.Action)
 			}

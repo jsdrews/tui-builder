@@ -237,10 +237,11 @@ tui:
       # URL, namespace, and name fed into the destination's params. The
       # same `pod_detail` / `pod_logs` source definitions handle every
       # cluster because cluster_url is just another bound param.
-      on_key:
-        - source: all_pods
+      actions:
+        - key:    enter
+          name:   open_detail
           push:   detail
-          key:    enter
+          from:   all_pods
           bind:
             cluster_url: ${selection.ClusterURL}
             namespace:   ${selection.Namespace}

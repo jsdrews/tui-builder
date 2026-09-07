@@ -52,7 +52,6 @@ func TestSubstituteEnvCoversEveryTemplatedField(t *testing.T) {
 					Key: "x", Action: "run", Confirm: tok, Notice: tok,
 					Bind: map[string]string{"arg": tok},
 				}},
-				OnKey: []OnKeyBinding{{Key: "d", Push: "other", Bind: map[string]string{"ns": tok}}},
 			},
 			Screens: map[string]*Screen{
 				"other": {Title: tok, Actions: []ActionBinding{{Key: "y", Action: "post", Notice: tok}}},

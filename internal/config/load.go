@@ -157,33 +157,6 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("tui.screens.%s: components.%s referenced %d times — each component may be placed only once per screen", name, cname, n)
 			}
 		}
-		// Track (source, key) → binding index so a screen can't wire two
-		// different pushes onto the same keystroke — the first-match
-		// behavior of the dispatch loop would silently pick one.
-		seenKeys := map[string]int{}
-		for i, b := range s.OnKey {
-			if b.Source == "" || b.Push == "" {
-				return fmt.Errorf("tui.screens.%s.on_key[%d]: source and push are required", name, i)
-			}
-			if b.Key == "" {
-				return fmt.Errorf("tui.screens.%s.on_key[%d]: `key:` is required (spell out `key: enter` for the classic drilldown)", name, i)
-			}
-			if refs[b.Source] == 0 {
-				return fmt.Errorf("tui.screens.%s.on_key[%d]: source %q not used in this screen's layout", name, i, b.Source)
-			}
-			if _, ok := c.TUI.Screens[b.Push]; !ok {
-				return fmt.Errorf("tui.screens.%s.on_key[%d]: push %q not defined in screens map", name, i, b.Push)
-			}
-			src := c.TUI.Components[b.Source]
-			if src.Type != "list" && src.Type != "table" {
-				return fmt.Errorf("tui.screens.%s.on_key[%d]: source %q must be a list or table (got %s)", name, i, b.Source, src.Type)
-			}
-			dedupKey := b.Source + "\x00" + b.Key
-			if prev, ok := seenKeys[dedupKey]; ok {
-				return fmt.Errorf("tui.screens.%s.on_key[%d]: source %q + key %q already bound at on_key[%d]", name, i, b.Source, b.Key, prev)
-			}
-			seenKeys[dedupKey] = i
-		}
 		if err := validateActionBindings(s.Actions, refs, c.TUI.Components, c.Actions, fmt.Sprintf("tui.screens.%s", name), c.App.OutputConsoleKey(), c.App.ThemeCycleKey(), c.App.ActionMenuKey()); err != nil {
 			return err
 		}

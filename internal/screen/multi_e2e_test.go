@@ -273,10 +273,10 @@ func TestParamsBindEndToEnd(t *testing.T) {
 			"users": {
 				Title:  "Users",
 				Layout: cfg.Node{Component: "users_table"},
-				OnKey: []cfg.OnKeyBinding{
+				Actions: []cfg.ActionBinding{
 					{
-						Source: "users_table",
-						Push:   "posts",
+						From:   "users_table",
+						Action: "open_posts",
 						Key:    "enter",
 						// The whole point of this test: ${selection.ID}
 						// must resolve to the focused row's ID cell and
@@ -291,6 +291,7 @@ func TestParamsBindEndToEnd(t *testing.T) {
 			},
 		},
 		Initial: "users"},
+		Actions: pushRegistry(),
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
@@ -299,6 +300,7 @@ func TestParamsBindEndToEnd(t *testing.T) {
 	multi := &Multi{
 		Screens:    c.TUI.Screens,
 		Components: c.TUI.Components, Sources: c.Data.Sources,
+		Actions: c.Actions,
 	}
 	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.Nord())
 	if err != nil {
@@ -411,10 +413,10 @@ func TestParamsBindFromListSelection(t *testing.T) {
 		Screens: map[string]*cfg.Screen{
 			"namespaces": {
 				Layout: cfg.Node{Component: "namespaces_list"},
-				OnKey: []cfg.OnKeyBinding{
+				Actions: []cfg.ActionBinding{
 					{
-						Source: "namespaces_list",
-						Push:   "pods",
+						From:   "namespaces_list",
+						Action: "open_pods",
 						Key:    "enter",
 						// Bare ${selection} — the list's selected
 						// item drives the bind. Same shape as
@@ -428,6 +430,7 @@ func TestParamsBindFromListSelection(t *testing.T) {
 			},
 		},
 		Initial: "namespaces"},
+		Actions: pushRegistry(),
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
@@ -435,6 +438,7 @@ func TestParamsBindFromListSelection(t *testing.T) {
 
 	multi := &Multi{
 		Screens: c.TUI.Screens, Components: c.TUI.Components, Sources: c.Data.Sources,
+		Actions: c.Actions,
 	}
 	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.Nord())
 	if err != nil {
@@ -561,9 +565,9 @@ func TestParamsBindIgnoresUnusedSources(t *testing.T) {
 		Screens: map[string]*cfg.Screen{
 			"namespaces": {
 				Layout: cfg.Node{Component: "namespaces_list"},
-				OnKey: []cfg.OnKeyBinding{
+				Actions: []cfg.ActionBinding{
 					{
-						Source: "namespaces_list", Push: "pods", Key: "enter",
+						From: "namespaces_list", Action: "open_pods", Key: "enter",
 						Bind: map[string]string{"namespace": "${selection}"},
 					},
 				},
@@ -581,6 +585,7 @@ func TestParamsBindIgnoresUnusedSources(t *testing.T) {
 			},
 		},
 		Initial: "namespaces"},
+		Actions: pushRegistry(),
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
@@ -588,6 +593,7 @@ func TestParamsBindIgnoresUnusedSources(t *testing.T) {
 
 	multi := &Multi{
 		Screens: c.TUI.Screens, Components: c.TUI.Components, Sources: c.Data.Sources,
+		Actions: c.Actions,
 	}
 	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.Nord())
 	if err != nil {
@@ -681,14 +687,15 @@ func TestParamsBindMissingRequired(t *testing.T) {
 		Screens: map[string]*cfg.Screen{
 			"users": {
 				Layout: cfg.Node{Component: "users_table"},
-				OnKey: []cfg.OnKeyBinding{
+				Actions: []cfg.ActionBinding{
 					// Intentionally omit Bind — destination needs user_id.
-					{Source: "users_table", Push: "posts", Key: "enter"},
+					{From: "users_table", Action: "open_posts", Key: "enter"},
 				},
 			},
 			"posts": {Layout: cfg.Node{Component: "posts_table"}},
 		},
 		Initial: "users"},
+		Actions: pushRegistry(),
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
@@ -696,6 +703,7 @@ func TestParamsBindMissingRequired(t *testing.T) {
 
 	multi := &Multi{
 		Screens: c.TUI.Screens, Components: c.TUI.Components, Sources: c.Data.Sources,
+		Actions: c.Actions,
 	}
 	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.Nord())
 	if err != nil {
@@ -781,4 +789,13 @@ func stubKube(pods map[string]string) *httptest.Server {
 		body := fmt.Sprintf(`{"kind":"PodList","apiVersion":"v1","items":[%s]}`, strings.Join(items, ","))
 		fmt.Fprint(w, body)
 	}))
+}
+
+// pushRegistry declares every push action the multi-screen fixtures bind
+// to. Pushes are registry entries now, not their own on_key: block.
+func pushRegistry() map[string]*cfg.Action {
+	return map[string]*cfg.Action{
+		"open_pods":  {Push: "pods"},
+		"open_posts": {Push: "posts"},
+	}
 }
