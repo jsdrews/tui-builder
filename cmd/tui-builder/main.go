@@ -92,10 +92,9 @@ func run() error {
 
 	prog := tea.NewProgram(
 		app.New(app.Options{
-			Root:        root,
-			Themes:      themes,
-			Version:     c.App.Version,
-			HelpVerbose: c.App.HelpVerbose,
+			Root:    root,
+			Themes:  themes,
+			Version: c.App.Version,
 			// The output console. Everything a subprocess streams and
 			// every statusbar message lands here, with a badge counting
 			// events and a picker for killing what's still in flight.

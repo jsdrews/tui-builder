@@ -27,9 +27,14 @@ Everything below is additive.
 | v0.24.0 | Glyph vocabulary, border shapes, slot brackets | `pkg/glyph`, `pkg/theme` |
 | v0.25.0 | Help is a searchable modal, not a footer panel | `pkg/help`, `pkg/app` |
 
-v0.25 needs nothing from us: it compiles clean, `app.HelpVerbose` keeps
-its meaning, and the removed `HelpMaxRows` was never set here. It does
-change one fact this plan asserted, though — see Workstream 3.
+v0.25 compiles clean against this branch and the removed `HelpMaxRows`
+was never set here. It did change one fact this plan asserted (see
+Workstream 3) and cost one schema field: `app.help_verbose` is **gone**.
+Verbose mode packs bindings inline and only opens the overlay once they
+overflow the statusbar, so it made `?` conditional on terminal width —
+and the key overlay is the only discovery surface a config-built screen
+has. Minimal mode is now the only mode. `DisableHelpSearch` stays
+unexposed for the same reason.
 
 The v0.21–v0.24 four are not independent. Marking (v0.23) is what makes
 `action.Action.Multi` mean anything, and the action menu (v0.21) is the

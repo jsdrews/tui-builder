@@ -176,9 +176,9 @@ Unchanged from round 1. `layout.Center` lands when modal components
 | Tuilib feature | Exposed? | Schema field |
 |---|---|---|
 | `Title`, `Version`, `Theme` | ✓ | `app.title`, `app.version`, `app.theme` |
-| `HelpVerbose` (legacy inline footer) | ✓ | `app.help_verbose` (default false → minimal "? help" footer; press `?` for the searchable key overlay) |
+| `HelpVerbose` (legacy inline footer) | ✗ | **deliberately dropped.** Verbose mode packs bindings inline and only lets `?` open the key overlay once they *overflow* the statusbar, so on a wide terminal with a simple screen the modal silently never opens. The footer is always minimal ("? help") and `?` always opens the overlay |
+| `DisableHelpSearch` | ✗ | the overlay's search field stays on — it is the fast route through a screen with 15+ bindings |
 | `QuitKey`, `ThemeKey`, `HelpKey` custom bindings | ✗ | defaults locked |
-| `HelpMaxRows` (cap expanded help panel) | ✗ | defaults to 6 |
 | `ThemeEnvVar` / `SkipConfig` / `DisableAutoEscPop` | ✗ | |
 | Inline custom themes | ✗ | |
 | `theme.Terminal()` | ✗ | |
@@ -214,9 +214,6 @@ app:
   title: <string>             # breadcrumb prefix
   version: <string>           # statusbar right
   theme: <name>               # one of theme.All() names
-  help_verbose: <bool>        # true = legacy inline footer, false (default) =
-                              # minimal "? help" — `?` opens the searchable key
-                              # overlay, a modal that takes `borders.overlay`
   output_key: <key>           # opens the output console — scrollback of every
                               # statusbar message and everything a subprocess
                               # streams, with a statusbar badge counting events
