@@ -58,10 +58,9 @@ data:
       timeout: 15s
       headers:
         Accept: application/vnd.github+json
-
-tui:
         # Authorization: "Bearer ${env.GITHUB_TOKEN}"
 
+tui:
   components:
     repos_table:
       type: table
