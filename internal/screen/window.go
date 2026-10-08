@@ -294,14 +294,19 @@ func (m *Model) refreshWindows() []tea.Cmd {
 	return cmds
 }
 
-// windowError surfaces a failed window fetch. The first one goes to an
-// alert — an empty table gives the user no clue why — and later ones to
-// the statusbar, so a flaky endpoint doesn't pop a modal on every scroll.
+// windowError surfaces a failed window fetch. The first one carries the
+// full error — an empty table gives the user no clue why — and later
+// ones just the summary, so a flaky endpoint doesn't shout on every
+// scroll.
+//
+// This used to raise an alert modal. The action work replaced that path
+// with the output console: ErrorDetail puts the whole message somewhere
+// it can be read twice, behind an unread badge, without stealing the
+// keyboard from a user who is mid-scroll. Same reasoning as the initial
+// -fetch error in handleFetch, so both now read the same way.
 func (m *Model) windowError(w *windowEntry, c *build.Component, err error) tea.Cmd {
-	if _, count, _ := c.Table.Window(); count == 0 && m.alertModal == nil {
-		a := m.newAlertModal(w.source+": window fetch failed", err.Error())
-		m.alertModal = &a
-		return nil
+	if _, count, _ := c.Table.Window(); count == 0 {
+		return app.ErrorDetail(w.source+": window fetch failed", err.Error())
 	}
 	return app.Error(w.source + ": " + err.Error())
 }

@@ -8,7 +8,7 @@
 # Breadcrumb fills as you push:    My-App › Regions › Europe › London
 # esc pops back; q at the root quits.
 #
-# `on_key:` on a screen wires a keystroke on <source> to push <target>.
+# A push action wires a keystroke on <from> to open <push>.
 # The source component's selection is captured and substituted into the
 # target screen's config as ${selection} (and ${selection.COLNAME} or
 # ${selection.N} for table sources).
@@ -60,14 +60,14 @@ tui:
     regions:
       title: Regions
       layout: {component: regions}
-      on_key:
-        - {source: regions, push: cities, key: enter}
+      actions:
+        - {key: enter, name: open_cities, push: cities, from: regions}
 
     cities:
       title: ${selection}
       layout: {component: region_cities}
-      on_key:
-        - {source: region_cities, push: detail, key: enter}
+      actions:
+        - {key: enter, name: open_detail, push: detail, from: region_cities}
 
     detail:
       title: ${selection}

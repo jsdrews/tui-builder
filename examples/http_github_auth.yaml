@@ -94,8 +94,8 @@ tui:
     starred:
       title: Starred
       layout: {component: starred_table}
-      on_key:
-        - {source: starred_table, push: detail, key: enter}
+      actions:
+        - {key: enter, name: open_detail, push: detail, from: starred_table}
 
     detail:
       title: ${selection.Repo}

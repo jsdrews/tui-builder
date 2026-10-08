@@ -1,8 +1,9 @@
 # Adopting tuilib v0.21 – v0.25
 
 The bump from `v0.20.0` to `v0.25.0` is already on this branch and
-compiles green. This plan covers what to do with the five releases'
-new surface — none of which is wired into the YAML schema yet.
+compiles green. This plan covered what to do with the five releases'
+new surface. **All of it has now landed**; what's left below is the
+record of how, and one open question.
 
 ## The bump itself (done)
 
@@ -43,7 +44,7 @@ row or twelve. Plan them together; ship them in the order at the bottom.
 
 ---
 
-## Workstream 0 — the output console (prerequisite)
+## Workstream 0 — the output console (done)
 
 `cmd/tui-builder/main.go` doesn't set `app.Options.OutputKey`, so the
 shell's output console is off. Everything downstream depends on it:
@@ -65,243 +66,42 @@ one change that makes the actions work observable.
 
 ---
 
-## Workstream 1 — actions onto `pkg/action`
+## Workstream 1 — actions onto `pkg/action` (done)
 
-### Where we are
+The `origin/feature/actions` registry (named actions, `type: exec | http`,
+typed `inputs:`, `success:` expressions) landed via a merge, then moved
+onto tuilib's action menu. The user-facing model is in
+[`docs/components.md`](../docs/components.md) and the README; this is
+only what the docs don't carry.
 
-Two implementations exist:
-
-- **`main`** — `Screen.Actions []cfg.Action`: key-bound, tied to one
-  `source:` component, exec-only. Flow is prompts (form modal) →
-  confirm modal → `dispatch` → alert on error, `app.Info` on success.
-  `internal/screen/screen.go` owns all of it.
-- **`origin/feature/actions`** (unmerged, one commit, ~2500 lines) — a
-  much better shape already: a top-level `actions:` registry of named,
-  reusable actions with `type: exec | http`, typed `inputs:` referenced
-  as `${inputs.*}`, a separate TUI-layer `ActionBinding` (key, `from:`,
-  `bind:`, `confirm:`), `success:` expressions, `message:` /
-  `error_message:`, and a data-layer `internal/action` package that
-  resolves but does not execute.
-
-That branch was written against v0.20, before `pkg/action` existed. Its
-own doc comment already reaches for `runner.CaptureWith` "so output
-streams into the console" — it anticipated this release without having
-it. Do not re-derive it.
-
-**How to bring it in — unresolved.** The obvious move is to rebase it
-onto the bump and land it green first, but a trial cherry-pick turned up
-two things that argue against:
-
-- Its parent is `274d539`, **before** the pagination/window work
-  (`1499efb`, 3660 lines). So the rebase crosses that schema commit as
-  well as the bump — seven files conflict: `README.md`,
-  `cmd/tui-builder/main.go`, `docs/components.md`,
-  `examples/prompts_boot.yaml`, `internal/config/{config,env,load}.go`
-  and `internal/screen/screen.go`.
-- Most of the `screen.go` conflict is in the dispatch / confirm / alert
-  path that the `pkg/action` step **deletes**. Merging it carefully
-  across pagination in order to remove it next step is wasted work.
-
-The cheaper route is probably to cherry-pick only what applies cleanly —
-`internal/action/`, `internal/config/action.go`,
-`internal/config/action_validate.go`, `cmd/wrangl/actions.go` and the
-examples are all new files — and write the screen wiring straight against
-`pkg/action`. That keeps the branch's design (the registry, typed
-`inputs:`, exec + http, `success:` expressions) and skips a throwaway
-merge. Not decided; the schema halves of `config.go` and `load.go` still
-have to be merged either way.
-
-### What the shell takes over
-
-`app.Options.ActionsKey` is the single switch for the whole feature —
-leave it zero and no menu, no right-click, no key. Set it and the shell
-owns the menu overlay, the confirm modal, the goroutine, cancellation,
-the console entry, the statusbar badge, the kill picker, and the
-per-target exclusivity check. A screen supplies verbs by implementing
-one method:
-
-```go
-// internal/screen
-func (m *Model) Actions() action.Set
-```
-
-So `internal/screen` **deletes** its action-owned confirm modal, its
-`dispatch`, its `actionOutcome`, and the alert-on-error path. That is
-the real win here: less tui-builder code, which is the whole thesis in
-AGENTS.md ("tui-builder code is a thin wrapper — trust tuilib for
-behavior").
-
-### Mapping
-
-| tui-builder (`ActionBinding` + `Action`) | tuilib `action.Action` |
-|---|---|
-| `label:` (or action name) | `Label` |
-| `description:` | `Desc` |
-| `key:` (now optional) | `Key` — live only while the menu is open, **except `enter`** |
-| `key: enter` | `Key`, plus direct dispatch via `activate()` and double-click |
-| `push:` + `bind:` (was `on_key:`) | `Do` → push the screen (tuilib's "navigational Do") |
-| `confirm:` (substituted) | `Confirm` — shell owns the modal |
-| binding's `from:` pane not focused | `Disabled` with a reason |
-| exec non-interactive / http | `Run` (an `action.Func`) |
-| exec `interactive: true` | `Do` → `runner.Run(cmd)` |
-| action can fan out over marked rows | `Multi` |
-| http, or any mutating action | `Exclusive` (see open question) |
-
-`Set.Target` comes from `SelectionLabel()` ("cache-redis", or
-"3 items"); `Set.Count` from the selection length. `Set.Actions` is the
-screen's bindings filtered to those whose `from:` names the focused
-component, plus those with no `from:` at all (which fire regardless of
-focus — already the branch's semantics).
-
-`internal/action.Resolved` fits `action.Func` almost exactly. Both kinds
-collapse to one signature:
-
-```go
-Run: func(ctx context.Context, out io.Writer) error {
-    // exec: cmd.Stdout, cmd.Stderr = out, out; cmd.Run()
-    // http: act.Do(ctx, resolved, out)
-}
-```
-
-which is what earns both kinds the console, the badge, and cancellation
-with no extra code on either side. Today the http path has no way to
-report progress at all.
-
-### Keys: the menu replaces them
-
-**Decided: menu only.** One key (`a`) opens a picker that lists every
-verb the screen has, with its shortcut in the right-hand column and a
-visible reason next to anything unavailable. The screen's own
-`tryAction` key-dispatch path is **deleted**.
-
-This is tuilib rule 8's position and the reason `action.Action.Key` is
-deliberately not advertised in `Help()`: moving discovery into the menu
-is most of the point. A footer holds one row; a screen can easily have
-nine verbs.
-
-What changes:
-
-- Config `key:` becomes `action.Action.Key` — a **menu-scoped**
-  shortcut, live only while the menu is open. It no longer fires from
-  the screen.
-- `key:` becomes **optional**. Once the menu exists, a verb without a
-  key is perfectly usable, and the letter budget stops being the ceiling
-  on how many verbs a screen can have. This is the actual payoff.
-- Reserved-key validation relaxes for action bindings. A menu shortcut
-  can't shadow a global (`q`, `t`, `?`, `tab`, `esc`, `/`) because the
-  menu owns the keyboard while it's open. It must still be unique
-  within one screen's set — `action.Validate` catches duplicate
-  shortcuts and duplicate identities, both of which otherwise fail far
-  from their cause.
-- `internal/screen` loses `tryAction` and its call sites in `Update`,
-  along with the on_key-before-actions precedence comment that only
-  existed to arbitrate the collision. `verbSections` loses its actions
-  half (see below); the pushes half goes with `on_key:`.
-
-**Migration:** `key: d` still parses and still means something, but `d`
-alone stops firing — it's `a` then `d` now. That's a real behavior
-change for every existing config in `examples/`. They're ours, so it's
-a rewrite rather than a compatibility problem, but the docs need a line
-saying so.
-
-### `on_key:` folds into the registry — `enter` is the only direct key
-
-**Decided.** There is one registry, not two. `on_key:` disappears as a
-block; a push becomes an action with `push:` + `bind:` alongside `run:`
-and `request:`. Dispatch is:
-
-| binding | fires directly | in the menu |
-|---|---|---|
-| `key: enter` | ✓ — and double-click | ✓ |
-| any other `key:` | ✗ | ✓, menu-scoped |
-| no `key:` | ✗ | ✓ |
-
-The rule is **`enter`, not "pushes"**. An earlier draft of this section
-split by type — pushes keep their keys, verbs go to the menu — which
-quietly walked back the menu-only decision above for `d → describe`.
-Carving out `enter` alone holds that line: `enter` is not a shortcut
-competing for the letter budget, it is *activation*, which is why tuilib
-emits `ActivatedMsg` for it and for a double click rather than treating
-it as a keybinding at all.
-
-**The seam already exists.** `internal/screen.activate()` funnels
-keyboard `enter` and double-click into one place and already falls
-through to an action bound to `enter`:
-
-```go
-func (m *Model) activate() (tea.Cmd, bool) {
-    if cmd, handled := m.tryPush("enter"); handled {
-        return cmd, true
-    }
-    return m.tryAction(tea.KeyMsg{Type: tea.KeyEnter})
-}
-```
-
-So the work is deleting `tryPush` and letting the single registry answer,
-not inventing a carve-out. The on_key-before-actions precedence rule
-(`config.go`, `Action.Key`) then deletes itself — it exists only to
-arbitrate between two registries binding the same key on the same
-component, which was the symptom that this merge is the fix for.
-
-**What the schema loses:**
-
-- `on_key:` — gone. `push:` + `bind:` move onto an action.
-- `section:` on actions — gone. It groups a binding in the key overlay,
-  and actions leave the overlay for the menu. **It is knowingly
-  temporary**: added in 489d55c because actions are still help-strip
-  bindings today, and it should be deleted in the same cut that moves
-  them to the menu. `section:` on a *push* would go too, since pushes
-  become actions.
-- `key:` — survives, but menu-scoped except for `enter`.
-
-**What it keeps:** `label:`, which tuilib requires — *"Label names the
-verb and titles its log event. Required."* Its audience changes from the
-help strip to the menu entry, nothing else.
-
-**One pre-existing constraint, not a cost of the merge.** `tree` emits no
-`ActivatedMsg` and binds its own `enter` to "select", so enter-activation
-is list/table-only. That is already what the validator enforces for both
-`on_key` sources and action sources, so a tree gets menu-only verbs
-either way.
-
-**One thing with teeth.** `key: enter` on a destructive verb means enter
-deletes something — "enter descends" is safe in a way "enter is direct"
-is not. `confirm:` covers it and it is the author's call, so don't
-validate against it, but it is the one place this model is sharper than
-what it replaces.
-
-### Prompts need a seam the shell doesn't give us
-
-An action with unbound `inputs:` must ask for them between the pick and
-the run. There's nowhere to put that: `app.Update` matches
-`action.ChosenMsg` at app.go:747 and returns, while the line forwarding
-to our screen is app.go:1014. Pick and run happen in one `Update`, and
-we're never in that path — the action has already started before
-anything of ours could react.
-
-**Fix: those actions use `Do`, not `Run`.** `Do func() tea.Cmd` hands
-control back instead of running anything, so its cmd emits one of our
-messages, falls through to 1014, and the screen opens its form. On
-submit we substitute and call `runner.GoWith` ourselves — the shell
-intercepts capture messages globally (app.go:899/916/928), so the
-console entry, badge and kill picker still work.
-
-Confirm stays screen-side for these; the shell's fires before the form
-exists. That's anticipated, not a workaround — its `ConfirmedMsg`
-handler is guarded on `m.confUp` *"so a screen hosting its own confirm
-modal keeps receiving its own results."*
-
-Fully-bound actions stay on `Run` and use the shell's path. Common case.
-
-### Right-click
-
-`action.RetargetMsg` reports a right-press outside the open menu — "ask
-me about this one instead". The host moves its own selection to the
-event and reopens. tui-builder already hit-tests mouse events per
-component (`Mouse: app.MouseClick`), so this is a small addition:
-route the forwarded event through the existing focus/hit-test path,
-then reopen. Worth doing — it's the gesture that makes the menu feel
-native — but it can trail the first cut.
+- **Menu only; `enter` is the one direct key.** `key:` is optional and
+  menu-scoped. `key: enter` also fires directly and on double-click, via
+  `activate()`. `tryAction`, `tryPush` and the screen's own
+  confirm/dispatch/alert path are gone.
+- **`on_key:` folded into the registry.** A push is an action with
+  `push:`, and the binding's `bind:` fills the destination screen's
+  `parameters:`. `section:` is gone from actions.
+- **Run vs Do.** Fully bound exec and http actions use `Run`, so they go
+  through the shell's path (console, badge, kill picker, cancellation).
+  Pushes, interactive exec, and anything with unbound `inputs:` use `Do`.
+  Prompted runs finish through `runner.GoWith`, with the confirm kept
+  screen-side because the shell's fires before the form exists.
+- **Fan-out** (`multi: true`) is N runs, one per marked row, each tagged
+  `action.RunKey(a, target)`. It goes through `Do`, because the shell's
+  `Run` path starts exactly one run per Set.
+- **`exclusive:`** defaults to true for `type: http` and false otherwise,
+  and is overridable either way. **Correction:** the shell only records
+  in-flight runs it launched itself (its `Run` path). So exclusivity
+  holds for single-target runs, while fan-out and prompted runs, which
+  go out via `Do`, are not held against. Closing that needs tuilib to
+  let a host register its own runs in the menu's running set.
+- **Confirms are fitted to the shell modal** (`fitShellConfirm`). It's a
+  fixed 52×7 box that doesn't wrap, so a long confirm used to lose its
+  tail, which is where "cannot be undone" lives.
+- **Right-click** needed no `RetargetMsg` handling: the shell forwards
+  the press, then opens the menu. The fix was on our side. Focus now
+  moves *during* the press rather than one Update later, so `Actions()`
+  reads the clicked pane and not the previously focused one.
 
 ---
 
@@ -536,7 +336,7 @@ than argued.
 
 ---
 
-## Workstream 4 — password prompts
+## Workstream 4 — password prompts (done)
 
 The smallest change here and arguably the highest value per line.
 
@@ -572,71 +372,29 @@ and closes a real hole.
 
 ## Suggested implementation order
 
-1. **Password prompts.** Independent, tiny, closes a real hole.
-2. **Output console** (`OutputKey`). Prerequisite for everything in 3–4.
-3. **Rebase `origin/feature/actions`** onto this branch. Land it as-is,
-   green, before layering anything new on it.
-4. **Actions onto `pkg/action`.** `Actions() action.Set` + `ActionsKey`;
-   move exec and http onto `Run`, interactive onto `Do`, pushes onto
-   `Do`; delete `tryAction`, `tryPush` and the screen's
-   confirm/dispatch/alert path; fold `on_key:` into the registry and
-   drop `section:` from actions; rewrite the `examples/` configs off
-   direct keys. Prompts via `Do` + form + `runner.GoWith`.
-5. ~~**Multi-select.**~~ **Done**, minus the fan-out half, which is
-   actions. `markable:` + `mark_key:`, keyed setters on all three data
-   paths, the key→row map, validator constraints.
-6. **Right-click retargeting.** Small, follows naturally from 4.
-7. ~~**Glyphs and border shapes.**~~ **Done** — independent of 3-6, so
-   it landed while actions are parked.
-
-Steps 1–2 and 7 are worth doing regardless of whether 3–6 ever ship;
-all three have landed. **Actions (3, 4, 6) are parked** — 5 is landable
-without them, but its fan-out half and most of its payoff aren't.
+All done: password prompts (as `mask:`, not `type: password` — see
+`Parameter.Mask`), the output console, the actions rebase, actions onto
+`pkg/action`, multi-select with fan-out, right-click retargeting, and
+glyphs/border shapes.
 
 ## Tests
 
-- **Password:** `type: password` produces a masked field; the submitted
-  value is the real text, not the mask; validator rejects unknown types.
-- **Actions:** `Actions()` returns the right `Set` for the focused pane
-  (and disables bindings whose `from:` isn't focused); `action.Validate`
-  runs clean over every set a config can produce — it exists to be
-  called from a test, and catches duplicate shortcuts and duplicate
-  identities, both of which fail far from their cause; exec and http
-  both stream into the console; interactive still suspends the
-  alt-screen; a bare `d` press no longer fires the action bound to `d`
-  (menu-only), and does reach the focused component instead.
-- ~~**Marking:**~~ **Done.** Marks survive a poll that reorders rows
-  (and resolve to the row's *refreshed* cells); marks survive a filter;
-  the key set survives a theme rebuild and reattaches on the next fetch;
-  `markable:` + `window:` is a load error, as are the unsupported kinds
-  and every `mark_key:` misuse. Plus: static list and table are markable
-  (their keyed setters run at build time, since `Options.Items` /
-  `Options.Rows` seed cells but no keys — a detail the plan missed);
-  selections are ANSI-stripped; a non-markable component is untouched.
-- **Fan-out:** N marked rows produce N runs with distinct `RunKey`s.
-  *Blocked on actions.*
-- ~~**Glyphs/borders:**~~ **Done.** A partial `glyphs:` block resolves the
-  rest from defaults; unknown border name is a load error. Plus: the
-  overrides land on every palette (not just the initial one); every one
-  of the 13 glyph fields is both validated and copied; `ApplyChrome`
-  doesn't mutate its input; an empty block leaves the shapes zero so
-  tuilib's defaults still apply; and `overlay:` reaches confirm / alert /
-  the action menu but not ordinary components.
+All covered. The ones worth knowing exist: `action.Validate` runs over
+every generated Set (`TestGeneratedSetIsValid`); fan-out tags each run
+with its own target (`TestFanOutTagsEachRunWithItsOwnTarget`); the
+`exclusive:` defaults by kind (`TestExclusiveDefaultsByKind`); marks
+survive reorder, filter and theme rebuild; and `overlay:` reaches
+overlays only (`TestOverlayShapeReachesOverlaysOnly`).
 
 ## Open questions
 
-- **Should http actions default to `Exclusive`?** Firing the same POST
-  at the same target twice is usually a mistake, and the menu renders
-  the refusal with a reason rather than dropping the press. But it's a
-  behavior change for anything already relying on repeat-fire. Leaning
-  yes for `type: http`, no for `type: exec`.
-- **Does `bind:` stay its own field on a push action?** `on_key.bind:`
-  maps templated values into the *pushed screen's* parameter namespace,
-  which is not the same operation as substituting `${selection}` into
-  argv. Two substitution targets, one action schema — worth checking
-  they don't want different syntax before assuming `bind:` transplants
-  unchanged.
-- **Do we keep `Screen.Actions []cfg.Action` (main's shape) as a
-  deprecated alias?** The feature branch replaces it outright. Existing
-  configs in `examples/` would need rewriting either way — but they're
-  ours, so this is only a question if anyone else's configs exist.
+- **Does `bind:` stay its own field on a push action?** It landed
+  unchanged: on a push it fills the destination screen's `parameters:`,
+  and on anything else it fills the action's `inputs:`. Two substitution
+  targets, one field. It hasn't caused trouble yet. Revisit if the two
+  ever want different syntax.
+
+Resolved: http actions default to `Exclusive` (see Workstream 1), and
+`Screen.Actions []cfg.Action` was replaced outright rather than kept as
+an alias. The only configs were ours in `examples/`, and they were
+rewritten.

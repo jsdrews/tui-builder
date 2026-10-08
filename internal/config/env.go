@@ -236,6 +236,10 @@ func walkTemplates(c *Config, fn func(*string)) {
 		}
 	}
 
+	// Actions: the argv / URL / headers / body that actually reach the
+	// outside world.
+	visitActions(c.Actions, fn)
+
 	for _, src := range c.Data.Sources {
 		if src == nil {
 			continue
@@ -258,6 +262,7 @@ func walkTemplates(c *Config, fn func(*string)) {
 		}
 	}
 
+	// Components: titles + static row/list content.
 	for _, comp := range c.TUI.Components {
 		if comp == nil {
 			continue
@@ -296,22 +301,49 @@ func walkTemplates(c *Config, fn func(*string)) {
 	}
 }
 
-// visitScreen walks a screen's own templated fields: its title, its
-// actions' Run / Confirm / Notice, and any on_key bind templates.
+// visitScreen walks screen-level templated fields: the title, an action
+// binding's Confirm / Notice, and its Bind templates. Split out because
+// both the shorthand `screen:` and the multi-screen `screens:` map need
+// the same walk.
+//
+// A bound action's own Run / URL / Headers / Body are NOT walked here.
+// They live in the top-level `actions:` map now, so visitActions covers
+// them once each rather than once per binding that references them.
 func visitScreen(s *Screen, fn func(*string)) {
 	fn(&s.Title)
 	for i := range s.Actions {
 		fn(&s.Actions[i].Confirm)
 		fn(&s.Actions[i].Notice)
-		for j := range s.Actions[i].Run {
-			fn(&s.Actions[i].Run[j])
-		}
-	}
-	for i := range s.OnKey {
-		for k, v := range s.OnKey[i].Bind {
+		for k, v := range s.Actions[i].Bind {
 			str := v
 			fn(&str)
-			s.OnKey[i].Bind[k] = str
+			s.Actions[i].Bind[k] = str
+		}
+	}
+}
+
+// visitActions walks the templated fields of every defined action: the
+// argv, URL, headers and body that actually reach the outside world.
+// Runs after hoisting, so inline declarations are covered too.
+//
+// Pointer-form like the rest of walkTemplates: SubstituteEnv mutates
+// through this, and an action's URL needs ${env.*} resolved as much as
+// a source's does — more so, since an action is the write side.
+func visitActions(actions map[string]*Action, fn func(*string)) {
+	for _, a := range actions {
+		if a == nil {
+			continue
+		}
+		for i := range a.Run {
+			fn(&a.Run[i])
+		}
+		fn(&a.URL)
+		fn(&a.Method)
+		fn(&a.Body)
+		for k, v := range a.Headers {
+			str := v
+			fn(&str)
+			a.Headers[k] = str
 		}
 	}
 }

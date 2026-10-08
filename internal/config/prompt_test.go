@@ -25,26 +25,23 @@ func promptConfig() *Config {
 	}
 }
 
+// A prompt is a Key plus an inlined Parameter, so the vocabulary is the
+// DATA type — the widget follows from it.
 func TestPromptTypesAccepted(t *testing.T) {
-	for _, ty := range []string{"", "text", "password", "select", "confirm"} {
+	for _, ty := range []string{"", "string", "int", "bool", "duration"} {
 		c := promptConfig()
-		p := Prompt{Key: "TOKEN", Type: ty}
-		if ty == "select" {
-			p.Options = []string{"one", "two"}
-		}
-		c.App.Prompts = []Prompt{p}
+		c.App.Prompts = []Prompt{{Key: "TOKEN", Parameter: Parameter{Type: ty}}}
 		if err := c.Validate(); err != nil {
 			t.Errorf("type %q: Validate: %v", ty, err)
 		}
 	}
 }
 
-// A typo'd type used to fall through to a text field. That was harmless
-// until password existed; now it renders a token in the clear, which is
-// the one thing the field is for.
+// A typo'd type falls through to a plain text box. Harmless once, but a
+// mistyped `mask:` field would put a token on screen in the clear.
 func TestPromptUnknownTypeRejected(t *testing.T) {
 	c := promptConfig()
-	c.App.Prompts = []Prompt{{Key: "TOKEN", Type: "passwrod"}}
+	c.App.Prompts = []Prompt{{Key: "TOKEN", Parameter: Parameter{Type: "passwrod"}}}
 	err := c.Validate()
 	if err == nil {
 		t.Fatal("expected an error for an unknown prompt type")
@@ -56,48 +53,74 @@ func TestPromptUnknownTypeRejected(t *testing.T) {
 
 func TestPromptKeyRequired(t *testing.T) {
 	c := promptConfig()
-	c.App.Prompts = []Prompt{{Type: "password"}}
+	c.App.Prompts = []Prompt{{Parameter: Parameter{Mask: true}}}
 	err := c.Validate()
 	if err == nil || !strings.Contains(err.Error(), "key is required") {
 		t.Fatalf("expected a missing-key error, got: %v", err)
 	}
 }
 
-func TestPromptSelectNeedsOptions(t *testing.T) {
+// Masking is a rendering choice on a string, so it lives beside the type
+// rather than on it — `type: password` would put a widget name on the
+// axis that holds string / int / bool / duration.
+func TestPromptMaskAccepted(t *testing.T) {
 	c := promptConfig()
-	c.App.Prompts = []Prompt{{Key: "ENV", Type: "select"}}
-	err := c.Validate()
-	if err == nil || !strings.Contains(err.Error(), "needs options") {
-		t.Fatalf("expected a missing-options error, got: %v", err)
+	c.App.Prompts = []Prompt{{Key: "TOKEN", Parameter: Parameter{Mask: true}}}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
 }
 
-// Action prompts route through the same validator, so the rules hold on
-// both lists and the path names which one failed.
-func TestActionPromptTypesValidated(t *testing.T) {
+// A select renders every choice on screen, so there is nothing left to
+// mask — asking for both means one of them isn't going to happen.
+func TestPromptMaskWithOptionsRejected(t *testing.T) {
 	c := promptConfig()
-	c.TUI.Screen.Actions = []Action{{
-		Key:     "x",
-		Source:  "items",
-		Run:     []string{"echo", "hi"},
-		Prompts: []Prompt{{Key: "TOKEN", Type: "nope"}},
+	c.App.Prompts = []Prompt{{
+		Key:       "ENV",
+		Parameter: Parameter{Mask: true, Options: []string{"a", "b"}},
+	}}
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "mask") {
+		t.Fatalf("expected a mask/options conflict, got: %v", err)
+	}
+}
+
+func TestPromptRequiredAndDefaultConflict(t *testing.T) {
+	c := promptConfig()
+	c.App.Prompts = []Prompt{{
+		Key:       "ENV",
+		Parameter: Parameter{Required: true, Default: "x"},
+	}}
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("expected a required/default conflict, got: %v", err)
+	}
+}
+
+// Action inputs share the Parameter vocabulary, so they share the rules
+// — and the error names which input failed.
+func TestActionInputTypesValidated(t *testing.T) {
+	c := promptConfig()
+	c.TUI.Screen.Actions = []ActionBinding{{Key: "x", Action: "run"}}
+	c.Actions = map[string]*Action{"run": {
+		Run:    []string{"echo", "${inputs.token}"},
+		Inputs: map[string]*Parameter{"token": {Type: "nope"}},
 	}}
 	err := c.Validate()
 	if err == nil {
-		t.Fatal("expected an error for an unknown action prompt type")
+		t.Fatal("expected an error for an unknown action input type")
 	}
-	if !strings.Contains(err.Error(), "actions[0].prompts[0]") {
-		t.Errorf("error should name the action prompt path, got: %v", err)
+	if !strings.Contains(err.Error(), "inputs.token") {
+		t.Errorf("error should name the input, got: %v", err)
 	}
 }
 
-func TestActionPasswordPromptAccepted(t *testing.T) {
+func TestActionMaskedInputAccepted(t *testing.T) {
 	c := promptConfig()
-	c.TUI.Screen.Actions = []Action{{
-		Key:     "x",
-		Source:  "items",
-		Run:     []string{"echo", "${prompt.TOKEN}"},
-		Prompts: []Prompt{{Key: "TOKEN", Type: "password"}},
+	c.TUI.Screen.Actions = []ActionBinding{{Key: "x", Action: "run"}}
+	c.Actions = map[string]*Action{"run": {
+		Run:    []string{"echo", "${inputs.token}"},
+		Inputs: map[string]*Parameter{"token": {Mask: true}},
 	}}
 	if err := c.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)

@@ -8,8 +8,9 @@ import (
 	cfg "github.com/jsdrews/tui-builder/internal/config"
 )
 
-// helpModel builds a one-table screen with the given actions.
-func helpModel(t *testing.T, actions []cfg.Action) *Model {
+// helpModel builds a one-table screen with the given action bindings,
+// each resolved against a one-entry registry.
+func helpModel(t *testing.T, bindings []cfg.ActionBinding) *Model {
 	t.Helper()
 	comps := map[string]*cfg.Component{
 		"pods": {
@@ -21,8 +22,12 @@ func helpModel(t *testing.T, actions []cfg.Action) *Model {
 	sources := map[string]*cfg.Source{
 		"pods": cfg.NewEntry(&cfg.Source{Type: "static", Data: []any{}}),
 	}
-	sc := &cfg.Screen{Title: "Pods", Layout: cfg.Node{Component: "pods"}, Actions: actions}
-	m, err := New(sc, comps, sources, theme.Nord())
+	registry := map[string]*cfg.Action{}
+	for _, b := range bindings {
+		registry[b.Action] = &cfg.Action{Run: []string{"echo", b.Action}}
+	}
+	sc := &cfg.Screen{Title: "Pods", Layout: cfg.Node{Component: "pods"}, Actions: bindings}
+	m, err := New(sc, comps, sources, registry, theme.Nord())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -77,7 +82,7 @@ func TestHelpSectionsOmitUnconfiguredGroups(t *testing.T) {
 	sources := map[string]*cfg.Source{
 		"pods": cfg.NewEntry(&cfg.Source{Type: "static", Data: []any{}}),
 	}
-	m, err := New(&cfg.Screen{Title: "Pods", Layout: cfg.Node{Component: "pods"}}, comps, sources, theme.Nord())
+	m, err := New(&cfg.Screen{Title: "Pods", Layout: cfg.Node{Component: "pods"}}, comps, sources, nil, theme.Nord())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -89,68 +94,46 @@ func TestHelpSectionsOmitUnconfiguredGroups(t *testing.T) {
 	}
 }
 
-// Config-authored verbs get their own heading, defaulting to "Actions".
-func TestActionsGetTheirOwnSection(t *testing.T) {
-	m := helpModel(t, []cfg.Action{
-		{Key: "d", Source: "pods", Label: "describe", Run: []string{"echo", "d"}},
+// Actions are menu verbs now, so they are deliberately absent from the
+// overlay — tuilib keeps a menu shortcut out of Help() because moving
+// discovery off the footer and into the menu is most of the point, and a
+// footer listing nine verbs it can no longer fire would be worse than
+// listing none.
+func TestMenuOnlyActionsAreNotInTheOverlay(t *testing.T) {
+	m := helpModel(t, []cfg.ActionBinding{
+		{Key: "d", Action: "describe", Label: "describe"},
 	})
 	got := titles(t, m)
-	if !has(got, "Actions") {
-		t.Fatalf("actions should land under their own heading, got %v", got)
-	}
-	// And under it, the action's own label.
-	for _, s := range m.HelpSections() {
-		if s.Title != "Actions" {
-			continue
-		}
-		if len(s.Bindings) != 1 || s.Bindings[0].Help().Desc != "describe" {
-			t.Errorf("Actions section = %+v, want one binding labelled describe", s.Bindings)
-		}
+	if has(got, "Actions") || has(got, "describe") {
+		t.Errorf("a menu-only verb should not appear in the key overlay: %v", got)
 	}
 }
 
-// `section:` overrides the default heading, so a config can file a verb
-// next to the component keys it belongs with.
-func TestActionSectionOverridesTheDefault(t *testing.T) {
-	m := helpModel(t, []cfg.Action{
-		{Key: "d", Source: "pods", Label: "describe", Section: "Inspect", Run: []string{"echo", "d"}},
+// `enter` is the exception: it is still a real direct key, so it stays
+// discoverable, under its own heading and with the binding's label.
+func TestEnterVerbIsInTheOverlay(t *testing.T) {
+	m := helpModel(t, []cfg.ActionBinding{
+		{Key: "enter", Action: "open", Label: "open detail"},
 	})
-	got := titles(t, m)
-	if !has(got, "Inspect") {
-		t.Errorf("custom section: not applied, got %v", got)
+	if !has(titles(t, m), "Open") {
+		t.Fatalf("the enter verb should be listed: %v", titles(t, m))
 	}
-	if has(got, "Actions") {
-		t.Errorf("default heading should be replaced, not added to: %v", got)
-	}
-}
-
-// Two verbs naming the same section share one heading, in the order the
-// config lists them.
-func TestActionsShareASection(t *testing.T) {
-	m := helpModel(t, []cfg.Action{
-		{Key: "d", Source: "pods", Label: "describe", Section: "Inspect", Run: []string{"echo", "d"}},
-		{Key: "l", Source: "pods", Label: "logs", Section: "Inspect", Run: []string{"echo", "l"}},
-	})
-	for _, s := range m.HelpSections() {
-		if s.Title != "Inspect" {
+	for _, sec := range m.HelpSections() {
+		if sec.Title != "Open" {
 			continue
 		}
-		if len(s.Bindings) != 2 {
-			t.Fatalf("want both verbs under one heading, got %d", len(s.Bindings))
-		}
-		if s.Bindings[0].Help().Desc != "describe" || s.Bindings[1].Help().Desc != "logs" {
-			t.Errorf("config order not preserved: %+v", s.Bindings)
+		if len(sec.Bindings) != 1 || sec.Bindings[0].Help().Desc != "open detail" {
+			t.Errorf("Open section = %+v, want the binding's label", sec.Bindings)
 		}
 		return
 	}
-	t.Fatal("no Inspect section")
 }
 
 // The flat strip and the grouped overlay must agree about which keys
 // exist — they share verbSections precisely so they can't drift.
 func TestHelpAndHelpSectionsAgree(t *testing.T) {
-	m := helpModel(t, []cfg.Action{
-		{Key: "d", Source: "pods", Label: "describe", Run: []string{"echo", "d"}},
+	m := helpModel(t, []cfg.ActionBinding{
+		{Key: "d", Action: "describe", Label: "describe"},
 	})
 	flat := len(m.Help())
 	grouped := 0

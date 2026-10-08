@@ -1,0 +1,114 @@
+# action_http_argocd.yaml — `type: http` actions against a real API.
+#
+# Most actions should be subprocesses: shelling out to a CLI inherits its
+# auth, context selection, and RBAC for free, which is why the kube
+# example calls kubectl rather than the API it reads from. HTTP actions
+# earn their place when there is no CLI in the loop — an internal service,
+# or a workflow already wired to a token and an endpoint. Argo CD is the
+# case this was built for.
+#
+# Setup (nothing here needs a cluster to *load* — `wrangl --list-actions`
+# and `--describe-action` work offline):
+#
+#   export ARGOCD_URL=https://argocd.example.com
+#   export ARGOCD_TOKEN=...          # argocd account generate-token
+#
+# Inspect before firing anything:
+#   wrangl --list-actions examples/action_http_argocd.yaml
+#   wrangl --describe-action examples/action_http_argocd.yaml sync_app --param app=my-app
+#
+# Note what this example deliberately does NOT do: refresh the table
+# after a sync. A view owns its own refresh cycle — `apps` polls every
+# 10s below — and it converges on its own. Coupling the action to a
+# repaint would make every action responsible for knowing which panes it
+# invalidated, and an argocd sync is asynchronous anyway: the POST
+# returns immediately and the work happens afterwards, so the honest
+# picture comes from polling regardless.
+app:
+  title: Argo CD
+  theme: nord
+
+data:
+  sources:
+    apps:
+      type: http
+      url: ${env.ARGOCD_URL}/api/v1/applications
+      root: items
+      headers:
+        Authorization: "Bearer ${env.ARGOCD_TOKEN}"
+      # The convergence story. After a sync, this is what walks the row
+      # from OutOfSync → Progressing → Synced without anyone asking it to.
+      refresh: 10s
+      timeout: 15s
+
+actions:
+  sync_app:
+    description: Trigger a sync for one application
+    type: http
+    method: POST
+    url: ${env.ARGOCD_URL}/api/v1/applications/${inputs.app}/sync
+    headers:
+      Authorization: "Bearer ${env.ARGOCD_TOKEN}"
+    body: '{"prune": ${inputs.prune}, "dryRun": false}'
+    inputs:
+      app:   {type: string, required: true}
+      # Unbound below, so this opens a toggle when the action fires.
+      prune: {type: bool, label: "Prune resources?", default: "false"}
+    # A sync POST against an app that's already syncing returns 409.
+    # That's not a failure worth painting the badge red — the thing you
+    # asked for is already happening.
+    success: code < 400 or code == 409
+    message: "sync requested for ${inputs.app}"
+    # Without this the summary would be "POST …/sync failed → 403" and
+    # the actual reason would sit unread in a body too long for a footer.
+    error_message: ${body.message}
+
+  refresh_app:
+    description: Force a hard refresh of one application's state
+    type: http
+    method: GET
+    url: ${env.ARGOCD_URL}/api/v1/applications/${inputs.app}?refresh=hard
+    headers:
+      Authorization: "Bearer ${env.ARGOCD_TOKEN}"
+    inputs:
+      app: {type: string, required: true}
+    message: "refreshed ${inputs.app}"
+    error_message: ${body.message}
+
+tui:
+  components:
+    apps_table:
+      type: table
+      title: Applications
+      filterable: true
+      source: apps
+      columns:
+        - {title: Name,      width: 30, sortable: true, value: metadata.name}
+        - {title: Project,   width: 14, sortable: true, value: spec.project}
+        - {title: Sync,      width: 12, sortable: true, value: status.sync.status}
+        - {title: Health,    width: 12, sortable: true, value: status.health.status}
+        - {title: Revision,  width: 12,                 value: status.sync.revision}
+      color_rules:
+        - {when: Synced,      color: green}
+        - {when: OutOfSync,   color: yellow}
+        - {when: Healthy,     color: green}
+        - {when: Degraded,    color: red}
+        - {when: Progressing, color: cyan}
+
+  screen:
+    title: Argo CD
+    layout:
+      component: apps_table
+    actions:
+      - key: s
+        action: sync_app
+        label: sync
+        from: apps_table
+        confirm: "Sync ${selection.Name}?"
+        bind: {app: "${selection.Name}"}
+
+      - key: R
+        action: refresh_app
+        label: hard refresh
+        from: apps_table
+        bind: {app: "${selection.Name}"}

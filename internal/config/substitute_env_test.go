@@ -48,14 +48,21 @@ func TestSubstituteEnvCoversEveryTemplatedField(t *testing.T) {
 			},
 			Screen: Screen{
 				Title: tok,
-				Actions: []Action{{
-					Key: "x", Run: []string{"echo", tok}, Confirm: tok, Notice: tok,
+				Actions: []ActionBinding{{
+					Key: "x", Action: "run", Confirm: tok, Notice: tok,
+					Bind: map[string]string{"arg": tok},
 				}},
-				OnKey: []OnKeyBinding{{Key: "d", Push: "other", Bind: map[string]string{"ns": tok}}},
 			},
 			Screens: map[string]*Screen{
-				"other": {Title: tok, Actions: []Action{{Key: "y", Run: []string{tok}}}},
+				"other": {Title: tok, Actions: []ActionBinding{{Key: "y", Action: "post", Notice: tok}}},
 			},
+		},
+		// The registry: an action's argv, URL, headers and body are the
+		// values that actually reach the outside world, and visitActions
+		// is the only thing that walks them.
+		Actions: map[string]*Action{
+			"run":  {Run: []string{"echo", tok}},
+			"post": {Type: "http", Method: tok, URL: tok, Body: tok, Headers: map[string]string{"Authorization": tok}},
 		},
 	}
 

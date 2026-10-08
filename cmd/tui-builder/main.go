@@ -81,10 +81,11 @@ func run() error {
 			Screens:    c.TUI.Screens,
 			Components: c.TUI.Components,
 			Sources:    c.Data.Sources,
+			Actions:    c.Actions,
 		}
 		root, err = tqscreen.NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, initial)
 	} else {
-		root, err = tqscreen.New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, initial)
+		root, err = tqscreen.New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, initial)
 	}
 	if err != nil {
 		return err
@@ -106,6 +107,13 @@ func run() error {
 			// couldn't happen. Zero binding (app.theme_key: "-") pins
 			// the palette.
 			ThemeKey: keyBinding(c.App.ThemeCycleKey(), "theme"),
+			// The action menu. One switch for the whole feature: the
+			// overlay, the confirm modal, the goroutine, cancellation,
+			// the console entry, the badge, the kill picker and the
+			// per-target exclusivity check all come from the shell once
+			// this is bound. The screen supplies verbs by implementing
+			// action.Provider.
+			ActionsKey: keyBinding(c.App.ActionMenuKey(), "actions"),
 			// Every component we build (list / table / tree / logview /
 			// inspector / textview) hit-tests mouse events against its
 			// own rect, so clicking is uniformly useful. The cost is the
@@ -158,36 +166,46 @@ func collectAppPrompts(prompts []cfg.Prompt, th theme.Theme) error {
 		if label == "" {
 			label = p.Key
 		}
-		switch p.Type {
-		case "select":
+		// Widget follows the data type, same rule the generated action
+		// input form uses: Options means select, bool means toggle,
+		// everything else is a text input.
+		switch {
+		case len(p.Options) > 0:
+			initial := 0
+			for j, o := range p.Options {
+				if o == p.Default {
+					initial = j
+				}
+			}
 			fields[i] = form.Select(form.SelectOptions{
 				Key:     p.Key,
 				Label:   label,
 				Options: append([]string(nil), p.Options...),
-				Initial: p.InitialIdx,
+				Initial: initial,
 			})
-		case "confirm":
+		case p.Type == "bool":
 			fields[i] = form.Confirm(form.ConfirmOptions{
 				Key:     p.Key,
 				Label:   label,
-				Initial: p.InitialBool,
+				Initial: p.Default == "true",
 			})
-		case "password":
+		case p.Mask:
 			// Pre-fills from the environment like a text prompt does, so
-			// `TOKEN=… tui-builder …` still skips the typing. The value is
-			// masked either way, so pre-filling doesn't put it on screen.
+			// `TOKEN=… tui-builder …` still skips the typing. The value
+			// is masked either way, so pre-filling doesn't put it on
+			// screen.
 			fields[i] = form.Password(form.PasswordOptions{
 				Key:         p.Key,
 				Label:       label,
 				Placeholder: p.Placeholder,
-				Initial:     initialOr(p.Key, p.Initial),
+				Initial:     initialOr(p.Key, p.Default),
 			})
-		default: // text
+		default:
 			fields[i] = form.Text(form.TextOptions{
 				Key:         p.Key,
 				Label:       label,
 				Placeholder: p.Placeholder,
-				Initial:     initialOr(p.Key, p.Initial),
+				Initial:     initialOr(p.Key, p.Default),
 			})
 		}
 	}

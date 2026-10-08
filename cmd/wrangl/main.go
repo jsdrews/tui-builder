@@ -63,6 +63,8 @@ func newRoot() *cobra.Command {
 		pretty      bool
 		raw         bool
 		all         bool
+		listActions bool
+		describeAct bool
 		limit       int
 		maxDuration time.Duration
 		paramArgs   []string
@@ -94,6 +96,10 @@ wrangl never compiles, links, or drags in any terminal-UI code.`,
   wrangl --limit 5 examples/stream_l1.yaml l1
   wrangl --for 10s examples/stream_websocket.yaml trades
 
+  # Inspect actions — what this config can do, and what one would run
+  wrangl --list-actions examples/kube.yaml
+  wrangl --describe-action examples/kube.yaml delete_pod --param name=nginx --param namespace=default
+
   # Bind parameters on a parameterized source (repeatable)
   wrangl examples/params_demo.yaml posts_by_user --param user_id=1
   wrangl examples/params_demo.yaml posts_by_user --param user_id=3 --param limit=10`,
@@ -107,6 +113,15 @@ wrangl never compiles, links, or drags in any terminal-UI code.`,
 			params, err := parseParams(paramArgs)
 			if err != nil {
 				return err
+			}
+			if listActions {
+				return runListActions(args[0])
+			}
+			if describeAct {
+				if len(args) < 2 {
+					return fmt.Errorf("--describe-action requires an action name")
+				}
+				return runDescribeAction(args[0], args[1], params)
 			}
 			if describe {
 				if len(args) < 2 {
@@ -122,6 +137,8 @@ wrangl never compiles, links, or drags in any terminal-UI code.`,
 	// work after the migration.
 	cmd.Flags().BoolVar(&listOnly, "list", false, "list every defined source / pipeline and exit")
 	cmd.Flags().BoolVar(&describe, "describe", false, "print the schema (kind, lifecycle, parameters) for the given target and exit")
+	cmd.Flags().BoolVar(&listActions, "list-actions", false, "list every defined action (including hoisted inline ones) and exit")
+	cmd.Flags().BoolVar(&describeAct, "describe-action", false, "print an action's schema and a dry run of its resolved argv / request, then exit. Bind inputs with --param")
 	cmd.Flags().BoolVar(&pretty, "pretty", false, "indent one-shot JSON output (streams remain NDJSON)")
 	cmd.Flags().BoolVar(&raw, "raw", false, "emit string / log-line values as plain text instead of JSON (useful for `format: text` and streaming logs)")
 	cmd.Flags().BoolVarP(&all, "all", "a", false, "include hidden sources and pipelines (those whose name starts with `_`) in --list")
