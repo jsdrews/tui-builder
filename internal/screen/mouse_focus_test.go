@@ -90,7 +90,7 @@ func TestClickFocusesClickedPane(t *testing.T) {
 }
 
 // TestDoubleClickActivatesLikeEnter covers the mouse spelling of enter: a
-// double click must fire the same on_key binding the enter key does. The
+// double click must fire the same action binding the enter key does. The
 // component reports the double click as an ActivatedMsg naming itself; the
 // screen has to translate that into its enter verb, or the mouse can move
 // a cursor but never open anything.

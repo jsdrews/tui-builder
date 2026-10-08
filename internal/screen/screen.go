@@ -223,7 +223,7 @@ func New(s *cfg.Screen, components map[string]*cfg.Component, entries map[string
 // destination screen's parameterized sources. Pass nil on the initial
 // multi-screen construction (no push has fired yet) and on screens
 // whose binding has no Bind: map. Missing required params surface as
-// a build error so tryPush can pop an alert instead of constructing
+// a build error so pushAction can pop an alert instead of constructing
 // a half-broken screen.
 func NewMulti(screenName string, multi *Multi, sel build.Selection, params map[string]string, th theme.Theme) (*Model, error) {
 	src, ok := multi.Screens[screenName]
@@ -1526,11 +1526,10 @@ func componentActivated(c *build.Component, msg tea.Msg) bool {
 	return false
 }
 
-// tryPush handles a key that the focused component has an on_key
-// binding for. `press` is the key string as produced by tea.KeyMsg.String()
-// — "enter" for the Enter key, "d" / "l" / "ctrl+r" / etc. for arbitrary
-// bindings. Returns (cmd, true) when a matching binding fires; (nil, false)
-// to fall through to actions or normal component forwarding.
+// pushAction opens the screen a `push:` action names, filling the
+// destination's parameters from the binding's bind: map against sel.
+// The bool is always true — a push is handled even when it fails, since
+// the failure surfaces as an error cmd rather than falling through.
 func (m *Model) pushAction(b cfg.ActionBinding, def *cfg.Action, sel build.Selection) (tea.Cmd, bool) {
 	if m.multi == nil {
 		return app.Error(fmt.Sprintf("%s: push actions need a multi-screen config", b.Action)), true
@@ -1552,8 +1551,8 @@ func (m *Model) pushAction(b cfg.ActionBinding, def *cfg.Action, sel build.Selec
 }
 
 // selectionFrom extracts a Selection from a list or table component. The
-// validator restricts on_key sources / action sources to lists and
-// tables, so other kinds return a zero Selection.
+// validator restricts action sources to lists and tables, so other kinds
+// return a zero Selection.
 //
 // Items and cells are ANSI-stripped before being captured so that
 // color_rules wrapping (which lives in the displayed text) does not

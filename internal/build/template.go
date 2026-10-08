@@ -11,7 +11,7 @@ import (
 )
 
 // Selection is the data captured from a source component (list or table)
-// when an on_key binding fires. It seeds the ${selection} token in the
+// when an action binding fires. It seeds the ${selection} token in the
 // pushed screen's config.
 type Selection struct {
 	// String is the primary representation: a list's selected item, or a
@@ -58,7 +58,7 @@ func Substitute(s string, sel Selection) string {
 // params it actually declares. This is how the explicit push-site
 // bind: block feeds into the destination screen's parameterized
 // sources. Missing required params surface as an error so the caller
-// (tryPush) can pop an alert instead of building a broken screen.
+// (pushAction) can pop an alert instead of building a broken screen.
 //
 // Operator entries (filter, sort, …) are cloned without substitution
 // — they don't carry templated string fields and the expression

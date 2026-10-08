@@ -118,6 +118,15 @@ type Action struct {
 	// the target, so restarting `web` while `api` restarts is fine and
 	// restarting `web` twice is not.
 	Multi bool `yaml:"multi,omitempty"`
+	// Exclusive refuses a second run of this action against a target it
+	// is already running against: the menu shows it disabled with a
+	// reason until the first finishes. Other targets are unaffected.
+	//
+	// Defaults to true for http and false for everything else. Firing
+	// the same POST at the same target twice is almost always a
+	// double-tap, not intent; re-running a command usually is intent.
+	// Set it explicitly to override either way. See IsExclusive.
+	Exclusive *bool `yaml:"exclusive,omitempty"`
 	// Message is the head line on success — the one that paints the
 	// statusbar summary AND heads the console entry. Supports ${inputs.*}
 	// and, for http, dot-paths into the parsed JSON body via ${body.*}.
@@ -149,6 +158,16 @@ func (a *Action) Kind() string {
 		return "push"
 	}
 	return "exec"
+}
+
+// IsExclusive reports whether a second concurrent run against the same
+// target is refused, with the per-kind default applied — see the
+// Exclusive field.
+func (a *Action) IsExclusive() bool {
+	if a.Exclusive != nil {
+		return *a.Exclusive
+	}
+	return a.Kind() == "http"
 }
 
 // ActionBinding wires a key on a screen to an action. It carries every

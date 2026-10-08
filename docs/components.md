@@ -633,6 +633,12 @@ actions:
                                # verb disabled under a multi-selection rather
                                # than picking one row arbitrarily. Rejected
                                # on a push, and with `interactive: true`.
+    exclusive:    <bool>       # default true for http, false otherwise.
+                               # true refuses a second run against a target
+                               # it's already running on: the menu shows it
+                               # disabled until the first finishes. Only
+                               # single-target runs are held; fan-out and
+                               # prompted runs are not.
     push:         <screen>     # opens a screen in `tui.screens:` — what the
                                # old `on_key:` block was. Navigation, so it
                                # takes no run:/url:/inputs:; the binding's

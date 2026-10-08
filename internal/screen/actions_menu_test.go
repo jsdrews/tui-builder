@@ -292,6 +292,34 @@ func TestMultiFlagIsCarriedToTheMenu(t *testing.T) {
 	}
 }
 
+// http defaults to Exclusive — a repeated POST at the same target is a
+// double-tap — while exec defaults off. Either can be overridden.
+func TestExclusiveDefaultsByKind(t *testing.T) {
+	off := false
+	on := true
+	reg := map[string]*cfg.Action{
+		"sync":    {Type: "http", URL: "http://x/sync"},
+		"refresh": {Type: "http", URL: "http://x/refresh", Exclusive: &off},
+		"restart": {Run: []string{"echo", "r"}},
+		"drain":   {Run: []string{"echo", "d"}, Exclusive: &on},
+	}
+	m := menuModel(t, []cfg.ActionBinding{
+		{Action: "sync"}, {Action: "refresh"}, {Action: "restart"}, {Action: "drain"},
+	}, reg)
+
+	for label, want := range map[string]bool{
+		"sync": true, "refresh": false, "restart": false, "drain": true,
+	} {
+		a, ok := find(m.Actions(), label)
+		if !ok {
+			t.Fatalf("%s missing", label)
+		}
+		if a.Exclusive != want {
+			t.Errorf("%s: Exclusive = %v, want %v", label, a.Exclusive, want)
+		}
+	}
+}
+
 // A multi-selection fans out to Do (N runs); a single selection stays on
 // Run, which is what the shell can attribute and cancel on its own.
 func TestFanOutUsesDoOnlyForMoreThanOne(t *testing.T) {

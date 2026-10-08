@@ -102,6 +102,10 @@ func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Comp
 		sel = sels[0]
 	}
 	a.Multi = def.Multi
+	// The shell only tracks the runs it launches itself — the Run path
+	// below — so this guards the common case: one fully bound target.
+	// Fan-out and prompted runs go out through Do and aren't held.
+	a.Exclusive = def.IsExclusive()
 	// A push is navigation: nothing to stream, nothing to cancel, and
 	// the destination's parameters come from bind: rather than from the
 	// action's inputs. Do is the right shape, and tuilib says so —
