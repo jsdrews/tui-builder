@@ -193,6 +193,13 @@ type Model struct {
 	// kept so runner.Captured can be turned back into a Result carrying
 	// the action's own message: / error_message:.
 	pendingRun *action.Resolved
+
+	// id scopes this screen's internal messages; runs holds the
+	// subprocesses it launched; covered is set while a screen it pushed
+	// sits on top of it. See scope.go.
+	id      uint64
+	runs    map[*exec.Cmd]bool
+	covered bool
 }
 
 // New builds a single-screen Model. Components are looked up by name in
@@ -242,7 +249,7 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, entries map[str
 	if err != nil {
 		return nil, err
 	}
-	m := &Model{title: s.Title, th: th, tree: tree, focus: -1, multi: multi}
+	m := &Model{title: s.Title, th: th, tree: tree, focus: -1, multi: multi, id: nextModelID.Add(1)}
 	if len(tree.All()) > 0 {
 		m.focus = 0
 	}
@@ -306,6 +313,11 @@ func (m *Model) Init() tea.Cmd {
 // Subsequent activations (pop-back) reuse cached data and let polling
 // handle refreshes.
 func (m *Model) OnEnter(any) tea.Cmd {
+	m.covered = false
+	return m.own(m.onEnter())
+}
+
+func (m *Model) onEnter() tea.Cmd {
 	if m.started || len(m.sources) == 0 {
 		return nil
 	}
@@ -408,7 +420,7 @@ func (m *Model) Layout() layout.Node {
 // intercepted for focus cycling and enter intercepted when the focused
 // component has an action bound to enter). Non-key messages fan out so
 // spinner ticks reach every component.
-func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
+func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 	// Form modal — opened when a fired action had inputs nobody bound.
 	// On submit, merge the collected values into the inputs already
 	// resolved from bind: and resume. On cancel, abort the action.
@@ -512,6 +524,10 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		return m, nil
 	}
 
+	if cmd := m.updateWindows(msg); cmd != nil {
+		return m, cmd
+	}
+
 	switch x := msg.(type) {
 	case fetchMsg:
 		return m, m.handleFetch(x)
@@ -534,11 +550,17 @@ func (m *Model) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 	case windowTickMsg:
 		return m, m.handleWindowTick(x)
 	case runner.Result:
+		if !m.ownsRun(x.Cmd) {
+			return m, nil
+		}
 		// Interactive handoff finished. There's no captured output —
 		// the subprocess owned the terminal and printed straight to it —
 		// so the exit status is the whole report.
 		return m, m.actionOutcome(x.Err)
 	case runner.Captured:
+		if !m.ownsRun(x.Cmd) {
+			return m, nil
+		}
 		// A non-interactive run finished. Its stdout/stderr already
 		// streamed into the console line by line via the app shell; what
 		// we add is the head line, built with the action's own message: /
@@ -1309,6 +1331,7 @@ func (m *Model) dispatch(argv []string, notice string, interactive bool) tea.Cmd
 		return nil
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
+	m.launched(cmd)
 	if interactive {
 		if notice != "" {
 			return runner.RunWithNotice(cmd, notice)
@@ -1547,6 +1570,7 @@ func (m *Model) pushAction(b cfg.ActionBinding, def *cfg.Action, sel build.Selec
 	if err != nil {
 		return app.Error(fmt.Sprintf("%s: %v", def.Push, err)), true
 	}
+	m.covered = true
 	return tscreen.Push(child), true
 }
 

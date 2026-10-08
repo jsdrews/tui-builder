@@ -119,7 +119,8 @@ func (c *Component) Rebuild(th theme.Theme) {
 			// re-deliver the window — the source only refetches when the
 			// user scrolls or filters, and a theme change is neither.
 			// Reinstall it so a rebuild doesn't blank the page.
-			m.SetWindow(rows, off, total)
+			answered, _ := c.Table.Answered()
+			m.SetWindow(rows, off, total, answered)
 		}
 		if len(marks) > 0 {
 			m.SetMarks(marks)
