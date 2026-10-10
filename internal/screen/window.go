@@ -70,6 +70,7 @@ type windowFetchedMsg struct {
 	component string
 	gen       int
 	offset    int
+	answered  table.Answer
 	page      ds.WindowPage
 	err       error
 }
@@ -185,10 +186,11 @@ func (m *Model) handleWindowRequest(msg windowRequestMsg) tea.Cmd {
 	}
 	q := translateWindowQuery(msg.query, m.windowFilters(w.source))
 	src, gen, offset := w.src, msg.query.Gen, msg.query.Offset
+	answered := table.Answer{Raw: msg.query.Raw, Sort: msg.query.Sort, Desc: msg.query.Desc}
 	name := msg.component
 	return func() tea.Msg {
 		page, err := src.FetchWindow(context.Background(), q)
-		return windowFetchedMsg{component: name, gen: gen, offset: offset, page: page, err: err}
+		return windowFetchedMsg{component: name, gen: gen, offset: offset, answered: answered, page: page, err: err}
 	}
 }
 
@@ -201,15 +203,18 @@ func (m *Model) handleWindowFetched(msg windowFetchedMsg) tea.Cmd {
 	}
 	c := m.tree.Components[msg.component]
 	if msg.err != nil {
-		// Report the failure but still tell the coordinator the request
-		// finished, otherwise it stays pending forever and never asks
-		// for this window again. A zero-count page is exactly that
-		// signal, and it's also what keeps a broken endpoint from being
-		// re-requested on every scroll tick.
-		w.coord.Deliver(tsource.Page{Gen: msg.gen, Offset: msg.offset, Count: 0, Total: w.coord.Total()})
+		// Deliver the failure so the coordinator stops waiting on it and
+		// the table can mark the committed query failed. Its command (a
+		// QueryFailedMsg for the shell's query history) is dropped:
+		// windowError already reports the failure, naming the source.
+		accepted, _ := w.coord.Deliver(tsource.Page{Gen: msg.gen, Offset: msg.offset, Err: msg.err})
+		if !accepted || c == nil {
+			return nil
+		}
+		c.Table.SetFailed(msg.answered)
 		return tea.Batch(setLoading(c, false), m.windowError(w, c, msg.err))
 	}
-	accepted := w.coord.Deliver(tsource.Page{
+	accepted, next := w.coord.Deliver(tsource.Page{
 		Gen:    msg.gen,
 		Offset: msg.offset,
 		Count:  len(msg.page.Items),
@@ -221,7 +226,7 @@ func (m *Model) handleWindowFetched(msg windowFetchedMsg) tea.Cmd {
 	if c == nil {
 		return nil
 	}
-	build.ApplyWindow(c, msg.page.Items, msg.offset, msg.page.Total, m.th)
+	build.ApplyWindow(c, msg.page.Items, msg.offset, msg.page.Total, msg.answered, m.th)
 	// postApplyMsg flushes the ViewportChangedMsg that SetWindow just
 	// queued — that emit only fires from the table's own Update, and the
 	// intercepted fetch path never calls it. Without this the loop stalls
@@ -229,8 +234,22 @@ func (m *Model) handleWindowFetched(msg windowFetchedMsg) tea.Cmd {
 	// never ask for the rest. Same reason handleFetch sends it.
 	return tea.Batch(
 		setLoading(c, false),
+		tagWindowRequest(next, msg.component),
 		func() tea.Msg { return postApplyMsg{} },
 	)
+}
+
+// updateWindows hands msg to every coordinator. Each one runs a timer of
+// its own — a scroll waits for the viewport to settle before it asks for
+// rows — and only its own messages produce a command, so a non-nil return
+// means msg was a coordinator's and has been dealt with.
+func (m *Model) updateWindows(msg tea.Msg) tea.Cmd {
+	for name, w := range m.windows {
+		if cmd := w.coord.Update(msg); cmd != nil {
+			return tagWindowRequest(cmd, name)
+		}
+	}
+	return nil
 }
 
 // handleWindowViewport asks the coordinator whether the rows now on

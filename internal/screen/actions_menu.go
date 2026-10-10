@@ -114,7 +114,7 @@ func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Comp
 	if def.Kind() == "push" {
 		a.Do = func() tea.Cmd {
 			cmd, _ := m.pushAction(b, def, sel)
-			return cmd
+			return m.own(cmd)
 		}
 		return a
 	}
@@ -127,7 +127,7 @@ func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Comp
 	// messages, which does get forwarded, and the screen opens its form.
 	if len(unboundInputs(def, inputs)) > 0 {
 		a.Do = func() tea.Cmd {
-			return func() tea.Msg { return actionPickedMsg{binding: b} }
+			return m.own(func() tea.Msg { return actionPickedMsg{binding: b} })
 		}
 		return a
 	}
@@ -163,7 +163,7 @@ func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Comp
 	// run for the whole Set. tuilib still sees every one of them: they
 	// go out through the same runner.GoWith it would have used.
 	if def.Multi && len(sels) > 1 {
-		a.Do = func() tea.Cmd { return m.fanOut(b, def, a, sels) }
+		a.Do = func() tea.Cmd { return m.own(m.fanOut(b, def, a, sels)) }
 		return a
 	}
 
@@ -174,7 +174,7 @@ func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Comp
 		argv := append([]string(nil), resolved.Argv...)
 		a.Do = func() tea.Cmd {
 			m.trackRun(resolved)
-			return m.dispatch(argv, notice, true)
+			return m.own(m.dispatch(argv, notice, true))
 		}
 		return a
 	}
