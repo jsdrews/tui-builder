@@ -5,6 +5,9 @@ sources into them. Merge sources across clusters, accounts, or
 environments. Stream long-running output into a logview. Drill into
 multi-screen flows with stable cursor state across refreshes.
 
+**Docs:** <https://jsdrews.github.io/tui-builder/> — quick start, guide,
+full config reference, CLIs and every example.
+
 Built on top of [tuilib](https://github.com/jsdrews/tuilib): the
 component library does the rendering and theming; tui-builder turns
 declarative config into a live composition.

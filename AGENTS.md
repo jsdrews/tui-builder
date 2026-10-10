@@ -654,7 +654,10 @@ example second; implement third. Don't ship a half-shape.
   speculatively. `README.md`, `docs/reference/`, and this file are
   the canonical docs — keep them current, don't proliferate. Every
   config field needs a row in `docs/reference/`;
-  `TestReferenceDocumentsEveryField` fails otherwise.
+  `TestReferenceDocumentsEveryField` fails otherwise. The docs site
+  (`zensical.toml`, `docs/`) is built with `task docs:build`; update the
+  `docs/guide/` page too when a concept changes, and add new examples
+  to `docs/examples.md`.
 
 ## When in doubt
 
