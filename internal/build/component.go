@@ -59,6 +59,14 @@ type Component struct {
 	// pkg/remote drives; Table then points at its embedded table. Every
 	// message goes through Remote.Update rather than Table.Update.
 	Remote *remote.Table
+	// AtNewest is set on a span table anchored at its newest row. tuilib
+	// puts a span table's cursor on its first row whenever a new answer
+	// lands, which for a view anchored at the newest is the wrong end and
+	// leaves it at the older edge, loading older rows by itself. The
+	// screen moves it to the newest row instead; landed records which
+	// answer it last did that for.
+	AtNewest bool
+	landed   string
 	// RemoteLog is the eventlog's counterpart: an eventlog always binds a
 	// windowed source, and Eventlog points at this binding's embedded
 	// model once the screen has built it.
@@ -295,6 +303,9 @@ func tableOptions(c *cfg.Component, th theme.Theme) table.Options {
 			}
 			opts.Rows[i] = table.Row(cells)
 		}
+	}
+	if c.Spanned {
+		opts.MaxItems = c.MaxItems
 	}
 	if c.SortDebounce != "" {
 		// Validated at load. tuilib reads zero as its default, so "0"
@@ -924,4 +935,22 @@ func SplitAnchoredKey(k string) (cursor, key string) {
 		return k[:i], k[i+len(keySep):]
 	}
 	return "", k
+}
+
+// LandAtNewest puts a span table anchored at its newest row on that row
+// each time a new answer lands: the first page, and the first page of a
+// re-anchor after a filter. Called after every message the remote table
+// handles; it does nothing between answers, so scrolling is left alone.
+func (c *Component) LandAtNewest() {
+	if !c.AtNewest || c.Table == nil {
+		return
+	}
+	a, ok := c.Table.Answered()
+	if !ok || c.Table.Stale() {
+		return
+	}
+	if key := a.Raw + "\x00" + a.Sort; key != c.landed {
+		c.landed = key
+		c.Table.SetCursor(len(c.Table.Rows()) - 1)
+	}
 }

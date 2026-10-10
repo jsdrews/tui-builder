@@ -112,6 +112,25 @@ func MarkedSelections(c *Component) []Selection {
 	case KTable:
 		keys := c.Table.Selection()
 		out := make([]Selection, 0, len(keys))
+		if c.Cfg != nil && c.Cfg.Spanned {
+			// A span table's rows arrive through its remote binding, not
+			// ApplyData, so RowsByKey is never built; the table holds them
+			// keyed itself.
+			byKey := map[string]table.KeyedRow{}
+			for _, r := range c.Table.KeyedRows() {
+				byKey[r.Key] = r
+			}
+			titles := make([]string, 0, len(c.Cfg.Columns))
+			for _, col := range c.Cfg.Columns {
+				titles = append(titles, col.Title)
+			}
+			for _, k := range keys {
+				if r, ok := byKey[k]; ok {
+					out = append(out, selectionFromCells(r.Cells, titles))
+				}
+			}
+			return out
+		}
 		for _, k := range keys {
 			if sel, ok := c.RowsByKey[k]; ok {
 				out = append(out, sel)

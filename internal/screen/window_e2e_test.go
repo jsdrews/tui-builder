@@ -187,6 +187,11 @@ func (h *windowHarness) drain(cmds ...tea.Cmd) {
 		}
 		var next tea.Cmd
 		h.model, next = h.model.Update(msg)
+		// A real program renders after every update, and components
+		// settle their scroll position while rendering: a span table
+		// moved to its newest row doesn't know it has left the older
+		// edge until then.
+		_ = h.model.View()
 		if next != nil {
 			queue = append(queue, next)
 		}

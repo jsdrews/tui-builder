@@ -1737,7 +1737,9 @@ func updateComponent(c *build.Component, msg tea.Msg) tea.Cmd {
 		if c.Remote != nil {
 			// Every message, not just keys: remote routes its own fetch
 			// results and timers through here.
-			return c.Remote.Update(msg)
+			cmd := c.Remote.Update(msg)
+			c.LandAtNewest()
+			return cmd
 		}
 		m, cmd := c.Table.Update(msg)
 		*c.Table = m

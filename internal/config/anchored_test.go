@@ -39,9 +39,28 @@ func TestAnchoredWindowValidation(t *testing.T) {
 		{"offsets don't apply", func(c *Config) { c.Data.Sources["events"].Window.OffsetParam = "from" }, "offset_param: doesn't apply to an Anchored window"},
 		{"total doesn't apply", func(c *Config) { c.Data.Sources["events"].Window.TotalPath = "hits.total" }, "total_path: doesn't apply"},
 		{"no way to filter", func(c *Config) { c.Data.Sources["events"].Body = `{"size": ${window.limit}}` }, "set `search_param:` or at least one `filters:` entry"},
-		{"table can't bind it yet", func(c *Config) {
+		{"span table", func(c *Config) {
+			c.TUI.Components["events"] = &Component{Type: "table", Source: "events", MarkKey: Path{"_id"},
+				Columns: []Column{{Title: "T", Value: Path{"t"}}}}
+		}, ""},
+		{"span table needs mark_key", func(c *Config) {
 			c.TUI.Components["events"] = &Component{Type: "table", Source: "events", Columns: []Column{{Title: "T", Value: Path{"t"}}}}
-		}, "only an eventlog can bind for now"},
+		}, "needs `mark_key:`"},
+		{"span table is markable", func(c *Config) {
+			c.TUI.Components["events"] = &Component{Type: "table", Source: "events", MarkKey: Path{"_id"}, Markable: true, MaxItems: 1000,
+				Columns: []Column{{Title: "T", Value: Path{"t"}}}}
+		}, ""},
+		{"span table can't sort", func(c *Config) {
+			c.TUI.Components["events"] = &Component{Type: "table", Source: "events", MarkKey: Path{"_id"},
+				Columns: []Column{{Title: "T", Value: Path{"t"}, Sortable: true}}}
+		}, "order it walks them"},
+		{"span table has no initial sort", func(c *Config) {
+			c.TUI.Components["events"] = &Component{Type: "table", Source: "events", MarkKey: Path{"_id"},
+				InitialSort: &Sort{Column: "T"}, Columns: []Column{{Title: "T", Value: Path{"t"}}}}
+		}, "`initial_sort:` doesn't apply"},
+		{"max_items on an ordinary table", func(c *Config) {
+			c.TUI.Components["plain"] = &Component{Type: "table", MaxItems: 10, Columns: []Column{{Title: "T"}}, Rows: [][]any{{"a"}}}
+		}, "`max_items:` applies to an eventlog or a table over an Anchored source"},
 		{"exec needs the cursor tokens", func(c *Config) {
 			c.Data.Sources["events"] = &Source{Type: "exec", Command: []string{"logs", "--limit", "${window.limit}", "--q", "${window.search}"},
 				Window: &WindowConfig{Cursor: "ts"}}
