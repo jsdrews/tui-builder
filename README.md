@@ -27,7 +27,9 @@ expressions use an embedded expression language (`expr-lang`). Any
 entry can declare its own typed `parameters:` block, bindable via
 wrangl `--param`.
 
-See [`docs/data-layer.md`](docs/data-layer.md) for the full reference.
+See [`docs/reference/sources.md`](docs/reference/sources.md) and
+[`docs/reference/pipelines.md`](docs/reference/pipelines.md) for every field, and
+[`docs/data-layer.md`](docs/data-layer.md) for how the data layer fits together.
 
 ```
 ┌ All pods (3 clusters merged) ────────────────────────────────────┐
@@ -206,7 +208,7 @@ Operator kinds (transform an upstream entry):
 | `join` | Per-row enrichment: driver iterable + per-row lookup fetches |
 | `cache` | TTL-memoise an upstream's Fetch |
 
-See [`docs/components.md`](docs/components.md) for the full schema.
+See [`docs/reference/components.md`](docs/reference/components.md) for every field.
 
 ### Paging a remote API
 
@@ -248,7 +250,7 @@ being passed empty.
 
 See [`examples/http_window.yaml`](examples/http_window.yaml),
 [`examples/exec_window.yaml`](examples/exec_window.yaml), and
-[Windowed sources](docs/data-layer.md#windowed-sources).
+[`window`](docs/reference/sources.md#window).
 
 ### Streaming
 
@@ -471,15 +473,21 @@ via `task examples`.
 | `examples/table.yaml` | Filterable + sortable table, filter syntax (`key:value`, `~regex`) |
 | `examples/table_columns.yaml` | Column sizing (fixed / auto / flex / max_width) + alignment |
 | `examples/table_styled.yaml` | Colored cells + clickable hyperlinks, `initial_sort` |
+| `examples/table_wide.yaml` | Wide table with horizontal scroll (`←`/`→`, `0`/`$`) |
 | `examples/inspector.yaml` | Two-column label/value record viewer, nested groups |
+| `examples/inspector_auto.yaml` | `auto: true` — an inspector that derives its fields from any JSON response |
 | `examples/tree.yaml` | Hierarchical view, expand/collapse, search |
+| `examples/tree_source.yaml` | Source-bound tree: a `file` source bucketed by `group_by: team`, surviving `refresh:` polling |
 | `examples/logview.yaml` | Streaming-log pane, `/`-search, filter mode |
+| `examples/textview.yaml` | Static-text viewer: inline `content:` plus a source-bound clock; `/`-search, `w` wrap |
 | `examples/layout.yaml` | Nested vstack / hstack with mixed flex weights |
 | `examples/themes.yaml` | Theme picker reference |
 | `examples/chrome.yaml` | `app.glyphs` + `app.borders` — glyph vocabulary and border shapes |
 | `examples/marking.yaml` | Multi-select with `markable:` + `mark_key:` |
 | `examples/colors.yaml` | Per-component `colors:` overrides |
 | `examples/multi.yaml` | Multi-screen drilldown with breadcrumbs |
+| `examples/on_cursor.yaml` | `on_cursor:` — a repos table drives a detail inspector below it via `${cursor.*}` |
+| `examples/on_cursor_fs.yaml` | `on_cursor:` from a tree over the filesystem; `${cursor.path}` feeds `stat` in a textview |
 | `examples/http_countries.yaml` | Live REST API table (restcountries.com) |
 | `examples/http_github.yaml` | GitHub API drilldown: users → repos → repo detail |
 | `examples/http_github_auth.yaml` | Authenticated GitHub (`${env.GITHUB_TOKEN}`) |
@@ -500,6 +508,7 @@ via `task examples`.
 | `examples/action_http_argocd.yaml` | `type: http` actions against the Argo CD API — bearer auth, `success:` for a 409-is-fine API, `error_message: ${body.message}` |
 | `examples/kube.yaml` | Single-cluster kube: namespaces → pods → pod detail + logs |
 | `examples/kube_multi.yaml` | Multi-cluster kube: 3 clusters merged into one table |
+| `examples/demo.yaml` | Kitchen sink: list and table side by side |
 
 The two kube examples are wired to Taskfile tasks — see [Kubernetes
 demos](#kubernetes-demos) below.
@@ -564,7 +573,8 @@ examples/             # one YAML per feature, plus the kube demos
 scripts/
   check-data-layer-boundary.sh   # enforces no-TUI-imports in the data layer
 docs/
-  components.md       # full schema cheat sheet + per-component reference
+  reference/          # every config field, one page per area
+  data-layer.md       # how sources, pipelines and wrangl fit together
 AGENTS.md             # rules for AI agents working in this repo
 Taskfile.yml          # go-task entry points (`task --list`)
 ```
@@ -578,9 +588,9 @@ sign the boundary is wrong, not that you need an exception.
 
 ## Where to go next
 
-- **[`docs/components.md`](docs/components.md)** — complete schema
-  reference with every component, every data source field, every color
-  knob, the full example index, and the substitution syntax.
+- **[`docs/reference/`](docs/reference/README.md)** — every config
+  field: app and layout, components, sources, pipelines, actions, and
+  the `${…}` token, dot-path, expression and color syntax.
 - **[`AGENTS.md`](AGENTS.md)** — agent guidance: architecture brief,
   rules to follow, anti-patterns. Read this before generating tui-builder
   code with an LLM.

@@ -71,7 +71,7 @@ one change that makes the actions work observable.
 The `origin/feature/actions` registry (named actions, `type: exec | http`,
 typed `inputs:`, `success:` expressions) landed via a merge, then moved
 onto tuilib's action menu. The user-facing model is in
-[`docs/components.md`](../docs/components.md) and the README; this is
+[`docs/reference/`](../docs/reference/README.md) and the README; this is
 only what the docs don't carry.
 
 - **Menu only; `enter` is the one direct key.** `key:` is optional and
