@@ -255,7 +255,7 @@ task example NAME=demo
 
 ### http_countries
 
-A live REST API table with `refresh: 5m` and per-column dot-paths.
+A table over public JSON (the mledoze/countries dataset), polled with `refresh: 5m`, with per-column dot-paths.
 
 ```sh
 task example NAME=http_countries
