@@ -103,7 +103,12 @@ var windowTokenRe = regexp.MustCompile(`\$\{window\.([a-zA-Z0-9_.]+)\}`)
 // it. Prefer direct argv (no shell) when the values are user-typed —
 // see the docs.
 func renderWindowArgv(argv []string, q WindowQuery, filters map[string]string) []string {
-	vals := windowTokens(q, filters)
+	return renderTokenArgv(argv, windowTokens(q, filters))
+}
+
+// renderTokenArgv is renderWindowArgv over an already-flattened token map,
+// shared with the Anchored request's tokens.
+func renderTokenArgv(argv []string, vals map[string]string) []string {
 	out := make([]string, 0, len(argv))
 	for _, elem := range argv {
 		saw, nonEmpty := false, false

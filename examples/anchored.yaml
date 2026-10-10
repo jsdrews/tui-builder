@@ -1,0 +1,75 @@
+# anchored.yaml — a log walked by timestamp instead of paged by offset.
+#
+# Some APIs can't jump to row N: Elasticsearch past 10,000 hits, log APIs
+# filtered by "before / after this timestamp", anything that pages with an
+# ?after=<token>. They're Anchored: you read them by walking from an edge.
+# `window.cursor:` declares that, naming the field each request walks from.
+#
+# This one is a script over a synthetic 1,000-line log, two lines per
+# second, so the example runs anywhere. It opens at the newest line;
+# scroll up (or `g`) and it asks for the lines before the oldest it holds.
+# Two lines share every timestamp: they're kept apart by `key:`, so
+# neither is lost at a page boundary.
+#
+# The same shape over Elasticsearch, with the cursor in the POST body:
+#
+#   logs:
+#     type: http
+#     method: POST
+#     url: ${env.ES_URL}/app-logs/_search
+#     root: hits.hits
+#     body: '{"query": {"match_all": {}}, "size": ${window.limit}}'
+#     window:
+#       cursor: sort
+#       older: {sort: [{"@timestamp": desc}, {_id: desc}], search_after: "${window.cursor}"}
+#       newer: {sort: [{"@timestamp": asc},  {_id: asc}],  search_after: "${window.cursor}"}
+app:
+  title: App log
+  theme: nord
+data:
+  sources:
+    app_log:
+      type: exec
+      command:
+        - sh
+        - -c
+        - |
+          # ${window.dir} is older or newer; ${window.cursor} is the edge
+          # line's timestamp (empty on the first request); ${window.limit}
+          # is one more than a page. An older walk answers newest first.
+          awk -v dir="${window.dir}" -v cur="${window.cursor}" -v lim="${window.limit}" -v q="${window.search}" 'BEGIN {
+            split("INFO INFO INFO WARN INFO ERROR", lvl, " "); n = 0; out = ""
+            if (dir == "older") { from = 999; to = 0; step = -1 } else { from = 0; to = 999; step = 1 }
+            for (i = from; (step > 0 ? i <= to : i >= to); i += step) {
+              ts = int(i / 2)
+              if (cur != "" && ((dir == "older" && ts >= cur) || (dir == "newer" && ts <= cur))) continue
+              level = lvl[i % 6 + 1]
+              msg = sprintf("%s request %d served in %dms", level, i, (i * 37) % 900)
+              if (q != "" && index(tolower(msg), tolower(q)) == 0) continue
+              if (n >= lim) break
+              out = out (out == "" ? "" : ",") sprintf("{\"id\":\"req-%04d\",\"ts\":%d,\"at\":\"12:%02d:%02d\",\"level\":\"%s\",\"msg\":\"%s\"}", i, ts, int(ts / 60) % 60, ts % 60, level, msg)
+              n++
+            }
+            printf "[%s]", out
+          }'
+      window:
+        page_size: 50
+        cursor: ts
+tui:
+  components:
+    log:
+      type: eventlog
+      title: App log
+      source: app_log
+      key: id
+      text: msg
+      mark: at
+      searchable: true
+      filterable: true
+      color_rules:
+        - {when: "~^ERROR", color: red}
+        - {when: "~^WARN", color: yellow}
+  screen:
+    title: App log
+    layout:
+      component: log
