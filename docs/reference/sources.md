@@ -251,6 +251,9 @@ Supported on `http` (the request goes in the query string) and `exec`
 | `sort_param` | string | — | http only | Query parameter for the sort field. |
 | `sorts` | map of string | — | http only; needs `sort_param` | Maps a column title to the sort field the API expects. Unlisted columns send their title. |
 | `sort_desc_prefix` | string | — | http only; needs `sort_param` | Prepended for a descending sort, e.g. `-` for Django REST (`ordering=-created`). Empty means both directions send the same value. |
+| `cursor` | string | — | eventlog sources | Makes the source **Anchored**: walked from an edge instead of paged by offset. The dot-path to each item's cursor, the value the next request walks from (ES `sort`, a timestamp, an id). See [Anchored windows](#anchored-windows). |
+| `older` | map | — | http, with `cursor` | What the request changes to walk towards older items, merged into `body:` or set as query parameters. |
+| `newer` | map | — | http, with `cursor` | The same, walking towards newer items. |
 | `growing` | `true` or map | — | eventlog only; not with `refresh` | The set is still gaining items at its newest end. A bound eventlog follows the newest item and the source is polled every `follow_every`; when growth stops, one final read picks up the last items. `true` grows for as long as the screen is open. The map form ties it to another source; see [growing](#growing). |
 | `follow_every` | duration | `2s` | needs `growing` | Poll interval while growing. |
 
@@ -264,6 +267,8 @@ On exec, `command:` uses these tokens instead of the `*_param` fields:
 | `${window.filters.NAME}` | A scoped term's value, where `NAME` is what `filters:` maps the column to. |
 | `${window.sort}` | The sort column's title; the command maps it itself. |
 | `${window.sort_dir}` | `asc` or `desc`; empty when unsorted. |
+| `${window.cursor}` | Anchored only: the edge item's cursor; empty on the first request. |
+| `${window.dir}` | Anchored only: `older` or `newer`. |
 
 An argv element whose window tokens all resolve empty is dropped, so
 `--author=${window.filters.author}` disappears when no author term is
@@ -275,6 +280,55 @@ Query parameters already on an http `url:` are kept on every request; a
 parameter the window also sets is overwritten, so `?q=x` on the URL acts
 as a default search the user's filter replaces. `refresh:` and `r`
 refetch the window on screen in place.
+
+### Anchored windows
+
+Some APIs can't jump to row N: Elasticsearch past 10,000 hits
+(`search_after`), log APIs filtered by timestamp, and any API that pages
+with an `?after=<token>`. They're **Anchored**: read by walking from an
+edge item to the items before or after it. Setting `cursor:` makes a
+window Anchored. An eventlog bound to one opens at the newest item and
+walks older as you scroll up.
+
+Each request carries the edge item's cursor, which direction to walk,
+and the page size:
+
+- **http:** the `older:` or `newer:` map is merged into `body:` (a JSON
+  object), or, for a request with no body, set as query parameters. A
+  value that is exactly `${window.cursor}` takes the cursor's JSON value
+  (an ES sort array stays an array) and is left out of the first request,
+  which has no cursor yet. Inside `body:` text, `${window.limit}` is a
+  number and `${window.search}` / `${window.filters.NAME}` are escaped for
+  a JSON string. `search_param` and, with no body, `filters:` still name
+  query parameters.
+- **exec:** the command reads `${window.cursor}` (a string cursor
+  unquoted, anything else as JSON), `${window.dir}` (`older` or `newer`)
+  and `${window.limit}`, plus the usual filter tokens.
+
+Answer an older walk newest first, as a descending sort does; tui-builder
+reverses it. `${window.limit}` is one more than the page size: whether the
+extra item comes back is how tui-builder knows that edge has more.
+
+Items are held by cursor plus the component's `key:`, so two items with
+the same cursor (log lines stamped the same millisecond) both stay.
+
+```yaml
+logs:
+  type: http
+  method: POST
+  url: ${env.ES_URL}/app-logs/_search
+  root: hits.hits
+  body: '{"query": {"query_string": {"query": "${window.search}*"}}, "size": ${window.limit}}'
+  window:
+    cursor: sort
+    older: {sort: [{"@timestamp": desc}, {_id: desc}], search_after: "${window.cursor}"}
+    newer: {sort: [{"@timestamp": asc},  {_id: asc}],  search_after: "${window.cursor}"}
+```
+
+An Anchored window has no offsets, total or user sort, so `offset_param`,
+`total_path`, `sort_param`, `sorts`, `sort_desc_prefix` and `prefetch`
+don't apply, and it opens at the newest item (`start: oldest` isn't
+available). Only an eventlog can bind one for now.
 
 ### Growing
 
@@ -322,6 +376,9 @@ data:
   window token.
 - A `sortable` column on the bound table needs `sort_param` (http).
 - `page_size` and `prefetch` are not negative.
+- With `cursor:`: http needs both `older:` and `newer:`, which are
+  http-only; exec must reference `${window.cursor}`, `${window.dir}` and
+  `${window.limit}`; the offset, total and sort fields are rejected.
 
 `wrangl` on a windowed source returns its first page.
 

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -153,7 +154,18 @@ func (h *windowHarness) drain(cmds ...tea.Cmd) {
 		if c == nil {
 			continue
 		}
-		msg := c()
+		// A command that takes longer than a second is a timer — an
+		// eventlog's 2s "new" highlight expiring, say — not a fetch or the
+		// viewport settling, which take milliseconds. Leave it sleeping in
+		// its goroutine rather than paying for it on every test.
+		done := make(chan tea.Msg, 1)
+		go func() { done <- c() }()
+		var msg tea.Msg
+		select {
+		case msg = <-done:
+		case <-time.After(time.Second):
+			continue
+		}
 		if msg == nil {
 			continue
 		}

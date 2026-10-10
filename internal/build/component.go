@@ -875,9 +875,12 @@ func NewRemoteEventlog(c *Component, th theme.Theme, shape remote.Shape[eventlog
 	c.RemoteLog = remote.NewEventlog(eventlogOptions(c.Cfg, th), shape)
 	c.Eventlog = &c.RemoteLog.Model
 	// tuilib's eventlog starts out following the newest item. That's the
-	// right default only for `start: newest`; a growing source turns
-	// following back on through SetGrowing, whatever `start:` says.
-	c.Eventlog.SetFollow(c.Cfg.Start == "newest")
+	// right default for `start: newest`, and for Anchored data, which
+	// tuilib anchors at the newest item; a Seekable log opens at the top
+	// unless asked. A growing source turns following back on through
+	// SetGrowing, whatever `start:` says.
+	_, anchored := shape.(remote.Anchored[eventlog.Item])
+	c.Eventlog.SetFollow(c.Cfg.Start == "newest" || anchored)
 }
 
 // EventlogItems turns a page of source items into eventlog items: the key
@@ -901,4 +904,23 @@ func EventlogItems(c *Component, items []any, th theme.Theme) []eventlog.Item {
 		}
 	}
 	return out
+}
+
+// keySep joins an Anchored item's cursor to its component key in the key
+// tuilib holds. tuilib treats an item's key as its cursor, so two items
+// with the same cursor (Prefect logs stamped the same millisecond) would
+// collapse into one; prefixing the component key keeps them apart.
+// JSON never contains a raw unit separator, so the split is unambiguous.
+const keySep = "\x1f"
+
+// AnchoredKey is the key tuilib holds for an Anchored item.
+func AnchoredKey(cursor, key string) string { return cursor + keySep + key }
+
+// SplitAnchoredKey recovers the cursor and component key from an
+// AnchoredKey. A key with no separator is a plain (Seekable) key.
+func SplitAnchoredKey(k string) (cursor, key string) {
+	if i := strings.Index(k, keySep); i >= 0 {
+		return k[:i], k[i+len(keySep):]
+	}
+	return "", k
 }
