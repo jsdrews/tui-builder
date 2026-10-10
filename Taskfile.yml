@@ -51,6 +51,28 @@ tasks:
       - go build -o bin/tui-builder ./cmd/tui-builder
       - cd "{{.USER_WORKING_DIR}}" && "{{.TASKFILE_DIR}}/bin/tui-builder" {{.CLI_ARGS}}
 
+  docs:serve:
+    desc: Serve the docs site at http://127.0.0.1:8000 with live reload
+    deps: [docs:venv]
+    cmds:
+      - .venv-docs/bin/zensical serve
+
+  docs:build:
+    desc: Build the docs site into ./site, failing on broken links or snippets (what CI runs)
+    deps: [docs:venv]
+    cmds:
+      - .venv-docs/bin/zensical build --strict
+
+  docs:venv:
+    internal: true
+    cmds:
+      - python3 -m venv .venv-docs
+      - .venv-docs/bin/pip install -q -r docs-requirements.txt
+    sources:
+      - docs-requirements.txt
+    generates:
+      - .venv-docs/bin/zensical
+
   wrangl:sources:
     desc: List the sources / pipelines defined in every examples/*.yaml
     # Build once, then run --list against each example. Reuses the shared

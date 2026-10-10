@@ -1,0 +1,77 @@
+[project]
+site_name = "tui-builder"
+site_description = "Build terminal UIs by writing YAML."
+site_url = "https://jsdrews.github.io/tui-builder/"
+repo_url = "https://github.com/jsdrews/tui-builder"
+repo_name = "jsdrews/tui-builder"
+edit_uri = "edit/main/docs/"
+docs_dir = "docs"
+site_dir = "site"
+
+nav = [
+  { "Home" = "index.md" },
+  { "Quick start" = "quickstart.md" },
+  { "Guide" = [
+    { "App, screens and layout" = "guide/app.md" },
+    { "Data" = "guide/data.md" },
+    { "Components" = "guide/components.md" },
+    { "Actions" = "guide/actions.md" },
+    { "Templating" = "guide/templating.md" },
+    { "How the data layer works" = "data-layer.md" },
+  ] },
+  { "Reference" = [
+    "reference/README.md",
+    { "App, screens and layout" = "reference/app.md" },
+    { "Components" = "reference/components.md" },
+    { "Sources" = "reference/sources.md" },
+    { "Pipelines" = "reference/pipelines.md" },
+    { "Actions" = "reference/actions.md" },
+    { "Templating" = "reference/templating.md" },
+  ] },
+  { "CLIs" = [
+    { "tui-builder" = "cli/tui-builder.md" },
+    { "wrangl" = "cli/wrangl.md" },
+  ] },
+  { "Examples" = "examples.md" },
+]
+
+[project.theme]
+language = "en"
+features = [
+  "content.code.copy",
+  "content.tabs.link",
+  "navigation.footer",
+  "navigation.path",
+  "navigation.sections",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to light mode"
+
+[project.markdown_extensions]
+admonition = {}
+attr_list = {}
+md_in_html = {}
+tables = {}
+toc.permalink = true
+pymdownx.details = {}
+pymdownx.highlight = {}
+pymdownx.inlinehilite = {}
+pymdownx.superfences = {}
+pymdownx.tabbed.alternate_style = true
+# Full examples are included from the real files, so every complete
+# config on the site is one `go test` already loads.
+pymdownx.snippets.base_path = ["."]
+pymdownx.snippets.check_paths = true
