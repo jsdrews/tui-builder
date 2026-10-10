@@ -52,12 +52,14 @@ Requests a URL and parses the response. For REST and JSON APIs, GraphQL
 | `window` | map | — | json; not with `follow`, `paginate` | Fetches only the rows on screen and lets the server filter and sort. See [`window`](#window). |
 
 ```yaml
-countries:
+releases:
   type: http
-  url: https://restcountries.com/v3.1/all?fields=name,region,population
+  url: https://api.github.com/repos/jsdrews/tui-builder/releases
   refresh: 5m
   timeout: 15s
-  headers: {Accept: application/json}
+  headers:
+    Accept: application/vnd.github+json
+    Authorization: "Bearer ${env.GITHUB_TOKEN}"
 ```
 
 ## `exec`
