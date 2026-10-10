@@ -6,6 +6,12 @@
 // same node fields.
 package config
 
+import (
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+)
+
 // Config is the top-level document. Layered into three blocks that
 // match the architectural boundary enforced in code:
 //
@@ -227,6 +233,52 @@ type WindowConfig struct {
 	// what follows it. Empty means the API has no descending form, so
 	// both directions send the same value.
 	SortDescPrefix string `yaml:"sort_desc_prefix,omitempty"`
+
+	// Growing says the set is still gaining items at its newest end — a
+	// running job's events. While it's growing, a bound eventlog follows
+	// the newest item and the source is polled every FollowEvery; when it
+	// stops, tuilib makes one final read. Only an eventlog can bind a
+	// growing source. See Growing.
+	Growing *Growing `yaml:"growing,omitempty"`
+	// FollowEvery is the poll interval while Growing. A duration string;
+	// empty is DefaultFollowEvery.
+	FollowEvery string `yaml:"follow_every,omitempty"`
+}
+
+// DefaultFollowEvery is the poll interval for a growing source when
+// `follow_every:` is unset. Matches tuilib's own default.
+const DefaultFollowEvery = "2s"
+
+// Growing is `window.growing:`. It's written either as `true` — growing
+// for as long as the screen is open — or as a condition on another
+// source:
+//
+//	growing: {source: job, while: 'status in ["pending", "running"]'}
+//
+// The condition is an expression over that source's value, re-evaluated
+// whenever it answers. That is the AWX shape: whether a job's events are
+// still arriving is a field on the job, not on the events.
+type Growing struct {
+	// Always is the `growing: true` form.
+	Always bool `yaml:"-"`
+	// Source names the data entry whose value decides.
+	Source string `yaml:"source,omitempty"`
+	// While is the expression, true while items are still arriving.
+	While string `yaml:"while,omitempty"`
+}
+
+// UnmarshalYAML accepts `growing: true` as well as the map form.
+func (g *Growing) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		var b bool
+		if err := node.Decode(&b); err != nil {
+			return fmt.Errorf("growing: expected true or {source, while}, got %q", node.Value)
+		}
+		*g = Growing{Always: b}
+		return nil
+	}
+	type plain Growing
+	return node.Decode((*plain)(g))
 }
 
 // DefaultWindowPageSize is the window size used when WindowConfig.PageSize
@@ -718,6 +770,27 @@ type Component struct {
 	// (live-tape pattern). MaxRows is ignored in keyed mode — row
 	// count is naturally bounded by the number of distinct keys.
 	RowKey Path `yaml:"row_key,omitempty"`
+
+	// eventlog fields. An eventlog binds only to a windowed source; each
+	// item draws as the lines of its Text.
+	//
+	// Key is the dot-path to each item's identity: what enter hands an
+	// action as ${selection}, and what dedupes items. Required.
+	Key Path `yaml:"key,omitempty"`
+	// Text is the dot-path to an item's text, split on newlines. An empty
+	// value draws as a dim "· no output" line — the item still happened.
+	// Required.
+	Text Path `yaml:"text,omitempty"`
+	// Mark is an optional dot-path shown as-is in the gutter, normally
+	// the server's timestamp.
+	Mark Path `yaml:"mark,omitempty"`
+	// Start is where the view opens once the source isn't growing:
+	// "oldest" (default) or "newest". A growing source always opens at
+	// the newest item and follows.
+	Start string `yaml:"start,omitempty"`
+	// MaxItems caps the items held; the end furthest from the view is
+	// trimmed. Zero is tuilib's default.
+	MaxItems int `yaml:"max_items,omitempty"`
 
 	// logview fields
 	Lines      []string `yaml:"lines,omitempty"`

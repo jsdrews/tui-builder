@@ -105,8 +105,8 @@ func TestWindowRejectsNonTableBinding(t *testing.T) {
 	if err == nil {
 		t.Fatal("Validate succeeded binding a windowed source to a list")
 	}
-	if !strings.Contains(err.Error(), "type: table") {
-		t.Errorf("error %q should say only tables can hold a window", err)
+	if !strings.Contains(err.Error(), "only a table or an eventlog") {
+		t.Errorf("error %q should say only tables and eventlogs can hold a window", err)
 	}
 }
 

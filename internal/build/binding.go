@@ -478,3 +478,13 @@ func buildInspectorFields(in []cfg.InspectorField, data any, th theme.Theme) []i
 	}
 	return out
 }
+
+// ItemInspector builds the inspector enter opens on an eventlog item when
+// no action is bound to it: the raw item, every field, first level open.
+// An eventlog draws only an item's text, so this is the way to reach the
+// rest of it.
+func ItemInspector(title string, data any, th theme.Theme) inspector.Model {
+	m := buildInspector(&cfg.Component{Type: "inspector", Title: title, Auto: true, Filterable: true, InitialDepth: 1}, th)
+	m.SetFields(inspector.FromAny(data))
+	return m
+}
