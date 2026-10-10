@@ -13,6 +13,7 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/jsdrews/tuilib/pkg/ansi"
+	"github.com/jsdrews/tuilib/pkg/eventlog"
 	"github.com/jsdrews/tuilib/pkg/inspector"
 	"github.com/jsdrews/tuilib/pkg/list"
 	"github.com/jsdrews/tuilib/pkg/logview"
@@ -23,6 +24,7 @@ import (
 	"github.com/jsdrews/tuilib/pkg/tree"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
+	ds "github.com/jsdrews/tui-builder/internal/datasource"
 )
 
 // Kind enumerates the supported leaf component types.
@@ -35,6 +37,7 @@ const (
 	KTree
 	KInspector
 	KTextview
+	KEventlog
 )
 
 // Component is a live, themed component pointer plus the originating config
@@ -50,11 +53,16 @@ type Component struct {
 	Tree      *tree.Model
 	Inspector *inspector.Model
 	Textview  *textview.Model
+	Eventlog  *eventlog.Model
 
 	// Remote is set on a table bound to a windowed source, which tuilib's
 	// pkg/remote drives; Table then points at its embedded table. Every
 	// message goes through Remote.Update rather than Table.Update.
 	Remote *remote.Table
+	// RemoteLog is the eventlog's counterpart: an eventlog always binds a
+	// windowed source, and Eventlog points at this binding's embedded
+	// model once the screen has built it.
+	RemoteLog *remote.Eventlog
 
 	// StreamRows is the ring buffer used by KTable components bound to
 	// a streaming source. Newest events first; trimmed to Cfg.MaxRows
@@ -90,6 +98,11 @@ func NewComponent(c *cfg.Component, th theme.Theme) (*Component, error) {
 	case "textview":
 		m := buildTextview(c, th)
 		return &Component{Cfg: c, Kind: KTextview, Textview: &m}, nil
+	case "eventlog":
+		// A stand-in until the screen binds it to its source with
+		// NewRemoteEventlog; it draws an empty pane meanwhile.
+		m := eventlog.New(eventlogOptions(c, th))
+		return &Component{Cfg: c, Kind: KEventlog, Eventlog: &m}, nil
 	}
 	return nil, fmt.Errorf("unknown component type %q", c.Type)
 }
@@ -135,6 +148,14 @@ func (c *Component) Rebuild(th theme.Theme) {
 		st := c.Textview.State()
 		*c.Textview = buildTextview(c.Cfg, th)
 		c.Textview.Restore(st)
+	case KEventlog:
+		if c.RemoteLog != nil {
+			c.RemoteLog.Restyle(eventlogOptions(c.Cfg, th))
+			return
+		}
+		st := c.Eventlog.State()
+		*c.Eventlog = eventlog.New(eventlogOptions(c.Cfg, th))
+		c.Eventlog.Restore(st)
 	}
 }
 
@@ -814,4 +835,70 @@ func parseSI(s string) float64 {
 	}
 	f, _ := strconv.ParseFloat(strings.TrimSpace(s), 64)
 	return f * mult
+}
+
+// ------------------------------------------------------------- eventlog ---
+
+// eventlogOptions is an eventlog's config and theme as tuilib options,
+// shared by the stand-in NewComponent builds, the remote binding and its
+// Restyle on a theme swap.
+func eventlogOptions(c *cfg.Component, th theme.Theme) eventlog.Options {
+	opts := th.Eventlog()
+	opts.Title = c.Title
+	opts.Searchable = c.Searchable
+	opts.Filterable = c.Filterable
+	opts.MaxItems = c.MaxItems
+	if c.FilterPlaceholder != "" {
+		opts.Filter.Placeholder = c.FilterPlaceholder
+	}
+	if cs := c.Colors; cs != nil {
+		if v := parseColor(cs.BorderActive, th); v != nil {
+			opts.ActiveColor = v
+		}
+		if v := parseColor(cs.BorderInactive, th); v != nil {
+			opts.InactiveColor = v
+		}
+		if v := parseColor(cs.Spinner, th); v != nil {
+			opts.SpinnerStyle = opts.SpinnerStyle.Foreground(v)
+		}
+		if v := parseColor(cs.Match, th); v != nil {
+			opts.MatchStyle = opts.MatchStyle.Foreground(v)
+		}
+	}
+	return opts
+}
+
+// NewRemoteEventlog binds c to its windowed source through tuilib's
+// pkg/remote. Eventlog keeps pointing at the binding's embedded model, so
+// everything that reads the eventlog reads this one.
+func NewRemoteEventlog(c *Component, th theme.Theme, shape remote.Shape[eventlog.Item]) {
+	c.RemoteLog = remote.NewEventlog(eventlogOptions(c.Cfg, th), shape)
+	c.Eventlog = &c.RemoteLog.Model
+	// tuilib's eventlog starts out following the newest item. That's the
+	// right default only for `start: newest`; a growing source turns
+	// following back on through SetGrowing, whatever `start:` says.
+	c.Eventlog.SetFollow(c.Cfg.Start == "newest")
+}
+
+// EventlogItems turns a page of source items into eventlog items: the key
+// and mark plucked by dot-path, the text split into lines with the
+// component's color rules applied per line, and the raw item kept as Data
+// for enter and the inspector.
+func EventlogItems(c *Component, items []any, th theme.Theme) []eventlog.Item {
+	out := make([]eventlog.Item, len(items))
+	for i, it := range items {
+		var lines []string
+		if text := ds.FirstString(it, c.Cfg.Text); text != "" {
+			for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+				lines = append(lines, applyColorRules(line, c.Cfg.ColorRules, th))
+			}
+		}
+		out[i] = eventlog.Item{
+			Key:   ds.FirstString(it, c.Cfg.Key),
+			Lines: lines,
+			Data:  it,
+			Mark:  ds.FirstString(it, c.Cfg.Mark),
+		}
+	}
+	return out
 }

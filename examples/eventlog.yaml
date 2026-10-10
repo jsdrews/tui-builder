@@ -1,0 +1,84 @@
+# eventlog.yaml — a long job log read a page at a time.
+#
+# An eventlog shows events or lines from a source too large to hold, the
+# way you'd read an AWX job's events or a search index: it asks the source
+# for the window you're looking at and fetches more as you scroll. Each
+# item draws as the lines of its `text:`; an item with no text still shows,
+# as "· no output", because it still happened.
+#
+# The source here is a script that pages a synthetic 2,000-event,
+# AWX-style job log, so the example runs anywhere.
+#
+# Try:
+#   - scroll, PgDn, `g` / `G` (top / newest)
+#   - `/` to search what's loaded, `n` / `N` for the next match
+#   - `f` to filter: the text goes to the script as ${window.search}, so
+#     `fatal` narrows all 2,000 events, not just the ones on screen
+#   - enter on an event to open its raw fields; esc to close
+#
+# A real job is still running while you watch it. Declare that with
+# `window.growing:` and the eventlog follows the newest event, counting
+# new ones as "↓ N new" when you scroll away:
+#
+#   job:
+#     type: http
+#     url: ${env.AWX_HOST}/api/v2/jobs/${params.id}/
+#     refresh: 5s
+#   job_events:
+#     ...
+#     window:
+#       growing: {source: job, while: 'status in ["pending", "waiting", "running"]'}
+#       follow_every: 2s
+app:
+  title: Job log
+  theme: nord
+data:
+  sources:
+    job_events:
+      type: exec
+      root: results
+      command:
+        - sh
+        - -c
+        - |
+          awk -v off="${window.offset}" -v lim="${window.limit}" -v q="${window.search}" 'BEGIN {
+            split("ok changed skipping", st, " "); n = 0; out = ""
+            stars = ""; for (k = 0; k < 40; k++) stars = stars "*"
+            for (i = 1; i <= 2000; i++) {
+              host = "web" (i % 5 + 1)
+              if (i % 50 == 1)      { ev = "playbook_on_task_start"; txt = "TASK [step " int(i / 50) "] " stars }
+              else if (i % 7 == 0)  { ev = "runner_on_start"; txt = "" }
+              else if (i % 97 == 0) { ev = "runner_on_failed"; txt = "fatal: [" host "]: FAILED! => {\"msg\": \"timeout\"}\nretrying in 5s" }
+              else                  { s = st[i % 3 + 1]; ev = "runner_on_" s; txt = s ": [" host "]" }
+              if (q != "" && index(tolower(txt), tolower(q)) == 0) continue
+              if (n >= off && n < off + lim) {
+                gsub(/\\/, "\\\\", txt); gsub(/"/, "\\\"", txt); gsub(/\n/, "\\n", txt)
+                out = out (out == "" ? "" : ",") sprintf("{\"id\":%d,\"counter\":%d,\"event\":\"%s\",\"created\":\"10:%02d:%02d\",\"stdout\":\"%s\",\"event_data\":{\"host\":\"%s\"}}", 4000 + i, i, ev, int(i / 60) % 60, i % 60, txt, host)
+              }
+              n++
+            }
+            printf "{\"count\":%d,\"results\":[%s]}", n, out
+          }'
+      window:
+        page_size: 100
+        prefetch: 1
+        total_path: count
+tui:
+  components:
+    events:
+      type: eventlog
+      title: Job events
+      source: job_events
+      key: id
+      text: stdout
+      mark: created
+      searchable: true
+      filterable: true
+      color_rules:
+        - {when: "~^fatal", color: red}
+        - {when: "~^changed", color: yellow}
+        - {when: "~^TASK", color: cyan}
+  screen:
+    title: Job events
+    layout:
+      component: events

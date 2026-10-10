@@ -49,7 +49,7 @@ See [`docs/reference/sources.md`](docs/reference/sources.md) and
 | Capability | What it looks like |
 |---|---|
 | **Declarative TUIs** | One YAML file per app: `data.sources:` + `tui.components:` + `tui.screen:` / `tui.screens:`. No Go to write for the common case. |
-| **Components** | `list`, `table`, `inspector`, `tree`, `logview` — every tuilib component except those that don't fit a config model |
+| **Components** | `list`, `table`, `inspector`, `tree`, `logview`, `textview`, `eventlog` — every tuilib component except those that don't fit a config model |
 | **Data sources** | `http`, `exec`, `file`, `websocket`, `static`, `merge` — plus operator kinds (`filter`, `project`, `derive`, `sort`, `union`, `compose`, `join`, `cache`, `passthrough`) layered on top |
 | **Multi-screen** | Push/pop with breadcrumbs; `${selection.*}` substitutes parent row into child config (URL, title, fields) |
 | **Streaming** | Long-running `exec` + `websocket` push events into a logview as they arrive |
@@ -479,6 +479,7 @@ via `task examples`.
 | `examples/tree.yaml` | Hierarchical view, expand/collapse, search |
 | `examples/tree_source.yaml` | Source-bound tree: a `file` source bucketed by `group_by: team`, surviving `refresh:` polling |
 | `examples/logview.yaml` | Streaming-log pane, `/`-search, filter mode |
+| `examples/eventlog.yaml` | An `eventlog` paging a 2,000-event job log through an exec window: search, server-side filter, enter to open an event |
 | `examples/textview.yaml` | Static-text viewer: inline `content:` plus a source-bound clock; `/`-search, `w` wrap |
 | `examples/layout.yaml` | Nested vstack / hstack with mixed flex weights |
 | `examples/themes.yaml` | Theme picker reference |
