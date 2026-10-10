@@ -8,7 +8,7 @@ most "I need feature X" requests should be answered with YAML, not Go.
 
 Read [`README.md`](README.md) first for the user-facing surface; this
 doc assumes you know what the project does. For the full schema
-reference, see [`docs/components.md`](docs/components.md).
+reference, see [`docs/reference/`](docs/reference/README.md).
 
 ## The mental model
 
@@ -459,8 +459,8 @@ sub-screens behind one tab strip). Steps in order:
    add a case in `build.ApplyData` and a matching apply function.
 6. **Example.** `examples/<kind>.yaml` demonstrating the smallest
    compelling usage. Heavily commented.
-7. **Docs.** Add to `docs/components.md` (schema), README example
-   table, and `internal/config/config.go` field comments.
+7. **Docs.** Add to `docs/reference/components.md` (schema), README
+   example table, and `internal/config/config.go` field comments.
 
 Look at the inspector or logview commits as the template — they each
 followed this checklist.
@@ -503,7 +503,7 @@ plug in by following the same shape:
    real http/exec/file for operator tests — they're transformations,
    so feed them fake data. Use `cfg.NewEntry(&cfg.Source{Type:
    "newkind", From: "src", ...})` for fixtures.
-6. **Docs.** New operator section in `docs/data-layer.md`, plus an
+6. **Docs.** New operator section in `docs/reference/pipelines.md`, plus an
    example pipeline in `examples/filter_demo.yaml` (the canonical
    "operator showroom").
 7. **wrangl.** Nothing to do — `wrangl <name>` already works
@@ -535,7 +535,7 @@ source. Steps:
    Apply `root:` inside `Fetch` per rule 3.
 3. **Dispatch.** Add the case in `ds.BuildLeaf` in `source.go`.
 4. **Example.** `examples/stream_sse.yaml` or wherever it fits.
-5. **Docs.** README + `docs/data-layer.md` source-kind section.
+5. **Docs.** README + `docs/reference/sources.md` source-kind section.
 
 That's it — no screen / binding / build changes. The `Source`
 interface is doing its job when adding a source touches just one new
@@ -651,14 +651,16 @@ example second; implement third. Don't ship a half-shape.
   obscure the real edges of the system.
 - **Don't write documentation files unless asked.** Update existing
   docs when you change behavior; don't introduce new ones
-  speculatively. `README.md`, `docs/components.md`, and this file are
-  the canonical docs — keep them current, don't proliferate.
+  speculatively. `README.md`, `docs/reference/`, and this file are
+  the canonical docs — keep them current, don't proliferate. Every
+  config field needs a row in `docs/reference/`;
+  `TestReferenceDocumentsEveryField` fails otherwise.
 
 ## When in doubt
 
 - Read the closest example. Examples are heavily commented and meant
   as adapt-this material.
-- Read [`docs/components.md`](docs/components.md) for the full schema.
+- Read [`docs/reference/`](docs/reference/README.md) for the full schema.
 - Read the file-level package doc comments in `internal/datasource/`,
   `internal/build/`, `internal/screen/` — each opens with a paragraph
   on what the package owns and why.
