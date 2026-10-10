@@ -136,6 +136,8 @@ func componentNode(c *Component) layout.Node {
 		return layout.Sized(c.Inspector)
 	case KTextview:
 		return layout.Sized(c.Textview)
+	case KEventlog:
+		return layout.Sized(c.Eventlog)
 	}
 	return layout.RenderFunc(func(geom.Rect) string { return "" })
 }

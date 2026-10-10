@@ -44,6 +44,7 @@ var referencePages = map[string][]string{
 	"PaginateConfig": {"sources.md"},
 	"WindowConfig":   {"sources.md"},
 	"CacheSpec":      {"sources.md"},
+	"Growing":        {"sources.md"},
 	"MergeChild":     {"sources.md"},
 	"JoinDriver":     {"pipelines.md"},
 	"JoinLookup":     {"pipelines.md"},

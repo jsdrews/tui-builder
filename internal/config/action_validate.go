@@ -244,9 +244,9 @@ func validateActionBindings(bindings []ActionBinding, refs map[string]int, compo
 				return fmt.Errorf("%s: from %q not used in this screen's layout", bp, b.From)
 			}
 			switch components[b.From].Type {
-			case "list", "table", "tree":
+			case "list", "table", "tree", "eventlog":
 			default:
-				return fmt.Errorf("%s: from %q must be a list, table or tree (got %s) — nothing else has a selected row", bp, b.From, components[b.From].Type)
+				return fmt.Errorf("%s: from %q must be a list, table, tree or eventlog (got %s) — nothing else has a selected row", bp, b.From, components[b.From].Type)
 			}
 		}
 

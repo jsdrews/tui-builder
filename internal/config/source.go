@@ -502,6 +502,9 @@ func (s *Source) validateHTTP(path string) error {
 		if s.Follow {
 			return fmt.Errorf("%s: `window:` and `follow: true` are mutually exclusive (a window is a random-access slice of a finite set; follow is an open-ended stream)", path)
 		}
+		if s.Window.Growing != nil && s.Refresh != "" {
+			return fmt.Errorf("%s: `refresh:` and `window.growing:` are mutually exclusive — while growing, `window.follow_every:` is the poll", path)
+		}
 		if s.Format == "text" {
 			return fmt.Errorf("%s: `window:` requires json format (needs to parse the response to slice items and read the total)", path)
 		}
@@ -512,6 +515,14 @@ func (s *Source) validateHTTP(path string) error {
 // validate enforces WindowConfig's required params and value ranges.
 // path is the YAML path (e.g. `data.sources.books.window`).
 func (w *WindowConfig) validateShared(path string) error {
+	if w.FollowEvery != "" {
+		if w.Growing == nil {
+			return fmt.Errorf("%s.follow_every: set without `growing:` — it's the poll interval while growing", path)
+		}
+		if d, err := time.ParseDuration(w.FollowEvery); err != nil || d <= 0 {
+			return fmt.Errorf("%s.follow_every: invalid duration %q", path, w.FollowEvery)
+		}
+	}
 	if w.PageSize < 0 {
 		return fmt.Errorf("%s.page_size: must be >= 0 (0 = default %d)", path, DefaultWindowPageSize)
 	}
@@ -651,6 +662,9 @@ func (s *Source) validateExec(path string) error {
 		}
 		if s.Follow {
 			return fmt.Errorf("%s: `window:` and `follow: true` are mutually exclusive (a window is a random-access slice of a finite set; follow is an open-ended stream)", path)
+		}
+		if s.Window.Growing != nil && s.Refresh != "" {
+			return fmt.Errorf("%s: `refresh:` and `window.growing:` are mutually exclusive — while growing, `window.follow_every:` is the poll", path)
 		}
 		if s.Format == "text" {
 			return fmt.Errorf("%s: `window:` requires json format (needs to parse stdout to slice items and read the total)", path)
