@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -95,6 +96,11 @@ func (c *Config) Validate() error {
 			if err := bindWindowed(name, comp, ref, entry); err != nil {
 				return err
 			}
+		}
+		// A local sort is instant, so there's nothing to debounce: the
+		// setting would read as working and do nothing.
+		if comp.SortDebounce != "" && !comp.Windowed {
+			return fmt.Errorf("tui.components.%s: `sort_debounce:` only applies to a table bound to a windowed source — a local sort is instant", name)
 		}
 		// After bindWindowed: the windowed check below needs the flag
 		// it sets.
@@ -413,6 +419,14 @@ func (c *Component) validate(path string) error {
 					return fmt.Errorf("%s.columns[%d].color_rules[%d]: color is required", path, i, j)
 				}
 			}
+		}
+	}
+	if c.SortDebounce != "" {
+		if c.Type != "table" {
+			return fmt.Errorf("%s: `sort_debounce:` is only valid on a table bound to a windowed source", path)
+		}
+		if d, err := time.ParseDuration(c.SortDebounce); err != nil || d < 0 {
+			return fmt.Errorf("%s: invalid sort_debounce %q (want a duration such as 300ms, or 0 to sort on every change)", path, c.SortDebounce)
 		}
 	}
 	if c.Type == "tree" && c.Root == nil && c.Source == "" {

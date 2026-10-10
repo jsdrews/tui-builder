@@ -695,6 +695,13 @@ type Component struct {
 	Columns     []Column `yaml:"columns,omitempty"`
 	Rows        [][]any  `yaml:"rows,omitempty"`
 	InitialSort *Sort    `yaml:"initial_sort,omitempty"`
+	// SortDebounce is how long a windowed table waits for sort input to
+	// go quiet before asking the source for a new order, so stepping
+	// through columns with [ / ] sends one request instead of one per
+	// keypress. A duration string; empty is tuilib's default and "0"
+	// commits every change at once. Only windowed tables sort remotely,
+	// so it's a load error anywhere else.
+	SortDebounce string `yaml:"sort_debounce,omitempty"`
 	// MaxRows caps the table when bound to a streaming source — each
 	// arriving JSON frame is prepended as a new row, oldest rows
 	// dropped past this size. 0 (default) implies 100 for streaming

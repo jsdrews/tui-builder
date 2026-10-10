@@ -1,8 +1,11 @@
 package build
 
 import (
+	"context"
 	"testing"
+	"time"
 
+	"github.com/jsdrews/tuilib/pkg/remote"
 	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
@@ -87,11 +90,22 @@ func TestWindowSurvivesThemeRebuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	NewRemoteTable(c, th, remote.Seekable[table.KeyedRow]{
+		Page: func(context.Context, remote.Window) ([]table.KeyedRow, int, error) {
+			return nil, 0, nil
+		},
+	})
+	// Stand in for a delivered page: the remote table installs windows
+	// through its embedded table's SetWindow.
 	items := []any{map[string]any{"title": "Dune"}, map[string]any{"title": "Emma"}}
 	answered := table.Answer{Raw: "author:herbert"}
-	ApplyWindow(c, items, 40, 900, answered, th)
+	c.Table.SetWindow(TableRows(c, items, th), 40, 900, answered)
 
 	c.Rebuild(theme.Dark())
+
+	if c.Table != &c.Remote.Model {
+		t.Fatal("after rebuild, Table no longer points at the remote table's model")
+	}
 
 	off, n, total := c.Table.Window()
 	if off != 40 || n != 2 || total != 900 {
@@ -99,5 +113,16 @@ func TestWindowSurvivesThemeRebuild(t *testing.T) {
 	}
 	if got, ok := c.Table.Answered(); !ok || got.Raw != answered.Raw {
 		t.Errorf("answered query after rebuild = %+v, %v; want %q", got, ok, answered.Raw)
+	}
+}
+
+// tuilib reads a zero SortDebounce as its default, so the config's "0"
+// (sort on every change) has to reach it as a negative duration.
+func TestSortDebounceReachesTableOptions(t *testing.T) {
+	for in, want := range map[string]time.Duration{"": 0, "300ms": 300 * time.Millisecond, "0": -1} {
+		opts := tableOptions(&cfg.Component{Type: "table", SortDebounce: in}, theme.Nord())
+		if opts.SortDebounce != want {
+			t.Errorf("sort_debounce %q → %v, want %v", in, opts.SortDebounce, want)
+		}
 	}
 }
