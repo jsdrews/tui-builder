@@ -87,97 +87,43 @@ func NewComponent(c *cfg.Component, th theme.Theme) (*Component, error) {
 	return nil, fmt.Errorf("unknown component type %q", c.Type)
 }
 
-// Rebuild reconstructs the component against a new theme, preserving as
-// much in-flight state as the component exposes accessors for.
+// Rebuild reconstructs the component against a new theme. Options carry
+// the palette, so tuilib can't restyle a component in place (its rule 4);
+// instead each component's State captures everything the user and the data
+// did to it, and Restore puts that back on the fresh build. That includes
+// the data itself, so a fetched table or list stays populated across a
+// theme swap rather than waiting for a refetch a one-shot source will never
+// make.
+//
+// Cells already rendered keep the colors they were rendered with: a
+// `theme:` token in a color rule shows the old palette until the next fetch
+// re-renders the rows.
 func (c *Component) Rebuild(th theme.Theme) {
 	switch c.Kind {
 	case KList:
-		cursor, value := c.List.Cursor(), c.List.Value()
-		marks := c.List.Marks()
-		m := buildList(c.Cfg, th)
-		// Marks are a set of keys, so they carry independently of the
-		// rows themselves: reinstate them now and they light up again
-		// when the next fetch reinstalls the keys they name.
-		if len(marks) > 0 {
-			m.SetMarks(marks)
-		}
-		if value != "" {
-			m.SetValue(value)
-		}
-		m.SetCursor(cursor)
-		*c.List = m
+		st := c.List.State()
+		*c.List = buildList(c.Cfg, th)
+		c.List.Restore(st)
 	case KTable:
-		cursor := c.Table.Cursor()
-		value := c.Table.Value()
-		sortCol, sortDesc := c.Table.SortColumn(), c.Table.SortDescending()
-		off, _, total := c.Table.Window()
-		rows := c.Table.Rows()
-		marks := c.Table.Marks()
-		m := buildTable(c.Cfg, th)
-		if c.Cfg.Windowed {
-			// The fresh table holds nothing, and nothing else will
-			// re-deliver the window — the source only refetches when the
-			// user scrolls or filters, and a theme change is neither.
-			// Reinstall it so a rebuild doesn't blank the page.
-			answered, _ := c.Table.Answered()
-			m.SetWindow(rows, off, total, answered)
-		}
-		if len(marks) > 0 {
-			m.SetMarks(marks)
-		}
-		m.SetValue(value)
-		m.SetCursor(cursor)
-		m.SetSort(sortCol, sortDesc)
-		*c.Table = m
+		st := c.Table.State()
+		*c.Table = buildTable(c.Cfg, th)
+		c.Table.Restore(st)
 	case KLogview:
-		lines := append([]string(nil), c.Logview.Lines()...)
-		query := c.Logview.Query()
-		filterMode := c.Logview.FilterMode()
-		m := buildLogview(c.Cfg, th)
-		m.Clear()
-		m.AppendLines(lines)
-		if query != "" {
-			m.SetQuery(query)
-		}
-		m.SetFilterMode(filterMode)
-		*c.Logview = m
+		st := c.Logview.State()
+		*c.Logview = buildLogview(c.Cfg, th)
+		c.Logview.Restore(st)
 	case KTree:
-		cursor := c.Tree.Cursor()
-		query := c.Tree.Query()
-		filterMode := c.Tree.FilterMode()
-		marks := c.Tree.Marks()
-		m := buildTree(c.Cfg, th)
-		if len(marks) > 0 {
-			m.SetMarks(marks)
-		}
-		if query != "" {
-			m.SetQuery(query)
-		}
-		m.SetFilterMode(filterMode)
-		m.SetCursor(cursor)
-		*c.Tree = m
+		st := c.Tree.State()
+		*c.Tree = buildTree(c.Cfg, th)
+		c.Tree.Restore(st)
 	case KInspector:
-		cursor := c.Inspector.Cursor()
-		query := c.Inspector.Query()
-		filterMode := c.Inspector.FilterMode()
-		m := buildInspector(c.Cfg, th)
-		if query != "" {
-			m.SetQuery(query)
-		}
-		m.SetFilterMode(filterMode)
-		m.SetCursor(cursor)
-		*c.Inspector = m
+		st := c.Inspector.State()
+		*c.Inspector = buildInspector(c.Cfg, th)
+		c.Inspector.Restore(st)
 	case KTextview:
-		content := c.Textview.Content()
-		wrap := c.Textview.Wrap()
-		query := c.Textview.Query()
-		m := buildTextview(c.Cfg, th)
-		m.SetContent(content)
-		m.SetWrap(wrap)
-		if query != "" {
-			m.SetQuery(query)
-		}
-		*c.Textview = m
+		st := c.Textview.State()
+		*c.Textview = buildTextview(c.Cfg, th)
+		c.Textview.Restore(st)
 	}
 }
 
