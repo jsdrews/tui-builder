@@ -149,12 +149,12 @@ type Model struct {
 	// repeated params.
 	cursorAllSources map[string]*cfg.Source
 
-	// windows holds one tuilib coordinator per windowed table, keyed by
-	// component name (not source name — two tables could window the same
+	// windows lists the windowed tables (each a tuilib remote.Table),
+	// keyed by component name (not source name — two tables could window the same
 	// source at different scroll positions). See window.go.
 	windows map[string]*windowEntry
 	// windowDefs is the `window:` block per source name, for the page
-	// size / prefetch the coordinator needs and the column-title →
+	// size / prefetch the remote table needs and the column-title →
 	// query-parameter map the query translation needs.
 	windowDefs map[string]*cfg.WindowConfig
 
@@ -324,7 +324,7 @@ func (m *Model) onEnter() tea.Cmd {
 	m.started = true
 	var cmds []tea.Cmd
 	// Windowed sources open with a request for the first page instead of
-	// a whole-set Fetch. Their coordinators drive everything after that.
+	// a whole-set Fetch. Their remote tables drive everything after that.
 	cmds = append(cmds, m.startWindows()...)
 	for name, entry := range m.sources {
 		// A windowed source's rows arrive through SetWindow. Fetching it
@@ -505,7 +505,7 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 					var cmds []tea.Cmd
 					for name := range m.sources {
 						// Windowed sources refresh through their
-						// coordinator — see refreshWindows.
+						// remote table — see refreshWindows.
 						if m.windowedSource(name) {
 							continue
 						}
@@ -524,10 +524,6 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		return m, nil
 	}
 
-	if cmd := m.updateWindows(msg); cmd != nil {
-		return m, cmd
-	}
-
 	switch x := msg.(type) {
 	case fetchMsg:
 		return m, m.handleFetch(x)
@@ -539,10 +535,6 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		return m, m.handleCursorChange(x)
 	case cursorFetchMsg:
 		return m, m.applyCursorFetch(x)
-	case windowRequestMsg:
-		return m, m.handleWindowRequest(x)
-	case windowFetchedMsg:
-		return m, m.handleWindowFetched(x)
 	case windowViewportMsg:
 		return m, m.handleWindowViewport(x)
 	case windowQueryMsg:
@@ -1655,6 +1647,11 @@ func updateComponent(c *build.Component, msg tea.Msg) tea.Cmd {
 		*c.List = m
 		return cmd
 	case build.KTable:
+		if c.Remote != nil {
+			// Every message, not just keys: remote routes its own fetch
+			// results and timers through here.
+			return c.Remote.Update(msg)
+		}
 		m, cmd := c.Table.Update(msg)
 		*c.Table = m
 		return cmd

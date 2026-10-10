@@ -320,7 +320,7 @@ func applyTable(c *Component, data any, th theme.Theme) {
 
 // TableRows projects items through a table component's columns —
 // dot-path pluck per column, then color rules. Shared by the whole-set
-// path (applyTable) and the windowed path (ApplyWindow) so a window's
+// path (applyTable) and the windowed path (a remote table's Page) so a window's
 // rows are built exactly like any other row.
 func TableRows(c *Component, items []any, th theme.Theme) []table.Row {
 	rows := make([]table.Row, 0, len(items))
@@ -332,24 +332,6 @@ func TableRows(c *Component, items []any, th theme.Theme) []table.Row {
 		rows = append(rows, table.Row(cells))
 	}
 	return rows
-}
-
-// ApplyWindow installs one window of a larger remote set: items are the
-// logical rows [offset, offset+len(items)) of a set total rows long, with
-// total < 0 meaning the source can't say. answered names the query the
-// page was fetched for, so the table can tell a fresh answer from a stale
-// one still on screen while a newer query is in flight.
-//
-// This is the windowed counterpart to ApplyData, and it is deliberately
-// separate rather than a branch inside it. SetRows means "these are all
-// the rows there are" — it clears any window and lets the table filter
-// and sort what it holds. Routing a window through it would quietly turn
-// a 30,000-row set into a 100-row one.
-func ApplyWindow(c *Component, items []any, offset, total int, answered table.Answer, th theme.Theme) {
-	if c.Kind != KTable {
-		return
-	}
-	c.Table.SetWindow(TableRows(c, items, th), offset, total, answered)
 }
 
 // applyTree turns a source's response into a live tree via

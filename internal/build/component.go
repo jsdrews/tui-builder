@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
@@ -15,6 +16,7 @@ import (
 	"github.com/jsdrews/tuilib/pkg/inspector"
 	"github.com/jsdrews/tuilib/pkg/list"
 	"github.com/jsdrews/tuilib/pkg/logview"
+	"github.com/jsdrews/tuilib/pkg/remote"
 	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/textview"
 	"github.com/jsdrews/tuilib/pkg/theme"
@@ -48,6 +50,11 @@ type Component struct {
 	Tree      *tree.Model
 	Inspector *inspector.Model
 	Textview  *textview.Model
+
+	// Remote is set on a table bound to a windowed source, which tuilib's
+	// pkg/remote drives; Table then points at its embedded table. Every
+	// message goes through Remote.Update rather than Table.Update.
+	Remote *remote.Table
 
 	// StreamRows is the ring buffer used by KTable components bound to
 	// a streaming source. Newest events first; trimmed to Cfg.MaxRows
@@ -105,6 +112,10 @@ func (c *Component) Rebuild(th theme.Theme) {
 		*c.List = buildList(c.Cfg, th)
 		c.List.Restore(st)
 	case KTable:
+		if c.Remote != nil {
+			c.Remote.Restyle(tableOptions(c.Cfg, th))
+			return
+		}
 		st := c.Table.State()
 		*c.Table = buildTable(c.Cfg, th)
 		c.Table.Restore(st)
@@ -176,6 +187,17 @@ func buildList(c *cfg.Component, th theme.Theme) list.Model {
 // --------------------------------------------------------------- table ---
 
 func buildTable(c *cfg.Component, th theme.Theme) table.Model {
+	opts := tableOptions(c, th)
+	m := table.New(opts)
+	initTable(&m, c, opts)
+	return m
+}
+
+// tableOptions is everything about a table that comes from its config and
+// the theme. Split from buildTable so a windowed table, which tuilib's
+// remote.NewTable constructs, and its Restyle on a theme swap start from
+// the same options as an ordinary one.
+func tableOptions(c *cfg.Component, th theme.Theme) table.Options {
 	opts := th.Table()
 	opts.Title = c.Title
 	opts.Filterable = c.Filterable
@@ -253,7 +275,21 @@ func buildTable(c *cfg.Component, th theme.Theme) table.Model {
 			opts.Rows[i] = table.Row(cells)
 		}
 	}
-	m := table.New(opts)
+	if c.SortDebounce != "" {
+		// Validated at load. tuilib reads zero as its default, so "0"
+		// (sort on every change) is its negative value.
+		if d, err := time.ParseDuration(c.SortDebounce); err == nil {
+			if d == 0 {
+				d = -1
+			}
+			opts.SortDebounce = d
+		}
+	}
+	return opts
+}
+
+// initTable applies the config's starting state to a freshly built table.
+func initTable(m *table.Model, c *cfg.Component, opts table.Options) {
 	// Same reason as buildList: Options.Rows carries cells but no
 	// keys. A static table's rows are fixed at load, so position is a
 	// legitimate identity — nothing repolls them into a new order.
@@ -271,7 +307,17 @@ func buildTable(c *cfg.Component, th theme.Theme) table.Model {
 			m.SetSort(idx, c.InitialSort.Desc)
 		}
 	}
-	return m
+}
+
+// NewRemoteTable turns c into a table bound to a remote source through
+// tuilib's pkg/remote, which routes the viewport, the filter and the sort
+// to the source and installs what comes back. c.Table keeps pointing at
+// the embedded table, so everything that reads a table reads this one.
+func NewRemoteTable(c *Component, th theme.Theme, shape remote.Shape[table.KeyedRow]) {
+	opts := tableOptions(c.Cfg, th)
+	c.Remote = remote.NewTable(opts, shape)
+	initTable(&c.Remote.Model, c.Cfg, opts)
+	c.Table = &c.Remote.Model
 }
 
 // resolveSortColumn maps a column reference (1-based number or title-prefix
@@ -369,7 +415,7 @@ type yamlNode struct {
 	children []tree.Node
 }
 
-func (n *yamlNode) Label() string      { return n.label }
+func (n *yamlNode) Label() string         { return n.label }
 func (n *yamlNode) Children() []tree.Node { return n.children }
 
 // sourceTreeRootLabel picks the display label for a source-bound tree's
