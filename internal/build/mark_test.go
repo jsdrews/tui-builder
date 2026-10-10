@@ -97,14 +97,8 @@ func TestMarksSurviveFilter(t *testing.T) {
 	}
 }
 
-// tuilib rule 4: a theme swap rebuilds the component, so anything the
-// user put there has to be carried across by hand.
-//
-// Rebuild does not re-deliver a source-bound table's rows — they came
-// from a fetch it can't repeat — so the rebuilt table is momentarily
-// empty and Marks(), which reports only keys the table still holds,
-// returns nothing. MarkCount is the honest assertion here: it counts the
-// stored key set, which is what has to survive.
+// tuilib rule 4: a theme swap rebuilds the component, so the marks have
+// to come through State / Restore with everything else the user did.
 func TestMarksSurviveThemeRebuild(t *testing.T) {
 	c := markableTable(t)
 	ApplyData(c, pods(
