@@ -169,7 +169,7 @@ data:
   sources:
     countries:
       type: http
-      url: https://restcountries.com/v3.1/all?fields=name,region,population
+      url: https://raw.githubusercontent.com/mledoze/countries/master/countries.json
       refresh: 5m
 
 tui:
@@ -180,7 +180,7 @@ tui:
       columns:
         - {title: Name,       value: name.common}
         - {title: Region,     value: region}
-        - {title: Population, value: population, sort: si, align: right}
+        - {title: Area,       value: area,       sort: number, align: right}
 ```
 
 Source kinds (leaf — fetch externally):
@@ -488,7 +488,7 @@ via `task examples`.
 | `examples/multi.yaml` | Multi-screen drilldown with breadcrumbs |
 | `examples/on_cursor.yaml` | `on_cursor:` — a repos table drives a detail inspector below it via `${cursor.*}` |
 | `examples/on_cursor_fs.yaml` | `on_cursor:` from a tree over the filesystem; `${cursor.path}` feeds `stat` in a textview |
-| `examples/http_countries.yaml` | Live REST API table (restcountries.com) |
+| `examples/http_countries.yaml` | A table over public JSON (the mledoze/countries dataset on GitHub), polled every 5m |
 | `examples/http_github.yaml` | GitHub API drilldown: users → repos → repo detail |
 | `examples/http_github_auth.yaml` | Authenticated GitHub (`${env.GITHUB_TOKEN}`) |
 | `examples/http_refresh.yaml` | CoinGecko prices with 10s polling |

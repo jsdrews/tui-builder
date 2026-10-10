@@ -418,7 +418,7 @@ Examples are the primary documentation. An example that requires the
 user to spin up a cluster / get an API token / install something is
 costly. Default to examples that work out of the box (file sources,
 synthesized exec output, public unauthenticated APIs like
-restcountries.com or coingecko). Reserve external-setup examples (kube,
+jsonplaceholder or coingecko). Reserve external-setup examples (kube,
 authenticated APIs) for things that can't be demoed otherwise.
 
 ### 8. Comment WHY, not WHAT.
