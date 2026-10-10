@@ -30,8 +30,10 @@ func TestAnchoredWindowValidation(t *testing.T) {
 	}{
 		{"body api", nil, ""},
 		{"growing", func(c *Config) { c.Data.Sources["events"].Window.Growing = &Growing{Always: true} }, ""},
-		{"start newest", func(c *Config) { c.TUI.Components["events"].Start = "newest" }, ""},
-		{"start oldest", func(c *Config) { c.TUI.Components["events"].Start = "oldest" }, "`start: oldest` isn't available on an Anchored source"},
+		{"anchor oldest", func(c *Config) { c.Data.Sources["events"].Window.Anchor = "oldest" }, ""},
+		{"anchor newest", func(c *Config) { c.Data.Sources["events"].Window.Anchor = "newest" }, ""},
+		{"unknown anchor", func(c *Config) { c.Data.Sources["events"].Window.Anchor = "middle" }, "unknown anchor"},
+		{"start on an anchored source", func(c *Config) { c.TUI.Components["events"].Start = "oldest" }, "set `window.anchor: newest|oldest`"},
 		{"no newer patch", func(c *Config) { c.Data.Sources["events"].Window.Newer = nil }, "needs both `older:` and `newer:`"},
 		{"patch without cursor", func(c *Config) { c.Data.Sources["events"].Window.Cursor = "" }, "only apply with `cursor:`"},
 		{"offsets don't apply", func(c *Config) { c.Data.Sources["events"].Window.OffsetParam = "from" }, "offset_param: doesn't apply to an Anchored window"},

@@ -249,6 +249,9 @@ type WindowConfig struct {
 	// only; an exec command reads ${window.cursor} and ${window.dir}.
 	Older map[string]any `yaml:"older,omitempty"`
 	Newer map[string]any `yaml:"newer,omitempty"`
+	// Anchor is where an Anchored view starts: "newest" (default) or
+	// "oldest". Only with Cursor.
+	Anchor string `yaml:"anchor,omitempty"`
 
 	// Growing says the set is still gaining items at its newest end — a
 	// running job's events. While it's growing, a bound eventlog follows

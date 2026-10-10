@@ -874,13 +874,14 @@ func eventlogOptions(c *cfg.Component, th theme.Theme) eventlog.Options {
 func NewRemoteEventlog(c *Component, th theme.Theme, shape remote.Shape[eventlog.Item]) {
 	c.RemoteLog = remote.NewEventlog(eventlogOptions(c.Cfg, th), shape)
 	c.Eventlog = &c.RemoteLog.Model
-	// tuilib's eventlog starts out following the newest item. That's the
-	// right default for `start: newest`, and for Anchored data, which
-	// tuilib anchors at the newest item; a Seekable log opens at the top
-	// unless asked. A growing source turns following back on through
+	// tuilib's eventlog starts out following the newest item, and stops
+	// following by itself when an Anchored source is anchored at its
+	// oldest. A Seekable log opens at the top unless `start: newest` asks
+	// otherwise. A growing source turns following back on through
 	// SetGrowing, whatever `start:` says.
-	_, anchored := shape.(remote.Anchored[eventlog.Item])
-	c.Eventlog.SetFollow(c.Cfg.Start == "newest" || anchored)
+	if _, anchored := shape.(remote.Anchored[eventlog.Item]); !anchored {
+		c.Eventlog.SetFollow(c.Cfg.Start == "newest")
+	}
 }
 
 // EventlogItems turns a page of source items into eventlog items: the key

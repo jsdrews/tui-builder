@@ -254,6 +254,7 @@ Supported on `http` (the request goes in the query string) and `exec`
 | `cursor` | string | — | eventlog sources | Makes the source **Anchored**: walked from an edge instead of paged by offset. The dot-path to each item's cursor, the value the next request walks from (ES `sort`, a timestamp, an id). See [Anchored windows](#anchored-windows). |
 | `older` | map | — | http, with `cursor` | What the request changes to walk towards older items, merged into `body:` or set as query parameters. |
 | `newer` | map | — | http, with `cursor` | The same, walking towards newer items. |
+| `anchor` | string | `newest` | with `cursor` | Where an Anchored view starts: `newest` (and follows), or `oldest` (and walks newer as you scroll down). |
 | `growing` | `true` or map | — | eventlog only; not with `refresh` | The set is still gaining items at its newest end. A bound eventlog follows the newest item and the source is polled every `follow_every`; when growth stops, one final read picks up the last items. `true` grows for as long as the screen is open. The map form ties it to another source; see [growing](#growing). |
 | `follow_every` | duration | `2s` | needs `growing` | Poll interval while growing. |
 
@@ -288,7 +289,8 @@ Some APIs can't jump to row N: Elasticsearch past 10,000 hits
 with an `?after=<token>`. They're **Anchored**: read by walking from an
 edge item to the items before or after it. Setting `cursor:` makes a
 window Anchored. An eventlog bound to one opens at the newest item and
-walks older as you scroll up.
+walks older as you scroll up, or, with `anchor: oldest`, opens at the
+oldest and walks newer.
 
 Each request carries the edge item's cursor, which direction to walk,
 and the page size:
@@ -327,8 +329,8 @@ logs:
 
 An Anchored window has no offsets, total or user sort, so `offset_param`,
 `total_path`, `sort_param`, `sorts`, `sort_desc_prefix` and `prefetch`
-don't apply, and it opens at the newest item (`start: oldest` isn't
-available). Only an eventlog can bind one for now.
+don't apply. Where it opens is `anchor:`; the eventlog's `start:` is for
+paged sources and is rejected here. Only an eventlog can bind one for now.
 
 ### Growing
 

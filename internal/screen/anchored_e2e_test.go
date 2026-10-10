@@ -70,7 +70,7 @@ func (s *logStub) requests() []map[string]any {
 	return append([]map[string]any(nil), s.bodies...)
 }
 
-func newAnchoredHarness(t *testing.T, srv *logStub) *windowHarness {
+func newAnchoredHarness(t *testing.T, srv *logStub, anchor ...string) *windowHarness {
 	t.Helper()
 	c := cfg.Config{
 		Data: cfg.DataBlock{Sources: map[string]*cfg.Source{
@@ -82,6 +82,7 @@ func newAnchoredHarness(t *testing.T, srv *logStub) *windowHarness {
 					Older:   map[string]any{"order": "desc", "before": "${window.cursor}"},
 					Newer:   map[string]any{"order": "asc", "after": "${window.cursor}"},
 					Filters: map[string]string{"Text": "text"},
+					Anchor:  strings.Join(anchor, ""),
 				},
 			}),
 		}},
@@ -199,5 +200,28 @@ func TestAnchoredExampleWalksOlder(t *testing.T) {
 	_, items := root.tree.Components["log"].Eventlog.Items()
 	if len(items) <= 50 {
 		t.Errorf("holds %d lines after going to the top, want older pages walked in", len(items))
+	}
+}
+
+// `window.anchor: oldest` starts at the other end: the first request
+// walks newer with no cursor, and the view sits at the top.
+func TestAnchoredEventlogCanStartAtTheOldest(t *testing.T) {
+	srv := newLogStub()
+	defer srv.Close()
+	h := newAnchoredHarness(t, srv, "oldest")
+	h.drain(h.model.Init())
+
+	first := srv.requests()[0]
+	if first["order"] != "asc" {
+		t.Errorf("first request = %v, want an ascending walk from the oldest entry", first)
+	}
+	if _, ok := first["after"]; ok {
+		t.Error("the first request has no cursor to send")
+	}
+	if got := h.view(); !strings.Contains(got, "entry 000") {
+		t.Errorf("the oldest entry isn't on screen; view:\n%s", got)
+	}
+	if h.root.tree.Components["logs"].Eventlog.Following() {
+		t.Error("anchored at the oldest, the view shouldn't follow the newest")
 	}
 }

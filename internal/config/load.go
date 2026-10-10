@@ -99,11 +99,10 @@ func (c *Config) Validate() error {
 				return err
 			}
 		}
-		// Anchored data is walked from its newest item (tuilib's remote
-		// binding takes no other anchor yet), so there's no oldest end to
-		// open at.
-		if comp.Type == "eventlog" && comp.Start == "oldest" && isAnchored(c.Data.Sources[comp.Source]) {
-			return fmt.Errorf("tui.components.%s: `start: oldest` isn't available on an Anchored source (`window.cursor:`) — it's read from its newest item", name)
+		// An Anchored source says where it starts with window.anchor;
+		// a second, conflicting knob on the component would only confuse.
+		if comp.Type == "eventlog" && comp.Start != "" && isAnchored(c.Data.Sources[comp.Source]) {
+			return fmt.Errorf("tui.components.%s: `start:` doesn't apply to an Anchored source — set `window.anchor: newest|oldest` on %q instead", name, comp.Source)
 		}
 		// An eventlog has no whole-set mode: it exists to page through
 		// what's too big to hold.

@@ -42,6 +42,7 @@ import (
 	"github.com/jsdrews/tuilib/pkg/eventlog"
 	"github.com/jsdrews/tuilib/pkg/query"
 	"github.com/jsdrews/tuilib/pkg/remote"
+	tsource "github.com/jsdrews/tuilib/pkg/source"
 	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
@@ -137,6 +138,7 @@ func (m *Model) initWindows() {
 				Edge:     eventlogEdge(as, c, m.windowFilters(c.Cfg.Source), m.th),
 				Name:     c.Cfg.Source,
 				PageSize: def.PageSize,
+				Anchor:   anchorOf(def),
 			}
 			w.growing, w.while, shape.Follow = growthOf(def)
 			build.NewRemoteEventlog(c, m.th, shape)
@@ -197,6 +199,14 @@ func eventlogPage(src ds.WindowedSource, c *build.Component, mapped map[string]s
 		}
 		return build.EventlogItems(c, page.Items, th), page.Total, nil
 	}
+}
+
+// anchorOf is a window's `anchor:` as a tuilib anchor.
+func anchorOf(def *cfg.WindowConfig) tsource.Anchor {
+	if def.Anchor == "oldest" {
+		return tsource.Oldest()
+	}
+	return tsource.Newest()
 }
 
 // growthOf reads a window's `growing:` into what the screen and tuilib

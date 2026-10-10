@@ -515,6 +515,14 @@ func (s *Source) validateHTTP(path string) error {
 // validate enforces WindowConfig's required params and value ranges.
 // path is the YAML path (e.g. `data.sources.books.window`).
 func (w *WindowConfig) validateShared(path string) error {
+	switch w.Anchor {
+	case "", "newest", "oldest":
+	default:
+		return fmt.Errorf("%s.anchor: unknown anchor %q (want newest|oldest)", path, w.Anchor)
+	}
+	if w.Anchor != "" && w.Cursor == "" {
+		return fmt.Errorf("%s.anchor: only applies with `cursor:` — a paged window starts where the bound component's `start:` says", path)
+	}
 	if w.Cursor != "" {
 		for field, set := range map[string]bool{
 			"offset_param": w.OffsetParam != "", "total_path": w.TotalPath != "",
