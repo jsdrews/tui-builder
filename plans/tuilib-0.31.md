@@ -98,8 +98,10 @@ enforces it.
 
 Decided in [Config schema reference docs](https://github.com/jsdrews/tui-builder/issues/30).
 
-- MkDocs with the Material theme, built from `docs/`. Keep `mkdocs.yml`
-  compatible with Zensical.
+- Zensical (Material for MkDocs' successor), configured natively in
+  `zensical.toml` and built from `docs/`. The ticket chose MkDocs +
+  Material with a Zensical-compatible config; switched to Zensical from
+  the start when the site was built.
 - Nav:
   - **Home**
   - **Quick start**: install, a first ~15-line YAML, run it, then add a
@@ -116,7 +118,8 @@ Decided in [Config schema reference docs](https://github.com/jsdrews/tui-builder
   so every complete config on the site is a file CI already loads. Short
   fragments stay inline.
 - A workflow deploys to GitHub Pages on push to `main`. PR CI runs
-  `mkdocs build --strict`, so broken links and missing snippets fail.
+  `zensical build --strict`, so broken links, missing anchors and missing
+  snippets fail.
 
 Feature PRs after this update the reference, and the guide pages where a
 concept changes.

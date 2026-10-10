@@ -20,3 +20,7 @@
 
 # go-task internal cache
 /.task/
+
+# Zensical output and its local virtualenv
+/site/
+/.venv-docs/
