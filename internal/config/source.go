@@ -493,7 +493,7 @@ func (s *Source) validateHTTP(path string) error {
 		}
 	}
 	if s.Window != nil {
-		if err := s.Window.validateHTTPWindow(path + ".window"); err != nil {
+		if err := s.Window.validateHTTPWindow(path+".window", s.Body); err != nil {
 			return err
 		}
 		if s.Paginate != nil {
@@ -515,6 +515,17 @@ func (s *Source) validateHTTP(path string) error {
 // validate enforces WindowConfig's required params and value ranges.
 // path is the YAML path (e.g. `data.sources.books.window`).
 func (w *WindowConfig) validateShared(path string) error {
+	if w.Cursor != "" {
+		for field, set := range map[string]bool{
+			"offset_param": w.OffsetParam != "", "total_path": w.TotalPath != "",
+			"sort_param": w.SortParam != "", "sorts": len(w.Sorts) > 0,
+			"sort_desc_prefix": w.SortDescPrefix != "", "prefetch": w.Prefetch != 0,
+		} {
+			if set {
+				return fmt.Errorf("%s.%s: doesn't apply to an Anchored window (`cursor:` is set) — there are no offsets or total, and the order is the walk's", path, field)
+			}
+		}
+	}
 	if w.FollowEvery != "" {
 		if w.Growing == nil {
 			return fmt.Errorf("%s.follow_every: set without `growing:` — it's the poll interval while growing", path)
@@ -543,20 +554,33 @@ func (w *WindowConfig) validateShared(path string) error {
 }
 
 // validateHTTPWindow enforces the query-string half of the schema.
-func (w *WindowConfig) validateHTTPWindow(path string) error {
+func (w *WindowConfig) validateHTTPWindow(path, body string) error {
 	if err := w.validateShared(path); err != nil {
 		return err
 	}
-	if w.OffsetParam == "" {
-		return fmt.Errorf("%s.offset_param: required on an http source (the query parameter carrying the first row wanted, e.g. \"offset\")", path)
-	}
-	if w.LimitParam == "" {
-		return fmt.Errorf("%s.limit_param: required on an http source (the query parameter carrying the page size, e.g. \"limit\")", path)
+	if w.Cursor != "" {
+		if len(w.Older) == 0 || len(w.Newer) == 0 {
+			return fmt.Errorf("%s: an Anchored window needs both `older:` and `newer:` — what the request changes when walking each way (usually the sort order and where ${window.cursor} goes)", path)
+		}
+	} else {
+		if len(w.Older) > 0 || len(w.Newer) > 0 {
+			return fmt.Errorf("%s: `older:` / `newer:` only apply with `cursor:`", path)
+		}
+		if w.OffsetParam == "" {
+			return fmt.Errorf("%s.offset_param: required on an http source (the query parameter carrying the first row wanted, e.g. \"offset\")", path)
+		}
+		if w.LimitParam == "" {
+			return fmt.Errorf("%s.limit_param: required on an http source (the query parameter carrying the page size, e.g. \"limit\")", path)
+		}
 	}
 	// A windowed table always filters remotely — it has no local rows to
 	// filter against. A source that declares no way to carry a filter
 	// would leave the user typing into a filter bar that does nothing.
-	if w.SearchParam == "" && len(w.Filters) == 0 {
+	// An Anchored body API carries the filter as tokens in the body or
+	// the patches instead of query parameters.
+	bodySearch := w.Cursor != "" && (strings.Contains(body, "${window.search}") ||
+		strings.Contains(fmt.Sprint(w.Older, w.Newer), "${window.search}"))
+	if w.SearchParam == "" && len(w.Filters) == 0 && !bodySearch {
 		return fmt.Errorf("%s: set `search_param:` or at least one `filters:` entry — a windowed table filters remotely, so with neither the filter bar has nowhere to send what the user types", path)
 	}
 	if len(w.Sorts) > 0 && w.SortParam == "" {
@@ -594,8 +618,15 @@ func (w *WindowConfig) validateExecWindow(path string, argv []string) error {
 		return fmt.Errorf("%s.sorts: http-only — an exec command receives the column title as ${window.sort} and maps it itself", path)
 	}
 
+	if len(w.Older) > 0 || len(w.Newer) > 0 {
+		return fmt.Errorf("%s: `older:` / `newer:` are http-only — an exec command reads ${window.cursor} and ${window.dir} (older|newer) instead", path)
+	}
 	joined := strings.Join(argv, " ")
-	for _, tok := range []string{"${window.offset}", "${window.limit}"} {
+	required := []string{"${window.offset}", "${window.limit}"}
+	if w.Cursor != "" {
+		required = []string{"${window.cursor}", "${window.dir}", "${window.limit}"}
+	}
+	for _, tok := range required {
 		if !strings.Contains(joined, tok) {
 			return fmt.Errorf("%s: `command:` never references %s — without it the command returns the same rows for every window, and the table would scroll through 10,000 copies of page one", path, tok)
 		}

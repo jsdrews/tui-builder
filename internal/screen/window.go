@@ -128,7 +128,19 @@ func (m *Model) initWindows() {
 			source:    c.Cfg.Source,
 			refresh:   entry.src.Refresh(),
 		}
-		if c.Kind == build.KEventlog {
+		if c.Kind == build.KEventlog && def != nil && def.Cursor != "" {
+			as, ok := entry.src.(ds.AnchoredSource)
+			if !ok {
+				continue
+			}
+			shape := remote.Anchored[eventlog.Item]{
+				Edge:     eventlogEdge(as, c, m.windowFilters(c.Cfg.Source), m.th),
+				Name:     c.Cfg.Source,
+				PageSize: def.PageSize,
+			}
+			w.growing, w.while, shape.Follow = growthOf(def)
+			build.NewRemoteEventlog(c, m.th, shape)
+		} else if c.Kind == build.KEventlog {
 			shape := remote.Seekable[eventlog.Item]{
 				Page: eventlogPage(ws, c, m.windowFilters(c.Cfg.Source), m.th),
 				// Prefixes this source's lines in the shell's query history.
@@ -136,19 +148,7 @@ func (m *Model) initWindows() {
 			}
 			if def != nil {
 				shape.PageSize, shape.Prefetch = def.PageSize, def.Prefetch
-				if def.Growing != nil {
-					w.growing = def.Growing
-					every := def.FollowEvery
-					if every == "" {
-						every = cfg.DefaultFollowEvery
-					}
-					// Validated at load.
-					shape.Follow, _ = time.ParseDuration(every)
-					if !def.Growing.Always {
-						// Validated at load, so it compiles.
-						w.while, _ = expr.Compile(def.Growing.While)
-					}
-				}
+				w.growing, w.while, shape.Follow = growthOf(def)
 			}
 			build.NewRemoteEventlog(c, m.th, shape)
 		} else {
@@ -196,6 +196,47 @@ func eventlogPage(src ds.WindowedSource, c *build.Component, mapped map[string]s
 			return nil, 0, err
 		}
 		return build.EventlogItems(c, page.Items, th), page.Total, nil
+	}
+}
+
+// growthOf reads a window's `growing:` into what the screen and tuilib
+// need: the spec, its compiled condition (nil for `growing: true`), and
+// the poll interval while growing.
+func growthOf(def *cfg.WindowConfig) (*cfg.Growing, *expr.Program, time.Duration) {
+	if def.Growing == nil {
+		return nil, nil, 0
+	}
+	every := def.FollowEvery
+	if every == "" {
+		every = cfg.DefaultFollowEvery
+	}
+	// Both validated at load.
+	follow, _ := time.ParseDuration(every)
+	var prog *expr.Program
+	if !def.Growing.Always {
+		prog, _ = expr.Compile(def.Growing.While)
+	}
+	return def.Growing, prog, follow
+}
+
+// eventlogEdge is an Anchored eventlog's fetch: one FetchEdge from the
+// edge item's cursor, which tuilib hands back as that item's key.
+func eventlogEdge(src ds.AnchoredSource, c *build.Component, mapped map[string]string, th theme.Theme) func(context.Context, remote.Edge) ([]eventlog.Item, bool, error) {
+	return func(ctx context.Context, e remote.Edge) ([]eventlog.Item, bool, error) {
+		cursor, _ := build.SplitAnchoredKey(e.Cursor)
+		wq := translateWindowQuery(remote.Window{Filter: e.Filter}, mapped)
+		page, err := src.FetchEdge(ctx, ds.EdgeQuery{
+			Cursor: cursor, Newer: e.Newer, Limit: e.Limit,
+			Search: wq.Search, Filters: wq.Filters,
+		})
+		if err != nil {
+			return nil, false, err
+		}
+		items := build.EventlogItems(c, page.Items, th)
+		for i := range items {
+			items[i].Key = build.AnchoredKey(page.Cursors[i], items[i].Key)
+		}
+		return items, page.More, nil
 	}
 }
 

@@ -234,6 +234,22 @@ type WindowConfig struct {
 	// both directions send the same value.
 	SortDescPrefix string `yaml:"sort_desc_prefix,omitempty"`
 
+	// Cursor makes the source Anchored: reachable only by walking from
+	// an edge, with no offsets and no total — Elasticsearch search_after,
+	// a log API filtered by timestamp, any ?after=<token> API. It is the
+	// dot-path to each item's cursor, the value the next request walks
+	// from (ES: sort, Prefect: timestamp). Non-string values are carried
+	// as JSON. With it set, the offset and total fields don't apply.
+	Cursor string `yaml:"cursor,omitempty"`
+	// Older and Newer are what changes in the request between walking
+	// towards older items and towards newer ones: JSON-merged into
+	// `body:`, or set as query parameters on a request with no body. A
+	// field whose value is exactly ${window.cursor} is left out when there
+	// is no cursor yet (the first request, from the newest item). http
+	// only; an exec command reads ${window.cursor} and ${window.dir}.
+	Older map[string]any `yaml:"older,omitempty"`
+	Newer map[string]any `yaml:"newer,omitempty"`
+
 	// Growing says the set is still gaining items at its newest end — a
 	// running job's events. While it's growing, a bound eventlog follows
 	// the newest item and the source is polled every FollowEvery; when it

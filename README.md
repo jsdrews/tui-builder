@@ -480,6 +480,7 @@ via `task examples`.
 | `examples/tree_source.yaml` | Source-bound tree: a `file` source bucketed by `group_by: team`, surviving `refresh:` polling |
 | `examples/logview.yaml` | Streaming-log pane, `/`-search, filter mode |
 | `examples/eventlog.yaml` | An `eventlog` paging a 2,000-event job log through an exec window: search, server-side filter, enter to open an event |
+| `examples/anchored.yaml` | An eventlog over an **Anchored** source: a log walked by timestamp with `window.cursor:` (the `search_after` shape), opening at the newest line |
 | `examples/textview.yaml` | Static-text viewer: inline `content:` plus a source-bound clock; `/`-search, `w` wrap |
 | `examples/layout.yaml` | Nested vstack / hstack with mixed flex weights |
 | `examples/themes.yaml` | Theme picker reference |

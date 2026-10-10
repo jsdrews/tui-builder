@@ -246,7 +246,8 @@ A timeline of events or lines read in pages from a source too large to
 hold: an AWX job's events, a search index, a long log. Each item draws as
 the lines of its text. Unlike a logview, which holds a stream whole, an
 eventlog binds only to a [windowed source](sources.md#window) and fetches
-as you scroll.
+as you scroll. Over an [Anchored](sources.md#anchored-windows) source it
+opens at the newest item and walks older as you scroll up.
 
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
