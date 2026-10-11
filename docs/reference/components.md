@@ -246,14 +246,15 @@ A timeline of events or lines read in pages from a source too large to
 hold: an AWX job's events, a search index, a long log. Each item draws as
 the lines of its text. Unlike a logview, which holds a stream whole, an
 eventlog binds only to a [windowed source](sources.md#window) and fetches
-as you scroll.
+as you scroll. Over an [Anchored](sources.md#anchored-windows) source it
+opens at the end `window.anchor:` names and walks from there.
 
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
 | `key` | path | — | required | Each item's identity. Bare `${selection}` when enter fires an action. |
 | `text` | path | — | required | The text an item draws as, split on newlines. An empty value draws as a dim "· no output" line: the item still happened, and enter still opens it. |
 | `mark` | path | — | — | Shown as-is in the gutter, normally the server's timestamp. |
-| `start` | string | `oldest` | — | Where the view opens once the source isn't growing: `oldest` or `newest`. A [growing](sources.md#window) source always opens at the newest item and follows. |
+| `start` | string | `oldest` | paged (not Anchored) sources | Where the view opens once the source isn't growing: `oldest` or `newest`. A [growing](sources.md#window) source always opens at the newest item and follows. An [Anchored](sources.md#anchored-windows) source uses `window.anchor:` instead. |
 | `max_items` | int | tuilib's | — | Items held at once; the end furthest from the view is trimmed. |
 
 **Keys:** `/` searches the items held, and `n` / `N` jump between

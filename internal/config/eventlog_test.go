@@ -63,6 +63,7 @@ func TestEventlogValidation(t *testing.T) {
 		{"growing condition doesn't compile", func(c *Config) {
 			c.Data.Sources["events"].Window.Growing = &Growing{Source: "job", While: "status =="}
 		}, "growing.while"},
+		{"anchor without a cursor", func(c *Config) { c.Data.Sources["events"].Window.Anchor = "oldest" }, "only applies with `cursor:`"},
 		{"half a condition", func(c *Config) {
 			c.Data.Sources["events"].Window.Growing = &Growing{Source: "job"}
 		}, "both `source:` and `while:`"},

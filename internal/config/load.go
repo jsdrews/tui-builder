@@ -99,6 +99,11 @@ func (c *Config) Validate() error {
 				return err
 			}
 		}
+		// An Anchored source says where it starts with window.anchor;
+		// a second, conflicting knob on the component would only confuse.
+		if comp.Type == "eventlog" && comp.Start != "" && isAnchored(c.Data.Sources[comp.Source]) {
+			return fmt.Errorf("tui.components.%s: `start:` doesn't apply to an Anchored source — set `window.anchor: newest|oldest` on %q instead", name, comp.Source)
+		}
 		// An eventlog has no whole-set mode: it exists to page through
 		// what's too big to hold.
 		if comp.Type == "eventlog" && !comp.Windowed {
@@ -494,6 +499,8 @@ func (c *Component) validate(path string) error {
 	return nil
 }
 
+func isAnchored(s *Source) bool { return s != nil && s.Window != nil && s.Window.Cursor != "" }
+
 // validateEventlog checks the eventlog-only fields, and rejects them on
 // every other kind, where they would read as working and do nothing.
 func (c *Component) validateEventlog(path string) error {
@@ -539,6 +546,9 @@ func bindWindowed(name string, comp *Component, ref string, entry *Source) error
 	}
 	if comp.Type != "table" && comp.Type != "eventlog" {
 		return fmt.Errorf("tui.components.%s: source %q declares `window:` but this is a %s component — only a table or an eventlog can hold a windowed source (they render a slice of a larger set)", name, ref, comp.Type)
+	}
+	if comp.Type == "table" && entry.Window.Cursor != "" {
+		return fmt.Errorf("tui.components.%s: source %q is Anchored (`window.cursor:`), which only an eventlog can bind for now", name, ref)
 	}
 	if comp.Type == "table" && entry.Window.Growing != nil {
 		return fmt.Errorf("tui.components.%s: source %q declares `window.growing:`, which only an eventlog can follow", name, ref)

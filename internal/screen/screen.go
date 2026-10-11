@@ -632,7 +632,8 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 			if cmd, handled := m.activate(); handled {
 				return m, cmd
 			}
-			ins := build.ItemInspector(x.Key, x.Data, m.th)
+			_, key := build.SplitAnchoredKey(x.Key)
+			ins := build.ItemInspector(key, x.Data, m.th)
 			ins.Focus()
 			m.inspectModal = &ins
 			return m, nil
@@ -1679,7 +1680,8 @@ func selectionFrom(c *build.Component) build.Selection {
 		if !ok || it.Hole {
 			return build.Selection{}
 		}
-		return build.ItemSelection(it.Key, it.Data)
+		_, key := build.SplitAnchoredKey(it.Key)
+		return build.ItemSelection(key, it.Data)
 	}
 	return build.Selection{}
 }

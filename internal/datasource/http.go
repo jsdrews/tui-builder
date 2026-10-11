@@ -98,6 +98,14 @@ func (s *httpSource) Fetch(ctx context.Context) (any, error) {
 	if s.paginate != nil {
 		return s.fetchPaginated(ctx)
 	}
+	if s.window != nil && s.window.Cursor != "" {
+		// An Anchored source's first page is its newest.
+		page, err := s.FetchEdge(ctx, EdgeQuery{Limit: s.pageSize()})
+		if err != nil {
+			return nil, err
+		}
+		return page.Items, nil
+	}
 	if s.window != nil {
 		// A windowed source has no "everything" to hand back — that's the
 		// point of it. Return the first page so `wrangl` and any
@@ -255,6 +263,80 @@ func (s *httpSource) FetchWindow(ctx context.Context, q WindowQuery) (WindowPage
 	return page, nil
 }
 
+// FetchEdge implements AnchoredSource: one request for the items beyond
+// an edge. The direction's patch (`older:` / `newer:`) is merged into the
+// body, or, for a request with no body, set as query parameters. The
+// filter goes where a windowed source's does: search_param / filters on
+// the query string, or ${window.search} / ${window.filters.*} tokens.
+func (s *httpSource) FetchEdge(ctx context.Context, q EdgeQuery) (EdgePage, error) {
+	if s.window == nil || s.window.Cursor == "" {
+		return EdgePage{}, ErrNotWindowed
+	}
+	w := s.window
+	vals := edgeTokens(q, w.Filters)
+	patch := w.Older
+	if q.Newer {
+		patch = w.Newer
+	}
+	u, err := neturl.Parse(s.url)
+	if err != nil {
+		return EdgePage{}, fmt.Errorf("url: %w", err)
+	}
+	params := u.Query()
+	if w.LimitParam != "" {
+		params.Set(w.LimitParam, vals["limit"])
+	}
+	if q.Search != "" && w.SearchParam != "" {
+		params.Set(w.SearchParam, q.Search)
+	}
+	// With no body, `filters:` names query parameters, as on a windowed
+	// source. With one, they're ${window.filters.*} tokens in the body,
+	// and strict APIs (Elasticsearch among them) reject parameters they
+	// don't know.
+	if s.body == "" {
+		for title, val := range q.Filters {
+			if param, ok := w.Filters[title]; ok {
+				params.Set(param, val)
+			}
+		}
+	}
+	body := s.body
+	if body == "" {
+		rendered, _ := renderPatch(patch, q, vals)
+		for k, v := range rendered.(map[string]any) {
+			if str, ok := v.(string); ok {
+				params.Set(k, str)
+				continue
+			}
+			b, _ := json.Marshal(v)
+			params.Set(k, cursorText(string(b)))
+		}
+	} else if body, err = renderEdgeBody(body, patch, q, vals); err != nil {
+		return EdgePage{}, err
+	}
+	u.RawQuery = params.Encode()
+
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+	resp, err := s.doWith(ctx, u.String(), body)
+	if err != nil {
+		return EdgePage{}, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return EdgePage{}, err
+	}
+	if resp.StatusCode >= 300 {
+		return EdgePage{}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	var parsed any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return EdgePage{}, fmt.Errorf("parse json: %w", err)
+	}
+	return edgePage(Iter(applyRoot(parsed, s.root)), q, w.Cursor), nil
+}
+
 // windowURL renders q into s.url's query string. Any parameters already
 // on the configured URL (`?fields=title,author`) survive — only the
 // window's own parameters are set, so a source can pin API options in
@@ -380,9 +462,15 @@ func (s *httpSource) do(ctx context.Context) (*http.Response, error) {
 // are meant to be called with the same auth headers, so this is
 // correct-by-default.
 func (s *httpSource) doURL(ctx context.Context, url string) (*http.Response, error) {
+	return s.doWith(ctx, url, s.body)
+}
+
+// doWith is doURL with the body overridden — an Anchored window renders a
+// body per request.
+func (s *httpSource) doWith(ctx context.Context, url, body string) (*http.Response, error) {
 	var bodyReader io.Reader
-	if s.body != "" {
-		bodyReader = strings.NewReader(s.body)
+	if body != "" {
+		bodyReader = strings.NewReader(body)
 	}
 	req, err := http.NewRequestWithContext(ctx, s.method, url, bodyReader)
 	if err != nil {
