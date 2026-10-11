@@ -1561,7 +1561,7 @@ func (m *Model) newInputForm(def *cfg.Action, names []string) form.Model {
 				Placeholder: p.Placeholder,
 				Initial:     p.Default,
 				Required:    p.Required,
-				Validate:    validatorFor(p.Type),
+				Validate:    ValidatorFor(p.Type),
 			})
 		}
 	}
@@ -1570,14 +1570,14 @@ func (m *Model) newInputForm(def *cfg.Action, names []string) form.Model {
 	return form.New(opts)
 }
 
-// validatorFor turns an input's declared data type into the form's
+// ValidatorFor turns an input's declared data type into the form's
 // per-field validator. Returns nil for types with nothing to check —
 // the form treats a nil Validate as "always acceptable".
 //
 // An empty value is left to Required: this runs after it, so a blank
 // optional field stays blank rather than failing a format check it was
 // never obliged to satisfy.
-func validatorFor(typ string) func(any) error {
+func ValidatorFor(typ string) func(any) error {
 	switch typ {
 	case "int":
 		return func(v any) error {

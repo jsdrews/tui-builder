@@ -126,3 +126,73 @@ func TestSortDebounceReachesTableOptions(t *testing.T) {
 		}
 	}
 }
+
+// A `theme:` token in a color rule has to follow a theme swap. Restore
+// brings back cells as they were rendered, so without a re-render a
+// static or one-shot component would keep the old palette forever.
+func TestColorRulesFollowThemeRebuild(t *testing.T) {
+	old, next := theme.Nord(), theme.Dark()
+	rules := []cfg.ColorRule{{When: "Running", Color: "theme:accent"}}
+	if applyColorRules("Running", rules, old) == applyColorRules("Running", rules, next) {
+		t.Fatal("fixture themes share an accent; pick two that differ")
+	}
+	want := applyColorRules("Running", rules, next)
+
+	fetched, err := NewComponent(&cfg.Component{
+		Type: "table", Source: "pods", Filterable: true,
+		Columns: []cfg.Column{{Title: "Phase", Value: cfg.Path{"phase"}, ColorRules: rules}},
+	}, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ApplyData(fetched, []any{
+		map[string]any{"phase": "Running"},
+		map[string]any{"phase": "Pending"},
+	}, old)
+	fetched.Table.SetValue("run")
+
+	static, err := NewComponent(&cfg.Component{
+		Type: "list", Items: []string{"Running", "Pending"}, ColorRules: rules,
+	}, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	streamed, err := NewComponent(&cfg.Component{
+		Type: "table", Source: "feed",
+		Columns: []cfg.Column{{Title: "Phase", Value: cfg.Path{"phase"}, ColorRules: rules}},
+	}, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ApplyStreamLine(streamed, `{"phase":"Running"}`, old)
+
+	inspected, err := NewComponent(&cfg.Component{
+		Type:   "inspector",
+		Fields: []cfg.InspectorField{{Label: "Phase", Value: "Running", ColorRules: rules}},
+	}, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, c := range []*Component{fetched, static, streamed, inspected} {
+		c.Rebuild(next)
+	}
+
+	if got := fetched.Table.Rows()[0][0]; got != want {
+		t.Errorf("fetched table cell = %q, want it recolored to %q", got, want)
+	}
+	if got := fetched.Table.Value(); got != "run" {
+		t.Errorf("fetched table filter = %q after recolor, want it kept", got)
+	}
+	if got := static.List.Items()[0]; got != want {
+		t.Errorf("static list item = %q, want it recolored to %q", got, want)
+	}
+	if got := streamed.Table.Rows()[0][0]; got != want {
+		t.Errorf("streamed table cell = %q, want it recolored to %q", got, want)
+	}
+	if f, ok := inspected.Inspector.Selected(); !ok || f.Value != want {
+		got := f.Value
+		t.Errorf("inspector value = %q, want it recolored to %q", got, want)
+	}
+}

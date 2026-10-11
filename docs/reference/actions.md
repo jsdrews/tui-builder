@@ -167,7 +167,7 @@ map at load, so the two forms behave identically.
 
 **Validation:**
 
-- A `key` can't be reserved (below), can't be `app.actions_key`,
+- A `key` can't be reserved or one of the menu's own keys (below), can't be `app.actions_key`,
   `app.output_key` or `app.theme_key`, and can't repeat on one screen.
 - `from:` is required when `bind:` or `confirm:` reads `${selection…}`,
   or the action is a push, and forbidden otherwise. It must be a list,
@@ -186,9 +186,18 @@ map at load, so the two forms behave identically.
 | `tab`, `shift+tab` | cycles focus |
 | `r` | refreshes every bound source |
 
-`j`, `k`, `/` and `enter` are not reserved: the first three belong to the
-focused component only while it has focus, and `enter` is the direct
-activation key.
+Every key except `enter` is a shortcut inside the action menu, so the
+menu's own keys are reserved too. The menu handles them first, so a
+shortcut on one would never fire:
+
+| Key | Inside the menu |
+|---|---|
+| `up`, `k`, `down`, `j` | moves the cursor |
+| `g`, `G` | jumps to the first or last action |
+| `ctrl+u`, `ctrl+d` | scrolls half a page |
+
+`/` and `enter` are not reserved: `/` belongs to the focused component
+only while it has focus, and `enter` is the direct activation key.
 
 ```yaml
 actions:

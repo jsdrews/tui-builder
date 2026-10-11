@@ -84,6 +84,12 @@ type Component struct {
 	// themselves, so it can't describe a set the table no longer holds.
 	// nil unless Cfg.Markable is set on a table.
 	RowsByKey map[string]Selection
+
+	// last is the data the most recent fetch applied, kept so Rebuild can
+	// re-render it with a new theme's colors. hasLast tells "never
+	// fetched" apart from a fetch that returned nil.
+	last    any
+	hasLast bool
 }
 
 // NewComponent builds a Component from a config leaf and the active theme.
@@ -124,9 +130,11 @@ func NewComponent(c *cfg.Component, th theme.Theme) (*Component, error) {
 // theme swap rather than waiting for a refetch a one-shot source will never
 // make.
 //
-// Cells already rendered keep the colors they were rendered with: a
-// `theme:` token in a color rule shows the old palette until the next fetch
-// re-renders the rows.
+// Restore brings back cells as they were rendered, colors included, so a
+// component with color rules is then re-rendered from what it was given
+// (see recolor). Windowed tables and eventlogs restyle through tuilib's
+// remote binding instead, and pick up new rule colors with the next page
+// they fetch.
 func (c *Component) Rebuild(th theme.Theme) {
 	switch c.Kind {
 	case KList:
@@ -166,6 +174,65 @@ func (c *Component) Rebuild(th theme.Theme) {
 		*c.Eventlog = eventlog.New(eventlogOptions(c.Cfg, th))
 		c.Eventlog.Restore(st)
 	}
+	c.recolor(th)
+}
+
+// recolor re-renders a component's content with th so a `theme:` token
+// in a color rule follows a theme swap. It runs after Restore and goes
+// through the same setters a poll does, so cursor, filter, sort and marks
+// survive it the way they survive a refresh. Components without color
+// rules have nothing theme-dependent in their cells and are left alone.
+func (c *Component) recolor(th theme.Theme) {
+	if !hasColorRules(c.Cfg) {
+		return
+	}
+	switch {
+	case c.StreamRows != nil:
+		renderStreamRows(c, th)
+	case c.hasLast:
+		ApplyData(c, c.last, th)
+	case c.Cfg.Source == "":
+		c.restatic(th)
+	}
+}
+
+// restatic re-renders content declared in the config itself.
+func (c *Component) restatic(th theme.Theme) {
+	switch c.Kind {
+	case KList:
+		c.List.SetItems(staticListItems(c.Cfg, th))
+	case KTable:
+		c.Table.SetRows(staticTableRows(c.Cfg, th))
+	case KLogview:
+		c.Logview.Clear()
+		c.Logview.AppendLines(staticLogLines(c.Cfg, th))
+	case KInspector:
+		c.Inspector.SetFields(convertFields(c.Cfg.Fields, th))
+	}
+}
+
+// hasColorRules reports whether any part of c renders through a color
+// rule: the component's own rules, a column's, or an inspector field's
+// at any depth.
+func hasColorRules(c *cfg.Component) bool {
+	if len(c.ColorRules) > 0 {
+		return true
+	}
+	for _, col := range c.Columns {
+		if len(col.ColorRules) > 0 {
+			return true
+		}
+	}
+	var fields func([]cfg.InspectorField) bool
+	fields = func(fs []cfg.InspectorField) bool {
+		for _, f := range fs {
+			if len(f.ColorRules) > 0 || fields(f.Children) {
+				return true
+			}
+		}
+		return false
+	}
+	return fields(c.Fields)
 }
 
 // ---------------------------------------------------------------- list ---
@@ -174,10 +241,7 @@ func buildList(c *cfg.Component, th theme.Theme) list.Model {
 	opts := th.List()
 	opts.Title = c.Title
 	if c.Source == "" {
-		opts.Items = make([]string, len(c.Items))
-		for i, item := range c.Items {
-			opts.Items[i] = applyColorRules(item, c.ColorRules, th)
-		}
+		opts.Items = staticListItems(c, th)
 	}
 	opts.Filterable = c.Filterable
 	opts.Markable = c.Markable
@@ -294,23 +358,7 @@ func tableOptions(c *cfg.Component, th theme.Theme) table.Options {
 		}
 	}
 	if c.Source == "" {
-		opts.Rows = make([]table.Row, len(c.Rows))
-		for i, row := range c.Rows {
-			cells := make([]string, len(row))
-			for j, v := range row {
-				// Bare-string cells go through column color_rules so
-				// hand-authored static tables can use the same rule
-				// language as data-bound ones. Mapping cells
-				// ({value, color} or {label, url}) keep their explicit
-				// styling — they're already declaring intent per cell.
-				if s, ok := v.(string); ok && j < len(c.Columns) && len(c.Columns[j].ColorRules) > 0 {
-					cells[j] = applyColorRules(s, c.Columns[j].ColorRules, th)
-				} else {
-					cells[j] = renderCell(v)
-				}
-			}
-			opts.Rows[i] = table.Row(cells)
-		}
+		opts.Rows = staticTableRows(c, th)
 	}
 	if c.Spanned {
 		opts.MaxItems = c.MaxItems
@@ -405,14 +453,7 @@ func buildLogview(c *cfg.Component, th theme.Theme) logview.Model {
 	}
 	m := logview.New(opts)
 	if len(c.Lines) > 0 {
-		lines := c.Lines
-		if len(c.ColorRules) > 0 {
-			lines = make([]string, len(c.Lines))
-			for i, ln := range c.Lines {
-				lines[i] = applyColorRules(ln, c.ColorRules, th)
-			}
-		}
-		m.AppendLines(lines)
+		m.AppendLines(staticLogLines(c, th))
 	}
 	if c.InitialQuery != "" {
 		m.SetQuery(c.InitialQuery)
@@ -544,6 +585,50 @@ func buildTree(c *cfg.Component, th theme.Theme) tree.Model {
 		m.SetCursor(c.InitialCursor)
 	}
 	return m
+}
+
+// staticListItems renders a static list's `items:` through its color
+// rules.
+func staticListItems(c *cfg.Component, th theme.Theme) []string {
+	out := make([]string, len(c.Items))
+	for i, item := range c.Items {
+		out[i] = applyColorRules(item, c.ColorRules, th)
+	}
+	return out
+}
+
+// staticTableRows renders a static table's `rows:`. Bare-string cells go
+// through column color_rules so hand-authored static tables can use the
+// same rule language as data-bound ones. Mapping cells ({value, color} or
+// {label, url}) keep their explicit styling — they're already declaring
+// intent per cell.
+func staticTableRows(c *cfg.Component, th theme.Theme) []table.Row {
+	out := make([]table.Row, len(c.Rows))
+	for i, row := range c.Rows {
+		cells := make([]string, len(row))
+		for j, v := range row {
+			if s, ok := v.(string); ok && j < len(c.Columns) && len(c.Columns[j].ColorRules) > 0 {
+				cells[j] = applyColorRules(s, c.Columns[j].ColorRules, th)
+			} else {
+				cells[j] = renderCell(v)
+			}
+		}
+		out[i] = table.Row(cells)
+	}
+	return out
+}
+
+// staticLogLines renders a static logview's `lines:` through its color
+// rules.
+func staticLogLines(c *cfg.Component, th theme.Theme) []string {
+	if len(c.ColorRules) == 0 {
+		return c.Lines
+	}
+	out := make([]string, len(c.Lines))
+	for i, ln := range c.Lines {
+		out[i] = applyColorRules(ln, c.ColorRules, th)
+	}
+	return out
 }
 
 // ----------------------------------------------------- inspector ---

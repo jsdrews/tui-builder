@@ -61,6 +61,12 @@ func ApplyStreamLine(c *Component, line string, th theme.Theme) {
 	} else {
 		prependRing(c, item)
 	}
+	renderStreamRows(c, th)
+}
+
+// renderStreamRows hands a streaming table every event it holds. Called
+// per event, and by Rebuild to recolor them after a theme swap.
+func renderStreamRows(c *Component, th theme.Theme) {
 	if markable(c.Cfg) {
 		// Works in both stream modes. Keyed-upsert rows are stable by
 		// construction; ring-buffer rows slide down as events arrive,
@@ -181,6 +187,7 @@ func ApplyData(c *Component, data any, th theme.Theme) {
 	if c == nil {
 		return
 	}
+	c.last, c.hasLast = data, true
 	switch c.Kind {
 	case KList:
 		applyList(c, data, th)
@@ -360,6 +367,9 @@ func BeginRead(c *Component) activity.Read {
 // spinners that were waiting on a read. False means it was dropped:
 // overtaken by a newer read, or failed.
 func ApplyRead(c *Component, rd activity.Read, data any, err error, th theme.Theme) bool {
+	if err == nil {
+		c.last, c.hasLast = data, true
+	}
 	switch c.Kind {
 	case KTable:
 		var rows []table.KeyedRow

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
 
@@ -87,6 +88,13 @@ func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Comp
 	a := taction.Action{
 		Label: menuLabel(b, def),
 		Desc:  def.Description,
+	}
+	// Any key but enter is a shortcut inside the menu: tuilib draws it in
+	// the right-hand column and runs it while the menu is open. enter
+	// stays out — it fires straight from the pane (activate), and inside
+	// the menu it already means "run the highlighted action".
+	if b.Key != "" && b.Key != "enter" {
+		a.Key = key.NewBinding(key.WithKeys(b.Key), key.WithHelp(b.Key, a.Label))
 	}
 
 	// A binding scoped to a pane is only meaningful while that pane has

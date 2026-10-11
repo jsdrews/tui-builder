@@ -357,6 +357,10 @@ selected-row background passes through.
 | `when` | string | — (always matches) | — | Exact text (case-insensitive), `~regex` (case-insensitive), or a numeric comparison: `> 5`, `<= 10`, `== 0`, `!= 0`, with an optional K/M/B/G/T suffix on the number. Empty matches everything, which makes a final default rule. |
 | `color` | color | — | required | See [color values](templating.md#color-values). |
 
+A `theme:` color in a rule is re-rendered when the theme cycles. On a
+windowed table or an eventlog, rows already loaded keep their colors
+until the next page is fetched.
+
 ## `colors`
 
 Overrides individual theme colors on one component. Unset fields keep

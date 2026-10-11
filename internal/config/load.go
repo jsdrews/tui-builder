@@ -384,6 +384,16 @@ func (n *Node) set() int {
 	return set
 }
 
+// validate checks a stack item's sizing before its node. Setting both
+// flex and fixed is an error rather than letting fixed silently win: the
+// author asked for two sizes and would only ever see one.
+func (it *Item) validate(path string, components map[string]*Component, refs map[string]int) error {
+	if it.Flex > 0 && it.Fixed > 0 {
+		return fmt.Errorf("%s: set one of `flex:` / `fixed:`, not both (fixed would win and flex would be ignored)", path)
+	}
+	return it.Node.validate(path, components, refs)
+}
+
 func (n *Node) validate(path string, components map[string]*Component, refs map[string]int) error {
 	switch n.set() {
 	case 0:
@@ -396,13 +406,13 @@ func (n *Node) validate(path string, components map[string]*Component, refs map[
 	switch {
 	case n.VStack != nil:
 		for i, it := range n.VStack {
-			if err := it.Node.validate(fmt.Sprintf("%s.vstack[%d]", path, i), components, refs); err != nil {
+			if err := it.validate(fmt.Sprintf("%s.vstack[%d]", path, i), components, refs); err != nil {
 				return err
 			}
 		}
 	case n.HStack != nil:
 		for i, it := range n.HStack {
-			if err := it.Node.validate(fmt.Sprintf("%s.hstack[%d]", path, i), components, refs); err != nil {
+			if err := it.validate(fmt.Sprintf("%s.hstack[%d]", path, i), components, refs); err != nil {
 				return err
 			}
 		}
