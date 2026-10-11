@@ -1,0 +1,74 @@
+# metrics.yaml — inline badges, ratios, bars and sparklines.
+#
+# `metric:` on a table column (or an inspector field) draws a small
+# summary instead of text, through tuilib's pkg/metrics:
+#
+#   badge  [ok, warn, down]  status counts       12✓ 3⚠ 1✗
+#   ratio  [done, total]     colored by progress 3/5
+#   bar    value + max       progress bar        ▰▰▰▱▱
+#   spark  a list of numbers sparkline           ▁▃▅▇
+#
+# Inputs are dot-paths into each row, in that order. Anything computed
+# belongs in a `derive` operator; a metric only reads fields.
+#
+# A metric column's selection is its first input, not its glyphs. Focus
+# a row and press `a` → "scale": the confirm shows the ready count read
+# from the Ready column, ${selection.Ready}.
+app:
+  title: Metrics
+  theme: nord
+
+actions:
+  scale:
+    description: Echo the focused deployment's ready count
+    inputs:
+      name: {required: true}
+      ready: {required: true}
+    run: [echo, "${inputs.name} has ${inputs.ready} ready"]
+
+data:
+  sources:
+    deployments:
+      type: static
+      data:
+        - {name: web,   ready: 3, desired: 3, ok: 12, warn: 0, down: 0, cpu: 42, latency: [12, 14, 13, 18, 22, 19, 15, 14]}
+        - {name: api,   ready: 1, desired: 3, ok: 7,  warn: 3, down: 1, cpu: 87, latency: [30, 34, 41, 55, 72, 90, 85, 88]}
+        - {name: queue, ready: 0, desired: 2, ok: 0,  warn: 0, down: 4, cpu: 3,  latency: [5, 5, 6, 5, 4, 5, 5, 6]}
+    cluster:
+      type: static
+      data: {nodes_ready: 4, nodes: 5, ok: 19, warn: 3, down: 5, memory: 61, load: [0.4, 0.6, 0.9, 1.4, 1.1, 0.8]}
+
+tui:
+  components:
+    deployments:
+      type: table
+      title: Deployments
+      source: deployments
+      columns:
+        - {title: Name, value: name, flex: 1}
+        - {title: Ready, width: 6, metric: {ratio: [ready, desired]}}
+        - {title: Pods, width: 12, metric: {badge: [ok, warn, down]}}
+        - {title: CPU, width: 12, metric: {bar: cpu, max: 100}}
+        - {title: Latency, width: 10, metric: {spark: latency, color: cyan}}
+    cluster:
+      type: inspector
+      title: Cluster
+      source: cluster
+      fields:
+        - {label: Nodes, metric: {ratio: [nodes_ready, nodes]}}
+        - {label: Pods, metric: {badge: [ok, warn, down]}}
+        - {label: Memory, metric: {bar: memory, max: 100, width: 20}}
+        - {label: Load, metric: {spark: load, width: 20}}
+
+  screen:
+    title: Metrics
+    layout:
+      hstack:
+        - {flex: 2, component: deployments}
+        - {flex: 1, component: cluster}
+    actions:
+      - action: scale
+        label: scale
+        from: deployments
+        bind: {name: "${selection.Name}", ready: "${selection.Ready}"}
+        confirm: "Scale ${selection.Name}? It has ${selection.Ready} ready."

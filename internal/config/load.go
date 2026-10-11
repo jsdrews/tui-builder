@@ -509,6 +509,16 @@ func (c *Component) validate(path string) error {
 					return fmt.Errorf("%s.columns[%d].color_rules[%d]: color is required", path, i, j)
 				}
 			}
+			if col.Metric != nil {
+				if err := col.validateMetric(fmt.Sprintf("%s.columns[%d]", path, i), c.Source); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if c.Type == "inspector" {
+		if err := validateFieldMetrics(c.Fields, path+".fields", c.Source); err != nil {
+			return err
 		}
 	}
 	if c.SortDebounce != "" {
@@ -539,6 +549,9 @@ func (c *Component) validate(path string) error {
 			}
 		case "table":
 			for i, col := range c.Columns {
+				if col.Metric != nil {
+					continue // reads its own paths
+				}
 				if len(col.Value) == 0 || col.Value[0] == "" {
 					return fmt.Errorf("%s.columns[%d]: table bound to source %q needs `value:` (dot-path) on every column", path, i, c.Source)
 				}
@@ -574,6 +587,53 @@ func isAnchored(s *Source) bool { return s != nil && s.Window != nil && s.Window
 
 // validateEventlog checks the eventlog-only fields, and rejects them on
 // every other kind, where they would read as working and do nothing.
+// validateMetric checks a column's `metric:` and what it can't share a
+// column with.
+func (col *Column) validateMetric(path, source string) error {
+	mp := path + ".metric"
+	if err := col.Metric.validate(mp); err != nil {
+		return err
+	}
+	if source == "" {
+		return fmt.Errorf("%s: needs a table bound to a `source:` — a metric reads paths from each row's item", mp)
+	}
+	switch {
+	case len(col.Value) > 0:
+		return fmt.Errorf("%s: not with `value:` — the metric reads its own paths", mp)
+	case len(col.ColorRules) > 0:
+		return fmt.Errorf("%s: not with `color_rules:` — the metric colors the cell itself", mp)
+	case col.Sortable:
+		return fmt.Errorf("%s: not with `sortable: true` — drawn glyphs don't sort meaningfully", mp)
+	}
+	return nil
+}
+
+// validateFieldMetrics checks `metric:` on inspector fields, at any depth.
+func validateFieldMetrics(fields []InspectorField, path, source string) error {
+	for i, f := range fields {
+		fp := fmt.Sprintf("%s[%d]", path, i)
+		if f.Metric != nil {
+			mp := fp + ".metric"
+			if err := f.Metric.validate(mp); err != nil {
+				return err
+			}
+			if source == "" {
+				return fmt.Errorf("%s: needs an inspector bound to a `source:` — a metric reads paths from its data", mp)
+			}
+			switch {
+			case f.Value != "" || f.Path != "":
+				return fmt.Errorf("%s: not with `value:` / `path:` — the metric reads its own paths", mp)
+			case len(f.ColorRules) > 0:
+				return fmt.Errorf("%s: not with `color_rules:` — the metric colors the value itself", mp)
+			}
+		}
+		if err := validateFieldMetrics(f.Children, fp+".children", source); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // validateKindOptions rejects options set on a kind that would ignore
 // them, and checks their values.
 func (c *Component) validateKindOptions(path string) error {
