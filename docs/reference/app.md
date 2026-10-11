@@ -224,6 +224,8 @@ An item is a node plus a sizing hint.
 | `flex` | int | `1` | set one of `flex` / `fixed` | Share of the space left after fixed items. Used when neither is set. |
 | `fixed` | int | — | set one of `flex` / `fixed` | Exact size in rows (vstack) or columns (hstack). |
 
+**Validation:** setting both `flex` and `fixed` on one item is an error.
+
 ### `zstack`
 
 | Field | Type | Default | Valid on/with | What it does |

@@ -451,3 +451,46 @@ func TestKubeDeleteConfirmFits(t *testing.T) {
 		t.Errorf("kube's own confirm does not fit the shell modal:\n%s", got)
 	}
 }
+
+// A binding's key is a shortcut inside the menu: it reaches tuilib as the
+// action's Key, and pressing it in the open menu chooses that action.
+// Before this was wired, `key: d` validated and then did nothing at all.
+func TestBindingKeyIsAMenuShortcut(t *testing.T) {
+	m := menuModel(t,
+		[]cfg.ActionBinding{
+			{Key: "d", Action: "describe", Label: "describe"},
+			{Key: "enter", Action: "open", Label: "open"},
+			{Action: "logs", Label: "logs"},
+		},
+		map[string]*cfg.Action{
+			"describe": {Run: []string{"echo", "d"}},
+			"open":     {Run: []string{"echo", "o"}},
+			"logs":     {Run: []string{"echo", "l"}},
+		})
+	set := m.Actions()
+
+	d, _ := find(set, "describe")
+	if keys := d.Key.Keys(); len(keys) != 1 || keys[0] != "d" {
+		t.Errorf("describe Key = %v, want [d]", keys)
+	}
+	// enter fires from the pane and is the menu's own choose key, and a
+	// binding without a key is menu-only: neither gets a shortcut.
+	for _, label := range []string{"open", "logs"} {
+		a, _ := find(set, label)
+		if keys := a.Key.Keys(); len(keys) != 0 {
+			t.Errorf("%s Key = %v, want none", label, keys)
+		}
+	}
+
+	opts := theme.Nord().Actions()
+	opts.Set = set
+	menu := taction.New(opts)
+	_, cmd := menu.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if cmd == nil {
+		t.Fatal("pressing d in the open menu did nothing")
+	}
+	chosen, ok := cmd().(taction.ChosenMsg)
+	if !ok || chosen.Action.Label != "describe" {
+		t.Errorf("pressing d produced %#v, want ChosenMsg for describe", chosen)
+	}
+}

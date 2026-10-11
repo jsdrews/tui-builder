@@ -28,10 +28,10 @@ import (
 //   - enter: routed through activate(), the one direct key an action
 //     still fires from. Binding it is the documented drilldown idiom;
 //     every other key is a menu shortcut.
-//   - j / k / /: component-internal keys. They only matter while a list
-//     or table holds focus, and an action on a different pane has every
-//     right to them. componentCapturing already keeps filter typing
-//     from being hijacked.
+//   - /: a component-internal key. It only matters while a list or
+//     table holds focus, and componentCapturing already keeps filter
+//     typing from being hijacked. (j / k used to be listed here too;
+//     see menuKeys for why they no longer are.)
 //
 // `t` used to be listed above as deliberately-not-reserved, on the
 // grounds that tui-builder never set app.Options.ThemeKey so nothing
@@ -47,6 +47,22 @@ var reservedKeys = map[string]string{
 	"tab":       "cycles focus forward",
 	"shift+tab": "cycles focus backward",
 	"r":         "refreshes every bound source",
+}
+
+// menuKeys are the action menu's own keys. Every key but enter is a
+// shortcut inside the menu, and tuilib's menu checks its navigation keys
+// first, so a shortcut on one of these loads fine and then never fires.
+// esc is here for completeness; reservedKeys already rejects it.
+var menuKeys = map[string]string{
+	"up":     "moves the menu cursor up",
+	"k":      "moves the menu cursor up",
+	"down":   "moves the menu cursor down",
+	"j":      "moves the menu cursor down",
+	"g":      "jumps to the menu's first action",
+	"G":      "jumps to the menu's last action",
+	"ctrl+u": "scrolls the menu half a page up",
+	"ctrl+d": "scrolls the menu half a page down",
+	"esc":    "closes the menu",
 }
 
 // hoistInlineActions moves every inline action declaration up into
@@ -203,6 +219,9 @@ func validateActionBindings(bindings []ActionBinding, refs map[string]int, compo
 		if b.Key != "" {
 			if why, bad := reservedKeys[b.Key]; bad {
 				return fmt.Errorf("%s: key %q is reserved — it %s, so an action bound to it would never fire", bp, b.Key, why)
+			}
+			if why, bad := menuKeys[b.Key]; bad {
+				return fmt.Errorf("%s: key %q is the action menu's own key — it %s, so a menu shortcut on it would never fire", bp, b.Key, why)
 			}
 			// The two the shell claims but the config can move.
 			if outputKey != "" && b.Key == outputKey {

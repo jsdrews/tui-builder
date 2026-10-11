@@ -250,9 +250,11 @@ func (a *Action) IsExclusive() bool {
 //	    name: new_namespace
 //	    run: [kubectl, create, namespace, demo]
 type ActionBinding struct {
-	// Key is the trigger. Any tea.KeyMsg.String() name. Reserved keys
-	// (see load.go's reservedKeys) are rejected at load — binding one
-	// either does nothing at all or silently shadows navigation.
+	// Key is optional. `enter` fires the action directly from the
+	// focused pane; any other key is a shortcut inside the action menu.
+	// Any tea.KeyMsg.String() name. Reserved keys (reservedKeys) and the
+	// menu's own keys (menuKeys) are rejected at load — binding one would
+	// either never fire or silently shadow navigation.
 	Key string `yaml:"key"`
 	// Action names an entry in the top-level actions: map. Mutually
 	// exclusive with an inline declaration.

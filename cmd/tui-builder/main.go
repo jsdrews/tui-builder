@@ -160,6 +160,26 @@ func initialOr(key, fallback string) string {
 // env value if one is set, so `SYMBOLS=… tui-builder …` skips the
 // modal in spirit — you can see the value and just press enter.
 func collectAppPrompts(prompts []cfg.Prompt, th theme.Theme) error {
+	m := &promptModel{
+		form:  form.New(th.Form().With(promptFields(prompts))),
+		mouse: mouse.NewTracker(0),
+	}
+	prog := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	if _, err := prog.Run(); err != nil {
+		return err
+	}
+	if m.cancelled {
+		return fmt.Errorf("startup prompts cancelled")
+	}
+	for k, v := range m.values {
+		os.Setenv(k, stringify(v))
+	}
+	return nil
+}
+
+// promptFields builds one form field per prompt. Split from
+// collectAppPrompts so the fields can be checked without a terminal.
+func promptFields(prompts []cfg.Prompt) []form.Field {
 	fields := make([]form.Field, len(prompts))
 	for i, p := range prompts {
 		label := p.Label
@@ -199,32 +219,23 @@ func collectAppPrompts(prompts []cfg.Prompt, th theme.Theme) error {
 				Label:       label,
 				Placeholder: p.Placeholder,
 				Initial:     initialOr(p.Key, p.Default),
+				Required:    p.Required,
 			})
 		default:
+			// Required and the type check are enforced by the form, the
+			// same as an action input's: without them `required: true`
+			// passed load and then let an empty value through.
 			fields[i] = form.Text(form.TextOptions{
 				Key:         p.Key,
 				Label:       label,
 				Placeholder: p.Placeholder,
 				Initial:     initialOr(p.Key, p.Default),
+				Required:    p.Required,
+				Validate:    tqscreen.ValidatorFor(p.Type),
 			})
 		}
 	}
-
-	m := &promptModel{
-		form:  form.New(th.Form().With(fields)),
-		mouse: mouse.NewTracker(0),
-	}
-	prog := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	if _, err := prog.Run(); err != nil {
-		return err
-	}
-	if m.cancelled {
-		return fmt.Errorf("startup prompts cancelled")
-	}
-	for k, v := range m.values {
-		os.Setenv(k, stringify(v))
-	}
-	return nil
+	return fields
 }
 
 // stringify normalises a form value (bool/string/anything) to the
