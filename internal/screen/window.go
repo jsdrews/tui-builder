@@ -153,6 +153,20 @@ func (m *Model) initWindows() {
 				w.growing, w.while, shape.Follow = growthOf(def)
 			}
 			build.NewRemoteEventlog(c, m.th, shape)
+		} else if def != nil && def.Cursor != "" {
+			// A span table: rows walked from an edge, keyed by cursor and
+			// mark_key so marks hold and rows sharing a cursor stay apart.
+			as, ok := entry.src.(ds.AnchoredSource)
+			if !ok {
+				continue
+			}
+			build.NewRemoteTable(c, m.th, remote.Anchored[table.KeyedRow]{
+				Edge:     tableEdge(as, c, m.windowFilters(c.Cfg.Source), m.th),
+				Name:     c.Cfg.Source,
+				PageSize: def.PageSize,
+				Anchor:   anchorOf(def),
+			})
+			c.AtNewest = def.Anchor != "oldest"
 		} else {
 			shape := remote.Seekable[table.KeyedRow]{
 				Page: windowPage(ws, c, m.windowFilters(c.Cfg.Source), m.th),
@@ -247,6 +261,30 @@ func eventlogEdge(src ds.AnchoredSource, c *build.Component, mapped map[string]s
 			items[i].Key = build.AnchoredKey(page.Cursors[i], items[i].Key)
 		}
 		return items, page.More, nil
+	}
+}
+
+// tableEdge is a span table's fetch: one FetchEdge from the edge row's
+// cursor, with each row keyed by its cursor and mark_key and carrying the
+// raw item.
+func tableEdge(src ds.AnchoredSource, c *build.Component, mapped map[string]string, th theme.Theme) func(context.Context, remote.Edge) ([]table.KeyedRow, bool, error) {
+	return func(ctx context.Context, e remote.Edge) ([]table.KeyedRow, bool, error) {
+		cursor, _ := build.SplitAnchoredKey(e.Cursor)
+		wq := translateWindowQuery(remote.Window{Filter: e.Filter}, mapped)
+		page, err := src.FetchEdge(ctx, ds.EdgeQuery{
+			Cursor: cursor, Newer: e.Newer, Limit: e.Limit,
+			Search: wq.Search, Filters: wq.Filters,
+		})
+		if err != nil {
+			return nil, false, err
+		}
+		rows := build.TableRows(c, page.Items, th)
+		out := make([]table.KeyedRow, len(rows))
+		for i, r := range rows {
+			key := ds.FirstString(page.Items[i], c.Cfg.MarkKey)
+			out[i] = table.KeyedRow{Key: build.AnchoredKey(page.Cursors[i], key), Cells: r, Data: page.Items[i]}
+		}
+		return out, page.More, nil
 	}
 }
 

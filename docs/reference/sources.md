@@ -251,7 +251,7 @@ Supported on `http` (the request goes in the query string) and `exec`
 | `sort_param` | string | — | http only | Query parameter for the sort field. |
 | `sorts` | map of string | — | http only; needs `sort_param` | Maps a column title to the sort field the API expects. Unlisted columns send their title. |
 | `sort_desc_prefix` | string | — | http only; needs `sort_param` | Prepended for a descending sort, e.g. `-` for Django REST (`ordering=-created`). Empty means both directions send the same value. |
-| `cursor` | string | — | eventlog sources | Makes the source **Anchored**: walked from an edge instead of paged by offset. The dot-path to each item's cursor, the value the next request walks from (ES `sort`, a timestamp, an id). See [Anchored windows](#anchored-windows). |
+| `cursor` | string | — | eventlog and span-table sources | Makes the source **Anchored**: walked from an edge instead of paged by offset. The dot-path to each item's cursor, the value the next request walks from (ES `sort`, a timestamp, an id). See [Anchored windows](#anchored-windows). |
 | `older` | map | — | http, with `cursor` | What the request changes to walk towards older items, merged into `body:` or set as query parameters. |
 | `newer` | map | — | http, with `cursor` | The same, walking towards newer items. |
 | `anchor` | string | `newest` | with `cursor` | Where an Anchored view starts: `newest` (and follows), or `oldest` (and walks newer as you scroll down). |
@@ -330,7 +330,9 @@ logs:
 An Anchored window has no offsets, total or user sort, so `offset_param`,
 `total_path`, `sort_param`, `sorts`, `sort_desc_prefix` and `prefetch`
 don't apply. Where it opens is `anchor:`; the eventlog's `start:` is for
-paged sources and is rejected here. Only an eventlog can bind one for now.
+paged sources and is rejected here. An eventlog or a table can bind one;
+a table over an Anchored source is a span table (see
+[components.md](components.md#table)).
 
 ### Growing
 

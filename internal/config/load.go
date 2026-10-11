@@ -109,6 +109,11 @@ func (c *Config) Validate() error {
 		if comp.Type == "eventlog" && !comp.Windowed {
 			return fmt.Errorf("tui.components.%s: an eventlog binds only to a source that declares `window:` (a stream or a whole response belongs in a logview)", name)
 		}
+		// max_items caps what's resident, which only an eventlog or a
+		// span table holds a bounded run of.
+		if comp.MaxItems != 0 && comp.Type != "eventlog" && !comp.Spanned {
+			return fmt.Errorf("tui.components.%s: `max_items:` applies to an eventlog or a table over an Anchored source", name)
+		}
 		// A local sort is instant, so there's nothing to debounce: the
 		// setting would read as working and do nothing.
 		if comp.SortDebounce != "" && !comp.Windowed {
@@ -244,7 +249,7 @@ func validateOnCursor(refs map[string]int, components map[string]*Component, pat
 // Runs after bindWindowed, which is what sets Windowed.
 func validateMarkable(c *Component, path string) error {
 	if !c.Markable {
-		if len(c.MarkKey) > 0 {
+		if len(c.MarkKey) > 0 && !c.Spanned {
 			return fmt.Errorf("%s: `mark_key:` set without `markable: true` — it does nothing on its own", path)
 		}
 		return nil
@@ -261,7 +266,7 @@ func validateMarkable(c *Component, path string) error {
 		return nil
 	}
 	// Tables from here down.
-	if c.Windowed {
+	if c.Windowed && !c.Spanned {
 		return fmt.Errorf("%s: `markable: true` and a windowed source are mutually exclusive — a window holds one page of rows without keys, so marking there is inert", path)
 	}
 	if c.Source == "" {
@@ -504,10 +509,13 @@ func isAnchored(s *Source) bool { return s != nil && s.Window != nil && s.Window
 // validateEventlog checks the eventlog-only fields, and rejects them on
 // every other kind, where they would read as working and do nothing.
 func (c *Component) validateEventlog(path string) error {
+	if c.MaxItems < 0 {
+		return fmt.Errorf("%s: max_items must be >= 0 (0 = tuilib's default)", path)
+	}
 	if c.Type != "eventlog" {
 		for field, set := range map[string]bool{
 			"key": len(c.Key) > 0, "text": len(c.Text) > 0, "mark": len(c.Mark) > 0,
-			"start": c.Start != "", "max_items": c.MaxItems != 0,
+			"start": c.Start != "",
 		} {
 			if set {
 				return fmt.Errorf("%s: `%s:` is only valid on an eventlog", path, field)
@@ -548,7 +556,23 @@ func bindWindowed(name string, comp *Component, ref string, entry *Source) error
 		return fmt.Errorf("tui.components.%s: source %q declares `window:` but this is a %s component — only a table or an eventlog can hold a windowed source (they render a slice of a larger set)", name, ref, comp.Type)
 	}
 	if comp.Type == "table" && entry.Window.Cursor != "" {
-		return fmt.Errorf("tui.components.%s: source %q is Anchored (`window.cursor:`), which only an eventlog can bind for now", name, ref)
+		// A span table: rows walked from an edge, keyed by cursor plus
+		// mark_key, in the walk's order.
+		if len(comp.MarkKey) == 0 || comp.MarkKey[0] == "" {
+			return fmt.Errorf("tui.components.%s: a table over an Anchored source (`window.cursor:`) needs `mark_key:` — each row's identity, held with its cursor so rows that share a cursor stay apart", name)
+		}
+		for i, col := range comp.Columns {
+			if col.Sortable {
+				return fmt.Errorf("tui.components.%s: columns[%d] (%q) is sortable, but a table over an Anchored source shows rows in the order it walks them", name, i, col.Title)
+			}
+		}
+		if comp.InitialSort != nil {
+			return fmt.Errorf("tui.components.%s: `initial_sort:` doesn't apply to a table over an Anchored source — rows are in the order it walks them", name)
+		}
+		if comp.SortDebounce != "" {
+			return fmt.Errorf("tui.components.%s: `sort_debounce:` doesn't apply to a table over an Anchored source — there's no sort to debounce", name)
+		}
+		comp.Spanned = true
 	}
 	if comp.Type == "table" && entry.Window.Growing != nil {
 		return fmt.Errorf("tui.components.%s: source %q declares `window.growing:`, which only an eventlog can follow", name, ref)

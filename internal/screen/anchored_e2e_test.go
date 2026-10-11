@@ -16,6 +16,7 @@ import (
 	"github.com/jsdrews/tuilib/pkg/app"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
+	"github.com/jsdrews/tui-builder/internal/build"
 	cfg "github.com/jsdrews/tui-builder/internal/config"
 )
 
@@ -38,6 +39,7 @@ func newLogStub() *logStub {
 		s.mu.Lock()
 		s.bodies = append(s.bodies, body)
 		s.mu.Unlock()
+		q, _ := body["q"].(string)
 		desc := body["order"] == "desc"
 		limit := int(body["limit"].(float64))
 		before, hasBefore := body["before"].(float64)
@@ -48,7 +50,11 @@ func newLogStub() *logStub {
 			if (hasBefore && ts >= before) || (hasAfter && ts <= after) {
 				continue
 			}
-			out = append(out, map[string]any{"id": fmt.Sprintf("log-%03d", i), "ts": ts, "text": fmt.Sprintf("entry %03d", i)})
+			text := fmt.Sprintf("entry %03d", i)
+			if q != "" && !strings.Contains(text, q) {
+				continue
+			}
+			out = append(out, map[string]any{"id": fmt.Sprintf("log-%03d", i), "ts": ts, "text": text})
 		}
 		sort.SliceStable(out, func(a, b int) bool {
 			if desc {
@@ -76,7 +82,7 @@ func newAnchoredHarness(t *testing.T, srv *logStub, anchor ...string) *windowHar
 		Data: cfg.DataBlock{Sources: map[string]*cfg.Source{
 			"logs": cfg.NewEntry(&cfg.Source{
 				Type: "http", Method: "POST", URL: srv.URL + "/logs",
-				Body: `{"limit": ${window.limit}}`,
+				Body: `{"limit": ${window.limit}, "q": "${window.search}"}`,
 				Window: &cfg.WindowConfig{
 					PageSize: 20, Cursor: "ts",
 					Older:   map[string]any{"order": "desc", "before": "${window.cursor}"},
@@ -223,5 +229,124 @@ func TestAnchoredEventlogCanStartAtTheOldest(t *testing.T) {
 	}
 	if h.root.tree.Components["logs"].Eventlog.Following() {
 		t.Error("anchored at the oldest, the view shouldn't follow the newest")
+	}
+}
+
+func newSpanHarness(t *testing.T, srv *logStub) *windowHarness {
+	t.Helper()
+	c := cfg.Config{
+		Data: cfg.DataBlock{Sources: map[string]*cfg.Source{
+			"logs": cfg.NewEntry(&cfg.Source{
+				Type: "http", Method: "POST", URL: srv.URL + "/logs",
+				Body: `{"limit": ${window.limit}, "q": "${window.search}"}`,
+				Window: &cfg.WindowConfig{
+					PageSize: 20, Cursor: "ts",
+					Older: map[string]any{"order": "desc", "before": "${window.cursor}"},
+					Newer: map[string]any{"order": "asc", "after": "${window.cursor}"},
+				},
+			}),
+		}},
+		TUI: cfg.TUIBlock{
+			Components: map[string]*cfg.Component{
+				"logs": {Type: "table", Title: "Logs", Source: "logs", MarkKey: cfg.Path{"id"},
+					Markable: true, Filterable: true,
+					Columns: []cfg.Column{
+						{Title: "Id", Width: 10, Value: cfg.Path{"id"}},
+						{Title: "Text", Width: 20, Value: cfg.Path{"text"}},
+					}},
+			},
+			Screen: cfg.Screen{Title: "Logs", Layout: cfg.Node{Component: "logs"}},
+		},
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m tea.Model = app.New(app.Options{Root: root, Themes: []theme.Theme{theme.Nord()}, SkipConfig: true})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	return &windowHarness{t: t, model: m, root: root}
+}
+
+func TestSpanTableOpensAtTheNewestAndWalksOlder(t *testing.T) {
+	srv := newLogStub()
+	defer srv.Close()
+	h := newSpanHarness(t, srv)
+	h.drain(h.model.Init())
+
+	if got := h.view(); !strings.Contains(got, "entry 199") {
+		t.Fatalf("the newest row isn't on screen; view:\n%s", got)
+	}
+	if srv.requests()[0]["order"] != "desc" {
+		t.Errorf("first request = %v, want a walk older from the newest row", srv.requests()[0])
+	}
+	tbl := h.root.tree.Components["logs"].Table
+	held := len(tbl.Rows())
+
+	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	if got := len(tbl.Rows()); got <= held {
+		t.Errorf("holds %d rows after going to the top, want more than the %d it opened with", got, held)
+	}
+}
+
+// Rows are keyed by cursor and mark_key, so a mark stays on its row as
+// more rows arrive around it, and resolves to that row's cells.
+func TestSpanTableMarksHoldAcrossWalks(t *testing.T) {
+	srv := newLogStub()
+	defer srv.Close()
+	h := newSpanHarness(t, srv)
+	h.drain(h.model.Init())
+
+	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	before := build.MarkedSelections(h.root.tree.Components["logs"])
+	if len(before) != 1 {
+		t.Fatalf("marked %d rows, want 1", len(before))
+	}
+	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	after := build.MarkedSelections(h.root.tree.Components["logs"])
+	if len(after) != 1 || after[0].String != before[0].String {
+		t.Errorf("mark after walking older = %+v, want it still on %q", after, before[0].String)
+	}
+	if got := build.Substitute("${selection.Text}", after[0]); !strings.HasPrefix(got, "entry ") {
+		t.Errorf("${selection.Text} = %q, want the row's text", got)
+	}
+}
+
+// Committing a filter re-anchors: the source walks again from the newest
+// row matching it.
+func TestSpanTableFilterReanchors(t *testing.T) {
+	srv := newLogStub()
+	defer srv.Close()
+	h := newSpanHarness(t, srv)
+	h.drain(h.model.Init())
+
+	h.typeFilter("entry 01")
+	last := srv.requests()[len(srv.requests())-1]
+	if last["q"] != "entry 01" {
+		t.Fatalf("the filter didn't reach the source; last request %v", last)
+	}
+	if got := h.view(); !strings.Contains(got, "entry 019") || strings.Contains(got, "entry 199") {
+		t.Errorf("the view didn't re-anchor on the filtered rows; view:\n%s", got)
+	}
+}
+
+// The shipped span-table example opens at its newest row.
+func TestSpanTableExampleRenders(t *testing.T) {
+	c, err := cfg.Load("../../examples/span_table.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m tea.Model = app.New(app.Options{Root: root, Themes: []theme.Theme{theme.Nord()}, SkipConfig: true})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	h := &windowHarness{t: t, model: m, root: root}
+	h.drain(h.model.Init())
+	if got := h.view(); !strings.Contains(got, "request 999") {
+		t.Errorf("the newest row isn't on screen; view:\n%s", got)
 	}
 }

@@ -692,6 +692,11 @@ type Component struct {
 	// filters and sorts remotely and paints unloaded rows as
 	// placeholders. See WindowConfig.
 	Windowed bool `yaml:"-"`
+	// Spanned is derived alongside Windowed: set on a table whose source
+	// is Anchored (`window.cursor:`). A span table holds a contiguous run
+	// of rows grown at either end, keyed by cursor plus mark_key, so
+	// marking works there and sorting doesn't (the order is the walk's).
+	Spanned bool `yaml:"-"`
 
 	// Source names the data entry this component is bound to. The
 	// entry can be any kind (leaf source or pipeline operator) —
