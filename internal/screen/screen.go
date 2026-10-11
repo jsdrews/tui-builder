@@ -919,8 +919,8 @@ func componentHelpSections(c *build.Component) []help.Section {
 	return nil
 }
 
-// SetTheme rebuilds each component against the new palette, preserving
-// cursor / value / sort state via component accessors.
+// SetTheme rebuilds each component against the new palette; each one
+// carries its data and view state across via State / Restore.
 func (m *Model) SetTheme(t theme.Theme) {
 	m.th = t
 	for _, c := range m.tree.All() {
