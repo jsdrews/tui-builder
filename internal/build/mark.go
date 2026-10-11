@@ -39,6 +39,16 @@ func keyedItems(items []string) []list.KeyedItem {
 	return out
 }
 
+// keyedListItems is keyedItems with each item's source data attached, for
+// activity's BusyWhen.
+func keyedListItems(display []string, items []any) []list.KeyedItem {
+	out := keyedItems(display)
+	for i := range out {
+		out[i].Data = items[i]
+	}
+	return out
+}
+
 // indexKeyedRows keys static table rows on their position.
 func indexKeyedRows(rows []table.Row) []table.KeyedRow {
 	out := make([]table.KeyedRow, len(rows))
@@ -66,7 +76,9 @@ func KeyedTableRows(c *Component, items []any, th theme.Theme) ([]table.KeyedRow
 	byKey := make(map[string]Selection, len(rows))
 	for i, r := range rows {
 		key := ds.FirstString(items[i], c.Cfg.MarkKey)
-		keyed[i] = table.KeyedRow{Key: key, Cells: r}
+		// Data rides along for activity's BusyWhen, which reads fields
+		// the table needn't show.
+		keyed[i] = table.KeyedRow{Key: key, Cells: r, Data: items[i]}
 		byKey[key] = selectionFromCells(r, titles)
 	}
 	return keyed, byKey

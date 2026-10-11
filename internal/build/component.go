@@ -25,6 +25,7 @@ import (
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
 	ds "github.com/jsdrews/tui-builder/internal/datasource"
+	"github.com/jsdrews/tui-builder/internal/expr"
 )
 
 // Kind enumerates the supported leaf component types.
@@ -180,6 +181,9 @@ func buildList(c *cfg.Component, th theme.Theme) list.Model {
 	}
 	opts.Filterable = c.Filterable
 	opts.Markable = c.Markable
+	if busy := busyFunc(c.Activity); busy != nil {
+		opts.BusyWhen = func(it list.KeyedItem) (string, bool) { return busy(it.Data) }
+	}
 	if c.FilterPlaceholder != "" {
 		opts.Filter.Placeholder = c.FilterPlaceholder
 	}
@@ -231,6 +235,10 @@ func tableOptions(c *cfg.Component, th theme.Theme) table.Options {
 	opts.Title = c.Title
 	opts.Filterable = c.Filterable
 	opts.Markable = c.Markable
+	if busy := busyFunc(c.Activity); busy != nil {
+		opts.ActivityColumn = cfg.ActivityColumn(c)
+		opts.BusyWhen = func(r table.KeyedRow) (string, bool) { return busy(r.Data) }
+	}
 	if c.FilterPlaceholder != "" {
 		opts.Filter.Placeholder = c.FilterPlaceholder
 	}
@@ -445,6 +453,9 @@ func buildTextview(c *cfg.Component, th theme.Theme) textview.Model {
 type yamlNode struct {
 	label    string
 	children []tree.Node
+	// data is the source item a node was built from, for activity's
+	// BusyWhen. nil for group headers and static nodes.
+	data any
 }
 
 func (n *yamlNode) Label() string         { return n.label }
@@ -483,6 +494,14 @@ func convertTree(n *cfg.TreeNode) tree.Node {
 func buildTree(c *cfg.Component, th theme.Theme) tree.Model {
 	opts := th.Tree()
 	opts.Title = c.Title
+	if busy := busyFunc(c.Activity); busy != nil {
+		opts.BusyWhen = func(n tree.Node) (string, bool) {
+			if y, ok := n.(*yamlNode); ok && y.data != nil {
+				return busy(y.data)
+			}
+			return "", false
+		}
+	}
 	opts.Searchable = c.Searchable
 	opts.Markable = c.Markable
 	opts.InitialDepth = c.InitialDepth
@@ -952,5 +971,54 @@ func (c *Component) LandAtNewest() {
 	if key := a.Raw + "\x00" + a.Sort; key != c.landed {
 		c.landed = key
 		c.Table.SetCursor(len(c.Table.Rows()) - 1)
+	}
+}
+
+// busyFunc turns an `activity:` block into the predicate tuilib's
+// BusyWhen calls with each row's source item: the status at the path,
+// and whether it means busy. nil when there's no activity.
+func busyFunc(a *cfg.Activity) func(data any) (string, bool) {
+	if a == nil {
+		return nil
+	}
+	if a.BusyWhen != "" {
+		// Validated at load, so it compiles.
+		prog, _ := expr.Compile(a.BusyWhen)
+		return func(data any) (string, bool) {
+			busy, err := expr.EvalBool(prog, data)
+			return ds.FirstString(data, a.Status), err == nil && busy
+		}
+	}
+	values := make(map[string]bool, len(a.Busy))
+	for _, v := range a.Busy {
+		values[v] = true
+	}
+	return func(data any) (string, bool) {
+		status := ds.FirstString(data, a.Status)
+		return status, values[status]
+	}
+}
+
+// SetTitleSuffix redraws c's pane title as its configured title plus
+// suffix ("" to clear), for state the screen reports on the border such
+// as "· reads failing".
+func SetTitleSuffix(c *Component, suffix string) {
+	if c == nil || c.Cfg == nil {
+		return
+	}
+	title := c.Cfg.Title + suffix
+	switch c.Kind {
+	case KList:
+		c.List.SetTitle(title)
+	case KTable:
+		c.Table.SetTitle(title)
+	case KLogview:
+		c.Logview.SetTitle(title)
+	case KTree:
+		c.Tree.SetTitle(title)
+	case KInspector:
+		c.Inspector.SetTitle(title)
+	case KTextview:
+		c.Textview.SetTitle(title)
 	}
 }

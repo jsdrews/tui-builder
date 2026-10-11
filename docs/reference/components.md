@@ -34,7 +34,8 @@ These apply to every kind unless the column says otherwise.
 | `initial_query` | template | — | logview, textview, tree, inspector | Starts with this search or filter query applied. |
 | `initial_cursor` | int | `0` | list, table, tree, inspector | Row the cursor starts on. |
 | `markable` | bool | `false` | list, table, tree | Multi-select: adds a mark gutter and binds `x` (toggle), `X` (extend from the last mark), `A` (all), `D` (none). Actions with `multi: true` then run once per marked row. |
-| `mark_key` | path | — | source-bound markable table; span table | The stable identity marks are held by, read from the source item (not the rendered cells), e.g. `metadata.uid`. Required on a markable source-bound table and on every span table. |
+| `mark_key` | path | — | source-bound markable table; span table; table with `activity` | The stable identity marks and activity are held by, read from the source item (not the rendered cells), e.g. `metadata.uid`. Required on a markable source-bound table, on every span table and on a table with `activity`. |
+| `activity` | map | — | table, list, tree on a fetched or polled source | Shows a spinner on rows the data says are being worked on. See [`activity`](#activity). |
 | `on_cursor` | map | — | source-bound target | Refetches this component's source as another component's cursor moves. See [`on_cursor`](#on_cursor). |
 
 **Validation:**
@@ -297,6 +298,52 @@ events:
   color_rules:
     - {when: "~^fatal|FAILED", color: red}
 ```
+
+## `activity`
+
+Shows a spinner on the rows that are being worked on, according to the
+data: a pod `Pending`, a sync `Running`, a job queued. The server is the
+source of truth. Every fetch re-evaluates every row, so a row starts
+spinning when a read says it's busy and stops when a read says it isn't.
+Without `activity:` nothing changes; with it, a busy row shows the spinner
+and its status (`⣾ Pending`) in the activity column, and the rest render as
+usual.
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `status` | path | — | required | The field that says what a row is doing. Its value is shown beside the spinner while the row is busy. |
+| `busy` | list of string | — | not with `busy_when` | The `status` values that mean busy, matched exactly. |
+| `busy_when` | expr | — | not with `busy` | An [expression](templating.md#expressions) over the row's item, true while it's busy, for when busy-ness isn't one field's value: `status.observedGeneration < generation`. |
+| `column` | string | the column whose `value:` is `status` | table | The column the spinner draws in. A list or tree draws it beside the row. |
+
+```yaml
+pods_table:
+  type: table
+  source: pods            # refresh: 5s
+  mark_key: metadata.uid
+  activity:
+    status: status.phase
+    busy: [Pending, Terminating]
+  columns:
+    - {title: Name,  value: metadata.name}
+    - {title: Phase, value: status.phase, width: 14}   # the spinner draws here
+```
+
+Give the activity column a `width:` that fits the spinner and the longest
+busy status; the indicator never widens a column.
+
+**Reads failing.** When a polled source's fetches start failing, every
+component bound to it shows `· reads failing` on its title until a fetch
+succeeds again, and the error is reported once rather than on every poll.
+Rows keep what the last good read said; rows that were busy then show a
+static, muted marker instead of spinning. This applies to every polled
+component, with or without `activity:`.
+
+**Validation:** `status` and exactly one of `busy` / `busy_when` are
+required, and `busy_when` must compile. A table needs `mark_key:` (activity
+is tracked per row) and a column to draw in. Activity isn't available on
+streaming sources (one event isn't a whole read of the rows) or windowed
+ones (their rows have no keys).
 
 ## Color rules
 
