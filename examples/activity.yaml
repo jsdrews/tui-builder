@@ -1,0 +1,80 @@
+# activity.yaml — rows that spin while the data says they're busy.
+#
+# `activity:` reads one field per row and decides whether that row is
+# being worked on. Here a script stands in for `kubectl get pods`: every
+# few seconds each pod moves through Pending → Running → Terminating, and
+# the table, polling every 2s, spins the rows that are Pending or
+# Terminating with their phase beside the spinner. The server is the
+# truth: a row starts and stops spinning when a read says so.
+#
+# Press enter on a pod to restart it: the action claims the row, so it
+# spins "Restarting" at once rather than waiting for the next poll, and
+# stops when the (pretend) restart returns. Mark several with x and run
+# it from the menu (a) to restart them all, one claim per row.
+#
+# Make the script fail (set FAIL=1 in your shell before starting) to see
+# the outage marker: the title says "· reads failing", the rows keep what
+# the last good read said, and the error is reported once.
+app:
+  title: Pods
+  theme: nord
+  env:
+    - {name: FAIL, default: "0", description: "1 makes every read fail"}
+data:
+  sources:
+    pods:
+      type: exec
+      refresh: 2s
+      command:
+        - sh
+        - -c
+        - |
+          [ "$FAIL" = 1 ] && { echo "cluster unreachable" >&2; exit 1; }
+          now=$(date +%s)
+          printf '['
+          for i in 0 1 2 3 4 5; do
+            case $(( (now / 3 + i) % 6 )) in
+              0) phase=Pending ;; 1|2|3) phase=Running ;; 4) phase=Terminating ;; *) phase=Running ;;
+            esac
+            [ $i -gt 0 ] && printf ','
+            printf '{"metadata":{"uid":"uid-%d","name":"web-%d"},"status":{"phase":"%s"},"node":"node-%d"}' $i $i $phase $((i % 3))
+          done
+          printf ']'
+      env:
+        FAIL: ${env.FAIL}
+tui:
+  components:
+    pods:
+      type: table
+      title: Pods
+      source: pods
+      mark_key: metadata.uid
+      markable: true
+      activity:
+        status: status.phase
+        busy: [Pending, Terminating]
+      columns:
+        - {title: Name, value: metadata.name, width: 10}
+        - title: Phase
+          value: status.phase
+          width: 15
+          color_rules:
+            - {when: Running, color: green}
+        - {title: Node, value: node, flex: 1}
+  screen:
+    title: Pods
+    layout:
+      component: pods
+    actions:
+      - key: enter
+        action: restart
+        from: pods
+        bind: {name: "${selection.Name}"}
+actions:
+  restart:
+    description: Pretend to restart a pod (takes 3s)
+    multi: true
+    run: [sh, -c, "sleep 3; echo restarted ${inputs.name}"]
+    inputs:
+      name: {required: true}
+    claim: Restarting

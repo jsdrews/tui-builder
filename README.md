@@ -487,6 +487,7 @@ via `task examples`.
 | `examples/themes.yaml` | Theme picker reference |
 | `examples/chrome.yaml` | `app.glyphs` + `app.borders` — glyph vocabulary and border shapes |
 | `examples/marking.yaml` | Multi-select with `markable:` + `mark_key:` |
+| `examples/activity.yaml` | Row **activity**: pods spin while Pending or Terminating, read from the data every 2s poll; `FAIL=1` shows the "reads failing" title |
 | `examples/colors.yaml` | Per-component `colors:` overrides |
 | `examples/multi.yaml` | Multi-screen drilldown with breadcrumbs |
 | `examples/on_cursor.yaml` | `on_cursor:` — a repos table drives a detail inspector below it via `${cursor.*}` |

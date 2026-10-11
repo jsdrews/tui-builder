@@ -145,6 +145,25 @@ func validateActionDefs(actions map[string]*Action) error {
 		default:
 			return fmt.Errorf("%s: unknown type %q (want exec, http or push)", path, a.Type)
 		}
+		if cl := a.Claim; cl != nil {
+			if a.Kind() == "push" {
+				return fmt.Errorf("%s.claim: a push opens a screen; there are no rows for it to claim", path)
+			}
+			if cl.Label == "" {
+				return fmt.Errorf("%s.claim: `label:` is required — what the row shows beside the spinner (the server's word, e.g. Running)", path)
+			}
+			switch cl.Until {
+			case "", "done", "status":
+			default:
+				return fmt.Errorf("%s.claim.until: unknown %q (want done|status)", path, cl.Until)
+			}
+			if cl.Settle != 0 && !cl.IsObserved() {
+				return fmt.Errorf("%s.claim.settle: only applies with `until: status` — an `until: done` claim ends when the action returns", path)
+			}
+			if cl.Settle < 0 {
+				return fmt.Errorf("%s.claim.settle: must be >= 0", path)
+			}
+		}
 		for pname, p := range a.Inputs {
 			if p == nil {
 				return fmt.Errorf("%s.inputs.%s: empty definition", path, pname)
@@ -213,6 +232,17 @@ func validateActionBindings(bindings []ActionBinding, refs map[string]int, compo
 		}
 		if a.Kind() == "http" && b.Interactive != nil && *b.Interactive {
 			return fmt.Errorf("%s: `interactive: true` is meaningless for an http action — there is no terminal to hand over", bp)
+		}
+		if a.Claim != nil {
+			if b.IsInteractive() {
+				return fmt.Errorf("%s: action %q has `claim:`, which can't follow an interactive run — the TUI is suspended while it holds the terminal", bp, b.Action)
+			}
+			if b.From == "" {
+				return fmt.Errorf("%s: action %q has `claim:`, so the binding needs `from:` — the component whose rows it claims", bp, b.Action)
+			}
+			if fc := components[b.From]; fc != nil && fc.Activity == nil {
+				return fmt.Errorf("%s: action %q claims rows of %q, which has no `activity:` — a claim shows on rows that track activity", bp, b.Action, b.From)
+			}
 		}
 
 		// `from:` is derived, not declared: required exactly when a bind

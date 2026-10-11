@@ -3,8 +3,11 @@ package build
 import (
 	"strconv"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	xansi "github.com/charmbracelet/x/ansi"
 
+	"github.com/jsdrews/tuilib/pkg/activity"
 	"github.com/jsdrews/tuilib/pkg/list"
 	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/theme"
@@ -39,6 +42,16 @@ func keyedItems(items []string) []list.KeyedItem {
 	return out
 }
 
+// keyedListItems is keyedItems with each item's source data attached, for
+// activity's BusyWhen.
+func keyedListItems(display []string, items []any) []list.KeyedItem {
+	out := keyedItems(display)
+	for i := range out {
+		out[i].Data = items[i]
+	}
+	return out
+}
+
 // indexKeyedRows keys static table rows on their position.
 func indexKeyedRows(rows []table.Row) []table.KeyedRow {
 	out := make([]table.KeyedRow, len(rows))
@@ -66,7 +79,9 @@ func KeyedTableRows(c *Component, items []any, th theme.Theme) ([]table.KeyedRow
 	byKey := make(map[string]Selection, len(rows))
 	for i, r := range rows {
 		key := ds.FirstString(items[i], c.Cfg.MarkKey)
-		keyed[i] = table.KeyedRow{Key: key, Cells: r}
+		// Data rides along for activity's BusyWhen, which reads fields
+		// the table needn't show.
+		keyed[i] = table.KeyedRow{Key: key, Cells: r, Data: items[i]}
 		byKey[key] = selectionFromCells(r, titles)
 	}
 	return keyed, byKey
@@ -106,7 +121,7 @@ func MarkedSelections(c *Component) []Selection {
 		keys := c.List.Selection()
 		out := make([]Selection, 0, len(keys))
 		for _, k := range keys {
-			out = append(out, Selection{String: k})
+			out = append(out, Selection{String: k, Key: k})
 		}
 		return out
 	case KTable:
@@ -133,6 +148,7 @@ func MarkedSelections(c *Component) []Selection {
 		}
 		for _, k := range keys {
 			if sel, ok := c.RowsByKey[k]; ok {
+				sel.Key = k
 				out = append(out, sel)
 			}
 		}
@@ -150,3 +166,53 @@ func MarkedCount(c *Component) int { return len(MarkedSelections(c)) }
 // can carry them. The validator has already rejected the combinations
 // that can't, so this is a cheap guard rather than a second opinion.
 func markable(c *cfg.Component) bool { return c != nil && c.Markable }
+
+// CursorKey is the focused row's key, for a selection taken from the
+// cursor rather than from marks. "" for components without keys.
+func CursorKey(c *Component) string {
+	var keys []string
+	switch c.Kind {
+	case KTable:
+		keys = c.Table.Selection()
+	case KList:
+		keys = c.List.Selection()
+	case KTree:
+		keys = c.Tree.Selection()
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	return keys[0]
+}
+
+// Dispatch opens a claim on rows of c: they spin with label from now
+// until Done says the work is over (Held) or the data takes over
+// (Observed). settle is this claim's own allowance of unchanged reads
+// (an Observed claim's `settle:`). The command is the spinner's first
+// tick.
+func Dispatch(c *Component, keys []string, label string, mode activity.Mode, settle int) (activity.Op, tea.Cmd) {
+	opts := activity.DispatchOptions{Settle: &settle}
+	switch c.Kind {
+	case KTable:
+		return c.Table.DispatchWith(keys, label, mode, opts)
+	case KList:
+		return c.List.DispatchWith(keys, label, mode, opts)
+	case KTree:
+		return c.Tree.DispatchWith(keys, label, mode, opts)
+	}
+	return activity.Op{}, nil
+}
+
+// Done reports that a claim's request answered, err non-nil when it
+// failed.
+func Done(c *Component, op activity.Op, err error) activity.Outcome {
+	switch c.Kind {
+	case KTable:
+		return c.Table.Done(op, err)
+	case KList:
+		return c.List.Done(op, err)
+	case KTree:
+		return c.Tree.Done(op, err)
+	}
+	return activity.Withdrawn
+}

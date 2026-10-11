@@ -3,9 +3,9 @@ package config
 import (
 	"fmt"
 	"os"
-	"time"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
@@ -118,6 +118,11 @@ func (c *Config) Validate() error {
 		// setting would read as working and do nothing.
 		if comp.SortDebounce != "" && !comp.Windowed {
 			return fmt.Errorf("tui.components.%s: `sort_debounce:` only applies to a table bound to a windowed source — a local sort is instant", name)
+		}
+		if ref := comp.Source; ref != "" {
+			if err := validateActivityBinding(name, comp, c.Data.Sources[ref]); err != nil {
+				return err
+			}
 		}
 		// After bindWindowed: the windowed check below needs the flag
 		// it sets.
@@ -249,7 +254,7 @@ func validateOnCursor(refs map[string]int, components map[string]*Component, pat
 // Runs after bindWindowed, which is what sets Windowed.
 func validateMarkable(c *Component, path string) error {
 	if !c.Markable {
-		if len(c.MarkKey) > 0 && !c.Spanned {
+		if len(c.MarkKey) > 0 && !c.Spanned && c.Activity == nil {
 			return fmt.Errorf("%s: `mark_key:` set without `markable: true` — it does nothing on its own", path)
 		}
 		return nil
@@ -428,6 +433,9 @@ func (c *Component) validate(path string) error {
 	if err := c.validateEventlog(path); err != nil {
 		return err
 	}
+	if err := c.validateActivity(path); err != nil {
+		return err
+	}
 	if c.Type == "table" {
 		if len(c.Columns) == 0 {
 			return fmt.Errorf("%s: table needs columns", path)
@@ -539,6 +547,92 @@ func (c *Component) validateEventlog(path string) error {
 	}
 	if c.MaxItems < 0 {
 		return fmt.Errorf("%s: max_items must be >= 0 (0 = tuilib's default)", path)
+	}
+	return nil
+}
+
+// validateActivity checks an `activity:` block on its own; the checks
+// that need the bound source run in validateActivityBinding.
+func (c *Component) validateActivity(path string) error {
+	a := c.Activity
+	if a == nil {
+		return nil
+	}
+	path += ".activity"
+	switch c.Type {
+	case "table", "list", "tree":
+	default:
+		return fmt.Errorf("%s: only a table, list or tree shows row activity (got %s)", path, c.Type)
+	}
+	if c.Source == "" {
+		return fmt.Errorf("%s: needs `source:` — activity is read from the data each fetch returns", path)
+	}
+	if len(a.Status) == 0 || a.Status[0] == "" {
+		return fmt.Errorf("%s: `status:` is required (dot-path to the field that says what a row is doing, e.g. status.phase)", path)
+	}
+	switch {
+	case len(a.Busy) > 0 && a.BusyWhen != "":
+		return fmt.Errorf("%s: set `busy:` or `busy_when:`, not both", path)
+	case len(a.Busy) == 0 && a.BusyWhen == "":
+		return fmt.Errorf("%s: set `busy:` (the status values that mean busy) or `busy_when:` (an expression)", path)
+	}
+	if a.BusyWhen != "" {
+		if _, err := expr.Compile(a.BusyWhen); err != nil {
+			return fmt.Errorf("%s.busy_when: %w", path, err)
+		}
+	}
+	if c.Type != "table" {
+		if a.Column != "" {
+			return fmt.Errorf("%s: `column:` is table-only — a %s draws the spinner beside the row", path, c.Type)
+		}
+		return nil
+	}
+	if len(c.MarkKey) == 0 || c.MarkKey[0] == "" {
+		return fmt.Errorf("%s: a table with `activity:` needs `mark_key:` — activity is tracked per row, by a stable identity", strings.TrimSuffix(path, ".activity"))
+	}
+	if ActivityColumn(c) == "" {
+		if a.Column != "" {
+			return fmt.Errorf("%s.column: %q isn't one of the table's column titles", path, a.Column)
+		}
+		return fmt.Errorf("%s: no column shows %q, so set `column:` to the one the spinner should replace", path, strings.Join(a.Status, ", "))
+	}
+	return nil
+}
+
+// ActivityColumn is the title of the column a table's activity spinner
+// draws in: `column:` when it names a column, else the first column whose
+// `value:` is the activity's status path. "" when neither resolves.
+func ActivityColumn(c *Component) string {
+	a := c.Activity
+	if a == nil {
+		return ""
+	}
+	for _, col := range c.Columns {
+		if a.Column != "" {
+			if col.Title == a.Column {
+				return col.Title
+			}
+			continue
+		}
+		if len(col.Value) > 0 && len(a.Status) > 0 && col.Value[0] == a.Status[0] {
+			return col.Title
+		}
+	}
+	return ""
+}
+
+// validateActivityBinding rejects activity on sources it can't work over:
+// a stream (one event isn't a whole observation of the rows) or a window
+// (its rows carry no keys).
+func validateActivityBinding(name string, comp *Component, entry *Source) error {
+	if comp.Activity == nil || entry == nil {
+		return nil
+	}
+	if comp.Windowed {
+		return fmt.Errorf("tui.components.%s.activity: not available on a windowed source — a window holds rows without keys to track", name)
+	}
+	if entry.Type == "websocket" || entry.Follow {
+		return fmt.Errorf("tui.components.%s.activity: not available on a streaming source — one event isn't a whole read of the rows, so it can't say a row has stopped being busy", name)
 	}
 	return nil
 }

@@ -39,6 +39,7 @@ var referencePages = map[string][]string{
 	"InspectorField": {"components.md"},
 	"Colors":         {"components.md"},
 	"OnCursor":       {"components.md"},
+	"Activity":       {"components.md"},
 	"Source":         {"sources.md", "pipelines.md"},
 	"Parameter":      {"sources.md", "actions.md", "app.md"},
 	"PaginateConfig": {"sources.md"},
@@ -50,6 +51,7 @@ var referencePages = map[string][]string{
 	"JoinLookup":     {"pipelines.md"},
 	"Action":         {"actions.md"},
 	"ActionBinding":  {"actions.md"},
+	"Claim":          {"actions.md"},
 }
 
 // Fields documented as sub-keys of their parent's row rather than with a

@@ -192,8 +192,32 @@ func (r *Resolved) Finish(code int, output string) Result {
 		res.Summary = substitute(tmpl, r.messageVals(code, output))
 		return res
 	}
+	// A claiming action says what the reply means: an `until: status`
+	// one has only been accepted, so "requested"; an `until: done` one
+	// is over.
+	if res.OK && r.def.Claim != nil {
+		if r.def.Claim.IsObserved() {
+			res.Summary = r.def.Claim.Label + " requested"
+		} else {
+			res.Summary = r.def.Claim.Label + " completed"
+		}
+		return res
+	}
 	res.Summary = r.defaultSummary(res.OK, code, output)
 	return res
+}
+
+// Receipt is the statusbar line for a successful run, when the action
+// says one: its message: template can't be known before the run, so only
+// a claim's default qualifies. "" leaves the shell's own.
+func (r *Resolved) Receipt() string {
+	if r.def.Message != "" || r.def.Claim == nil {
+		return ""
+	}
+	if r.def.Claim.IsObserved() {
+		return r.def.Claim.Label + " requested"
+	}
+	return r.def.Claim.Label + " completed"
 }
 
 // verdict decides OK. Per-kind defaults unless the action declares a
