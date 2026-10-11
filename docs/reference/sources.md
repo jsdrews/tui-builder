@@ -251,6 +251,8 @@ Supported on `http` (the request goes in the query string) and `exec`
 | `sort_param` | string | — | http only | Query parameter for the sort field. |
 | `sorts` | map of string | — | http only; needs `sort_param` | Maps a column title to the sort field the API expects. Unlisted columns send their title. |
 | `sort_desc_prefix` | string | — | http only; needs `sort_param` | Prepended for a descending sort, e.g. `-` for Django REST (`ordering=-created`). Empty means both directions send the same value. |
+| `growing` | `true` or map | — | eventlog only; not with `refresh` | The set is still gaining items at its newest end. A bound eventlog follows the newest item and the source is polled every `follow_every`; when growth stops, one final read picks up the last items. `true` grows for as long as the screen is open. The map form ties it to another source; see [growing](#growing). |
+| `follow_every` | duration | `2s` | needs `growing` | Poll interval while growing. |
 
 On exec, `command:` uses these tokens instead of the `*_param` fields:
 
@@ -274,12 +276,43 @@ parameter the window also sets is overwritten, so `?q=x` on the URL acts
 as a default search the user's filter replaces. `refresh:` and `r`
 refetch the window on screen in place.
 
+### Growing
+
+`growing:` as a map names another source and a condition on its value,
+re-evaluated every time that source answers. That source needn't be shown
+anywhere: the screen fetches it when it opens, and polls it on its own
+`refresh:`, so give it one.
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `source` | string | — | required | The entry whose value decides, e.g. the job a list of events belongs to. |
+| `while` | expr | — | required | True while items are still arriving, over that source's value. |
+
+```yaml
+data:
+  sources:
+    job:
+      type: http
+      url: ${env.AWX_HOST}/api/v2/jobs/${params.id}/
+      refresh: 5s
+    job_events:
+      type: exec
+      command: [awx-events, --job, "${params.id}", --offset, "${window.offset}", --limit, "${window.limit}", --search, "${window.search}"]
+      window:
+        total_path: count
+        growing: {source: job, while: 'status in ["pending", "waiting", "running"]'}
+        follow_every: 2s
+```
+
 **Validation:**
 
 - `window:` only on `http` and `exec`, with json format, not with
   `follow` or `paginate`.
-- Only a `type: table` may bind a windowed source, and an operator can't
-  consume one (it would see one page and present it as everything).
+- Only a `type: table` or an `eventlog` may bind a windowed source, and
+  an operator can't consume one (it would see one page and present it as
+  everything). `growing:` is eventlog-only, can't be combined with
+  `refresh:`, and its `source:` must exist and its `while:` compile;
+  `follow_every` needs `growing`.
 - http: `offset_param` and `limit_param` are required, and at least one
   of `search_param` / `filters` (otherwise the filter bar has nowhere to
   send input). `sorts` and `sort_desc_prefix` need `sort_param`.

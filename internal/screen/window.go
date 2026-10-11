@@ -1,14 +1,16 @@
 package screen
 
-// Windowed sources: tables bound to a source that declares `window:`.
+// Windowed sources: tables and eventlogs bound to a source that declares
+// `window:`.
 //
 // A normal source is fetched once (or on a timer) and the whole result is
 // pushed into every bound component. A windowed source can't work that
 // way: the set is bigger than anyone wants to hold, so the table asks for
 // the rows it is showing and the source answers the filter and the sort.
 //
-// tuilib's pkg/remote runs that loop. The table is a remote.Table built
-// over a Seekable whose Page calls the data layer's FetchWindow; remote
+// tuilib's pkg/remote runs that loop. A table is a remote.Table, an
+// eventlog a remote.Eventlog, each built over a Seekable whose Page calls
+// the data layer's FetchWindow; remote
 // decides when to fetch, cancels requests a newer one supersedes, keeps
 // stale rows dimmed while a new query loads, marks a failed one, and
 // reports each query's outcome to the shell's query history under the
@@ -22,23 +24,31 @@ package screen
 //     scope.go), and handed only to that component's remote table.
 //   - Polling. `refresh:` on a windowed source re-requests the window on
 //     screen on a timer.
+//   - Growth. `window.growing:` with a condition reads another source;
+//     each time it answers, updateGrowth tells the eventlog whether items
+//     are still arriving.
 //   - The query mapping. translateWindowQuery turns tuilib's filter terms
 //     into the data layer's WindowQuery, which never imports tuilib.
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jsdrews/tuilib/pkg/app"
+	"github.com/jsdrews/tuilib/pkg/eventlog"
 	"github.com/jsdrews/tuilib/pkg/query"
 	"github.com/jsdrews/tuilib/pkg/remote"
 	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	"github.com/jsdrews/tui-builder/internal/build"
+	cfg "github.com/jsdrews/tui-builder/internal/config"
 	ds "github.com/jsdrews/tui-builder/internal/datasource"
+	"github.com/jsdrews/tui-builder/internal/expr"
 )
 
 // windowEntry is one windowed table: its component, the source it pulls
@@ -50,18 +60,36 @@ type windowEntry struct {
 	// windowed source polls by re-requesting the window on screen rather
 	// than refetching a whole result set.
 	refresh time.Duration
+	// growing is the source's `window.growing:`, nil when it doesn't
+	// grow. while is its compiled condition; nil for `growing: true`.
+	growing *cfg.Growing
+	while   *expr.Program
+	// grows is the last growing state handed to the eventlog, so a poll
+	// that answers the same thing doesn't send it again.
+	grows bool
+	// followed records that growth has started once: the first start
+	// jumps to the newest item, later ones leave a reader where they are.
+	followed bool
+}
+
+// remoteView is what the screen needs from either kind of remote binding:
+// remote.Table and remote.Eventlog both satisfy it.
+type remoteView interface {
+	Init() tea.Cmd
+	Update(tea.Msg) tea.Cmd
+	Refresh() tea.Cmd
 }
 
 // windowViewportMsg and windowQueryMsg carry a table's viewport and
 // query messages, tagged with the component that emitted them.
 type windowViewportMsg struct {
 	component string
-	msg       table.ViewportChangedMsg
+	msg       tea.Msg // table.ViewportChangedMsg or eventlog.ViewportChangedMsg
 }
 
 type windowQueryMsg struct {
 	component string
-	msg       table.QueryChangedMsg
+	msg       tea.Msg // table.QueryChangedMsg or eventlog.QueryChangedMsg
 }
 
 // windowTickMsg re-requests the window on screen for a polled source.
@@ -80,7 +108,7 @@ type windowTickMsg struct{ component string }
 func (m *Model) initWindows() {
 	for _, name := range m.tree.Order {
 		c := m.tree.Components[name]
-		if c.Cfg == nil || !c.Cfg.Windowed || c.Kind != build.KTable {
+		if c.Cfg == nil || !c.Cfg.Windowed || (c.Kind != build.KTable && c.Kind != build.KEventlog) {
 			continue
 		}
 		entry, ok := m.sources[c.Cfg.Source]
@@ -95,20 +123,45 @@ func (m *Model) initWindows() {
 			m.windows = map[string]*windowEntry{}
 		}
 		def := m.windowDefs[c.Cfg.Source]
-		shape := remote.Seekable[table.KeyedRow]{
-			Page: windowPage(ws, c, m.windowFilters(c.Cfg.Source), m.th),
-			// Prefixes this source's lines in the shell's query history.
-			Name: c.Cfg.Source,
-		}
-		if def != nil {
-			shape.PageSize, shape.Prefetch = def.PageSize, def.Prefetch
-		}
-		build.NewRemoteTable(c, m.th, shape)
-		m.windows[name] = &windowEntry{
+		w := &windowEntry{
 			component: name,
 			source:    c.Cfg.Source,
 			refresh:   entry.src.Refresh(),
 		}
+		if c.Kind == build.KEventlog {
+			shape := remote.Seekable[eventlog.Item]{
+				Page: eventlogPage(ws, c, m.windowFilters(c.Cfg.Source), m.th),
+				// Prefixes this source's lines in the shell's query history.
+				Name: c.Cfg.Source,
+			}
+			if def != nil {
+				shape.PageSize, shape.Prefetch = def.PageSize, def.Prefetch
+				if def.Growing != nil {
+					w.growing = def.Growing
+					every := def.FollowEvery
+					if every == "" {
+						every = cfg.DefaultFollowEvery
+					}
+					// Validated at load.
+					shape.Follow, _ = time.ParseDuration(every)
+					if !def.Growing.Always {
+						// Validated at load, so it compiles.
+						w.while, _ = expr.Compile(def.Growing.While)
+					}
+				}
+			}
+			build.NewRemoteEventlog(c, m.th, shape)
+		} else {
+			shape := remote.Seekable[table.KeyedRow]{
+				Page: windowPage(ws, c, m.windowFilters(c.Cfg.Source), m.th),
+				Name: c.Cfg.Source,
+			}
+			if def != nil {
+				shape.PageSize, shape.Prefetch = def.PageSize, def.Prefetch
+			}
+			build.NewRemoteTable(c, m.th, shape)
+		}
+		m.windows[name] = w
 	}
 }
 
@@ -134,14 +187,29 @@ func windowPage(src ds.WindowedSource, c *build.Component, mapped map[string]str
 	}
 }
 
+// eventlogPage is windowPage for an eventlog: the same FetchWindow, with
+// each item turned into lines instead of cells.
+func eventlogPage(src ds.WindowedSource, c *build.Component, mapped map[string]string, th theme.Theme) func(context.Context, remote.Window) ([]eventlog.Item, int, error) {
+	return func(ctx context.Context, w remote.Window) ([]eventlog.Item, int, error) {
+		page, err := src.FetchWindow(ctx, translateWindowQuery(w, mapped))
+		if err != nil {
+			return nil, 0, err
+		}
+		return build.EventlogItems(c, page.Items, th), page.Total, nil
+	}
+}
+
 // startWindows returns the opening request for every windowed table, and
 // starts the poll for the ones whose source refreshes. Batched into
 // OnEnter alongside the ordinary first-fetch wave.
 func (m *Model) startWindows() []tea.Cmd {
 	var cmds []tea.Cmd
 	for name, w := range m.windows {
-		if c := m.tree.Components[name]; c != nil && c.Remote != nil {
-			cmds = append(cmds, tagCursorFocused(c.Remote.Init(), name))
+		if rv := m.remoteFor(name); rv != nil {
+			cmds = append(cmds, tagCursorFocused(rv.Init(), name))
+		}
+		if w.growing != nil && w.growing.Always {
+			cmds = append(cmds, m.setGrowing(w, true))
 		}
 		if w.refresh > 0 {
 			cmds = append(cmds, windowTick(name, w.refresh))
@@ -157,15 +225,58 @@ func windowTick(component string, d time.Duration) tea.Cmd {
 	})
 }
 
-// remoteFor returns the remote table behind a windowed component, or nil.
-func (m *Model) remoteFor(component string) *remote.Table {
+// remoteFor returns the remote binding behind a windowed component, or
+// nil.
+func (m *Model) remoteFor(component string) remoteView {
 	if _, ok := m.windows[component]; !ok {
 		return nil
 	}
-	if c := m.tree.Components[component]; c != nil {
+	c := m.tree.Components[component]
+	switch {
+	case c == nil:
+	case c.Remote != nil:
 		return c.Remote
+	case c.RemoteLog != nil:
+		return c.RemoteLog
 	}
 	return nil
+}
+
+// setGrowing tells an eventlog whether its source is still gaining items.
+// While it is, the view follows and the source polls every follow_every;
+// when it stops, tuilib makes one final read.
+func (m *Model) setGrowing(w *windowEntry, b bool) tea.Cmd {
+	c := m.tree.Components[w.component]
+	if c == nil || c.RemoteLog == nil || w.grows == b {
+		return nil
+	}
+	w.grows = b
+	// A growing log opens at the newest item, following, whatever
+	// `start:` says. tuilib leaves following to the caller, so it's set
+	// here, once.
+	if b && !w.followed {
+		w.followed = true
+		c.Eventlog.SetFollow(true)
+	}
+	return tagCursorFocused(c.RemoteLog.SetGrowing(b), w.component)
+}
+
+// updateGrowth re-evaluates every `growing: {source, while}` condition
+// that depends on source, against the value it just answered.
+func (m *Model) updateGrowth(source string, data any) tea.Cmd {
+	var cmds []tea.Cmd
+	for _, w := range m.windows {
+		if w.while == nil || w.growing.Source != source {
+			continue
+		}
+		on, err := expr.EvalBool(w.while, data)
+		if err != nil {
+			cmds = append(cmds, app.Error(fmt.Sprintf("%s: growing: %v", w.source, err)))
+			continue
+		}
+		cmds = append(cmds, m.setGrowing(w, on))
+	}
+	return tea.Batch(cmds...)
 }
 
 // handleWindowViewport hands a table's viewport change to its own remote
@@ -299,6 +410,10 @@ func translateWindowMsg(msg tea.Msg, name string) tea.Msg {
 	case table.ViewportChangedMsg:
 		return windowViewportMsg{component: name, msg: x}
 	case table.QueryChangedMsg:
+		return windowQueryMsg{component: name, msg: x}
+	case eventlog.ViewportChangedMsg:
+		return windowViewportMsg{component: name, msg: x}
+	case eventlog.QueryChangedMsg:
 		return windowQueryMsg{component: name, msg: x}
 	}
 	return nil
