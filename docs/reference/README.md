@@ -2,8 +2,8 @@
 
 Every field tui-builder's YAML accepts, one page per area. Each section
 has a field table, the validation rules that apply, and a minimal
-example. For a guided tour, start with the [README](../../README.md); for
-complete, runnable configs, browse [`examples/`](../../examples/).
+example. For a guided tour, start with the [README](https://github.com/jsdrews/tui-builder/blob/main/README.md); for
+complete, runnable configs, browse [`examples/`](https://github.com/jsdrews/tui-builder/tree/main/examples).
 
 | Page | Covers |
 |---|---|

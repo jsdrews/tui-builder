@@ -2,7 +2,7 @@
 
 The data layer (sources and pipelines) is the heart of tui-builder: the
 TUI is one consumer of it and `wrangl` is another. This page covers how
-it is put together and how `wrangl` drives it. For every field, see the
+it is put together. For every field, see the
 reference: [sources](reference/sources.md),
 [pipelines](reference/pipelines.md) and
 [templating](reference/templating.md).
@@ -63,38 +63,10 @@ They combine: `polled (refresh: 5s) · needs params`,
 
 ## wrangl
 
-`wrangl <config.yaml>` runs the data layer with no TUI: to inspect a
-config, dump a source, or pipe one into other tools.
-
-| Invocation | Behaviour |
-|---|---|
-| `wrangl <config>` | Lists every source and operator (same as `--list`). |
-| `wrangl --list [--all] <config>` | Lists entries; `--all` (`-a`) includes hidden `_`-prefixed ones. |
-| `wrangl --list-actions <config>` | Lists the actions and their inputs. |
-| `wrangl --describe-action <config> <action> [--param k=v]` | Shows an action's inputs and a dry run of the command or request it would send. |
-| `wrangl <config> <target>` | Writes the entry's value to stdout. |
-| `wrangl <config> <target> --describe` | Prints the entry's kind, lifecycle, request template and parameters, without substituting `${env.*}`. |
-| `wrangl <config> <target> --param k=v` | Binds a parameter; repeatable. |
-| `wrangl <config> <target> --pretty` | Indents one-shot JSON output. |
-| `wrangl <config> <target> --raw` | Writes text values and text frames as plain text, not JSON strings. |
-| `wrangl <config> <target> --limit N` | Stops a stream after N events. |
-| `wrangl <config> <target> --for D` | Stops a stream after duration D. |
-
-### Output contract
-
-| Source shape | Default stdout | With `--raw` |
-|---|---|---|
-| `format: json`, one-shot or polled | one JSON value and a newline | unchanged |
-| `format: text`, one-shot or polled | one JSON-quoted string | the body as-is |
-| streamed JSON frames | NDJSON, one value per line | unchanged |
-| streamed text frames | NDJSON of JSON strings | one plain line per frame |
-
-Errors in the middle of a stream are written as `{"error": "..."}` lines,
-even with `--raw`, so the line protocol holds. A windowed source returns
-its first page.
-
-For log-like sources, prefer streaming (`follow: true`) over a polled
-`format: text` source, which re-sends the whole buffer on every tick.
+`wrangl` runs this layer on its own and writes the result to stdout,
+which makes every source and pipeline inspectable and scriptable without
+a terminal UI. See [wrangl](cli/wrangl.md) for its flags and output
+format.
 
 ## The boundary
 
@@ -108,5 +80,5 @@ The data layer never depends on the TUI:
   fails the build on a violation.
 
 Data wrangling is the product and the TUI is one sink. `wrangl` stays
-cheap to build and test without Bubble Tea. See [AGENTS.md](../AGENTS.md)
+cheap to build and test without Bubble Tea. See [AGENTS.md](https://github.com/jsdrews/tui-builder/blob/main/AGENTS.md)
 for the rule.
