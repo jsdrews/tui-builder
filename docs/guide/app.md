@@ -30,11 +30,12 @@ The shell always provides:
 | `?` | Opens the key overlay for the focused component, searchable |
 | `a` | Opens the action menu (`app.actions_key`) |
 | `o` | Opens the output console (`app.output_key`) |
-| `t` | Cycles the theme (`app.theme_key`) |
+| `t` | Cycles the theme (`app.theme_key`). Data, cursor, filter, sort, marks, expansion and scroll position are kept across the swap |
 | `tab` / `shift+tab` | Moves focus between components |
 | `r` | Refetches every source on the screen |
 | `esc` | Goes back one screen |
-| `q` | Quits |
+| `q`, `ctrl+c` | Quits |
+| `ctrl+z` | Suspends the app |
 
 Set any of the three configurable keys to `-` to turn that feature off.
 `glyphs:` and `borders:` change the marks and border shapes every

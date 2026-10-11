@@ -129,8 +129,9 @@ type PaginateConfig struct {
 	// strategy "link". Common values: "next", "links.next",
 	// "meta.pagination.next".
 	NextPath string `yaml:"next_path,omitempty"`
-	// MaxPages caps the walk. Default 20. Zero means unlimited (not
-	// recommended — one runaway API can OOM the process).
+	// MaxPages caps the walk. Zero (or unset) means the default of 20;
+	// there is deliberately no unlimited setting — one runaway API could
+	// OOM the process.
 	MaxPages int `yaml:"max_pages,omitempty"`
 	// OnPageError chooses what happens when a mid-walk page fails:
 	//   "" / "fail" (default) — abort, return the error

@@ -159,7 +159,7 @@ map at load, so the two forms behave identically.
 | `name` | string | — | required for an inline declaration | The registry name the inline action gets. |
 | `key` | string | — (menu only) | — | `enter` fires directly (a double click is its mouse form). Any other key is a shortcut inside the action menu. Omit it to list the action in the menu only. |
 | `label` | string | action name; a push: `open <screen>` | — | The action's name in the menu and help. |
-| `from` | string | — | see validation | The list, table or tree whose focused row supplies `${selection.*}` (or whose marked rows a `multi` action runs over). |
+| `from` | string | — | see validation | The list, table, tree or eventlog whose focused row supplies `${selection.*}` (or whose marked rows a `multi` action runs over). |
 | `bind` | map of template | — | — | Fills the action's `inputs:` (or, on a push, the destination's source `parameters:`) from `${selection.*}` and `${env.*}`. |
 | `confirm` | template | — | — | Shows a yes/no dialog before running. Takes `${selection.*}` and `${inputs.*}` (resolved values, after the form). |
 | `interactive` | bool | `false` | exec | Hands the terminal to the process (vim, ssh, `kubectl exec`) instead of capturing its output into the console. |
@@ -171,7 +171,7 @@ map at load, so the two forms behave identically.
   `app.output_key` or `app.theme_key`, and can't repeat on one screen.
 - `from:` is required when `bind:` or `confirm:` reads `${selection…}`,
   or the action is a push, and forbidden otherwise. It must be a list,
-  table or tree placed on this screen.
+  table, tree or eventlog placed on this screen.
 - Every `bind:` key is a declared input (except on a push).
 - `interactive: true` isn't allowed on http actions or with `multi`.
 

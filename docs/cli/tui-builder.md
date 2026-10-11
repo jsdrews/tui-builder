@@ -48,4 +48,5 @@ fails to load or the program fails to start.
 
 - [`wrangl`](wrangl.md) runs the same config's data layer without a UI.
 - `example-launcher` (or `task examples` in a clone) lists every example
-  and runs the one you pick.
+  and runs the one you pick. `-dir PATH` points it at another directory
+  of `*.yaml` configs; the default is `./examples`, or `../examples`.

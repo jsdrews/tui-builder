@@ -37,7 +37,7 @@ must have no cycles, and no operator may read a windowed source.
 | `type` | string | — | required | `passthrough`, `filter`, `project`, `derive`, `sort`, `union`, `compose`, `join` or `cache`. |
 | `from` | string | — | passthrough, filter, project, derive, sort, cache | The entry this operator reads. |
 | `parameters` | map | — | — | Typed inputs, available in this operator's expressions as `params.NAME`. See [parameters](#parameters). |
-| `pipe` | list | — | — | Further stages applied to this operator's output. See [`pipe`](#pipe). |
+| `pipe` | list | — | `passthrough` only | Further stages applied to this entry's output. Other operators chain with `from:` instead. See [`pipe`](#pipe). |
 
 ## `passthrough`
 
@@ -247,14 +247,16 @@ stage).
 
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
-| `pipe` | list | — | leaf kinds except `merge`; operators | The stages, in order. |
+| `pipe` | list | — | leaf kinds except `merge`; `passthrough` | The stages, in order. |
 
 At load, a leaf with `pipe:` becomes a hidden `_NAME_raw` entry plus the
 chain, and the chain's final stage takes the original name. Intermediate
 stages are hidden `_NAME_stepN` entries. `parameters:` on the leaf still
 bind to the raw fetch.
 
-**Validation:** stages have a `type:` from the five allowed and no
+**Validation:** `pipe:` is only accepted on a leaf or a `passthrough`;
+on any other operator it fails to load, so chain those with `from:`.
+Stages have a `type:` from the five allowed and no
 `from:`. Multi-input operators (`union`, `compose`, `join`) can't be
 stages; declare them as named entries instead.
 

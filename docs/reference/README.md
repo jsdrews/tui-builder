@@ -8,7 +8,7 @@ complete, runnable configs, browse [`examples/`](https://github.com/jsdrews/tui-
 | Page | Covers |
 |---|---|
 | [app.md](app.md) | The top-level shape, `app:` (title, theme, glyphs, borders, keys, boot prompts, env), `tui.screen` / `tui.screens`, and layout nodes |
-| [components.md](components.md) | Every component kind: list, table, logview, textview, tree, inspector, plus columns, color rules, colors and `on_cursor:` |
+| [components.md](components.md) | Every component kind: list, table, logview, textview, tree, inspector, eventlog, plus columns, color rules, colors, `activity:` and `on_cursor:` |
 | [sources.md](sources.md) | Leaf sources: http, exec, file, websocket, static, merge, plus `parameters:`, `paginate:`, `window:` and `cache:` |
 | [pipelines.md](pipelines.md) | Operator sources: passthrough, filter, project, derive, sort, union, compose, join, cache, and inline `pipe:` chains |
 | [actions.md](actions.md) | The `actions:` registry, screen action bindings, inputs and generated forms, reserved keys |

@@ -15,6 +15,7 @@ it's used. The full list is in
 | `${cursor…}` | the live cursor of an `on_cursor` driver | `on_cursor.bind` |
 | `${inputs.NAME}` | an action's inputs, after the form | an action's argv, URL, body, messages |
 | `${body.PATH}` | an action's JSON response | `message:`, `error_message:` |
+| `${window.*}` | the page or edge a windowed source is asked for | a windowed exec `command`, an Anchored http `body` / `older` / `newer` |
 
 `${selection}` alone is a list's item or a table's first cell;
 `${selection.Name}` is the cell in the column titled `Name`, and
@@ -48,7 +49,8 @@ first non-empty one wins.
 
 ## Expressions
 
-Pipeline operators and an action's `success:` take
+Pipeline operators, an action's `success:`, `activity.busy_when` and
+`window.growing.while` take
 [expr-lang](https://expr-lang.org/docs/language-definition) expressions.
 An item's fields are in scope directly:
 

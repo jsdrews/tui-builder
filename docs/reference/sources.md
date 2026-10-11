@@ -215,7 +215,7 @@ thousand rows; for bigger ones use [`window`](#window).
 |---|---|---|---|---|
 | `strategy` | string | — | required | How to find the next page. `link`: the response carries the next page's URL. |
 | `next_path` | string | — | required for `link` | Dot-path into the raw response (before `root:`) to the next page's URL, e.g. `next` or `links.next`. The walk stops when it's empty. |
-| `max_pages` | int | `20` | — | Caps the walk. `0` is unlimited (one runaway API can exhaust memory). |
+| `max_pages` | int | `20` | — | Caps the walk. `0` or unset means the default of 20; there is no unlimited setting (one runaway API could exhaust memory), so set a larger number if you need more pages. |
 | `on_page_error` | string | `fail` | — | `fail` returns the error; `skip` returns the pages fetched so far. |
 
 ```yaml
@@ -375,7 +375,8 @@ data:
   `follow_every` needs `growing`.
 - http: `offset_param` and `limit_param` are required, and at least one
   of `search_param` / `filters` (otherwise the filter bar has nowhere to
-  send input). `sorts` and `sort_desc_prefix` need `sort_param`.
+  send input). An Anchored http window can instead carry the filter as
+  `${window.search}` in `body:`, `older:` or `newer:`. `sorts` and `sort_desc_prefix` need `sort_param`.
 - exec: the http-only fields are errors. `command:` must reference
   `${window.offset}`, `${window.limit}` and at least one filter token;
   every `filters:` entry must be referenced; `command[0]` can't use a
@@ -385,6 +386,8 @@ data:
 - With `cursor:`: http needs both `older:` and `newer:`, which are
   http-only; exec must reference `${window.cursor}`, `${window.dir}` and
   `${window.limit}`; the offset, total and sort fields are rejected.
+- `anchor:` needs `cursor:`. A paged window starts where the bound
+  component's `start:` says.
 
 `wrangl` on a windowed source returns its first page.
 

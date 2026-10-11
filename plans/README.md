@@ -22,7 +22,9 @@ section in the plan gets trimmed or deleted.
   the action menu, multi-select marking, masked prompts, and
   glyph/border theming. **All landed**; kept as the record of how, plus
   one open question on `bind:`.
-- [`tabs.md`](tabs.md) — deferred `type: tabs` container component
-  (feature E from the tui-builder integration batch). Schema, focus-
-  semantics tradeoffs, scope estimate. Build when a concrete case
-  shows up.
+- [`tuilib-0.31.md`](tuilib-0.31.md) — adopting tuilib v0.26–v0.32:
+  activity, claims, eventlog, Anchored sources and span tables.
+- [`tuilib-0.35.md`](tuilib-0.35.md) — giving every tuilib v0.35
+  package and option a verdict: tabs, metrics, input/toggle, stream
+  resume, app and component options, and the docs fixes. Locked; eleven
+  PRs. It replaces the old `tabs.md` draft.

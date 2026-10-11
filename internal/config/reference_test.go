@@ -148,3 +148,44 @@ func TestReferenceDocumentsEveryField(t *testing.T) {
 		t.Error(m)
 	}
 }
+
+// enumPages says which docs/reference page must name each value of an
+// enum the code keeps a registry for. Only registries are checked: an
+// enum that lives in a switch has no list to compare against.
+var enumPages = []struct {
+	name   string
+	page   string
+	values func() []string
+}{
+	{"component kinds", "components.md", func() []string { return ComponentKinds }},
+	{"leaf source kinds", "sources.md", func() []string { return keys(leafTypes) }},
+	{"operator kinds", "pipelines.md", func() []string { return keys(operatorTypes) }},
+	{"border shapes", "app.md", func() []string { return BorderShapeNames }},
+	{"slot brackets", "app.md", func() []string { return SlotBracketNames }},
+}
+
+func keys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// TestReferenceDocumentsEveryEnumValue fails when a value the validator
+// accepts never appears, in backticks, on the page that documents it.
+func TestReferenceDocumentsEveryEnumValue(t *testing.T) {
+	dir := filepath.Join("..", "..", "docs", "reference")
+	for _, e := range enumPages {
+		b, err := os.ReadFile(filepath.Join(dir, e.page))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.page, err)
+		}
+		for _, v := range e.values() {
+			if !strings.Contains(string(b), "`"+v+"`") {
+				t.Errorf("%s: `%s` is not named on %s", e.name, v, e.page)
+			}
+		}
+	}
+}

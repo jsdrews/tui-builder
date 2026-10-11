@@ -48,7 +48,8 @@ These apply to every kind unless the column says otherwise.
   non-unique column collapses rows onto one mark and a volatile one (AGE,
   STATUS) loses the marks on the next poll.
 - `markable` with a windowed source is an error: a window holds rows
-  without keys.
+  without keys. The exception is a span table (bound to an Anchored
+  source), whose rows are keyed, so marking works.
 
 ## `list`
 
