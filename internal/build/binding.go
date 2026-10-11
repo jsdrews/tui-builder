@@ -285,7 +285,11 @@ func applyLogview(c *Component, data any, th theme.Theme) {
 	var lines []string
 	switch x := data.(type) {
 	case string:
-		lines = strings.Split(strings.TrimRight(x, "\n"), "\n")
+		// An empty body is no lines, not one blank line — streaming
+		// sources hand back "" as their placeholder snapshot.
+		if x != "" {
+			lines = strings.Split(strings.TrimRight(x, "\n"), "\n")
+		}
 	case []any:
 		lines = make([]string, 0, len(x))
 		for _, v := range x {

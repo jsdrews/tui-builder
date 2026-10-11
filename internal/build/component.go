@@ -249,6 +249,10 @@ func buildList(c *cfg.Component, th theme.Theme) list.Model {
 	if busy := busyFunc(c.Activity); busy != nil {
 		opts.BusyWhen = func(it list.KeyedItem) (string, bool) { return busy(it.Data) }
 	}
+	if rev := revisionFunc(c.Activity); rev != nil {
+		opts.Revision = func(it list.KeyedItem) string { return rev(it.Data) }
+	}
+	opts.LoadingLabel = c.LoadingLabel
 	if c.FilterPlaceholder != "" {
 		opts.Filter.Placeholder = c.FilterPlaceholder
 	}
@@ -264,6 +268,9 @@ func buildList(c *cfg.Component, th theme.Theme) list.Model {
 		}
 		if v := parseColor(cs.Spinner, th); v != nil {
 			opts.SpinnerStyle = opts.SpinnerStyle.Foreground(v)
+		}
+		if v := parseColor(cs.Mark, th); v != nil {
+			opts.MarkStyle = opts.MarkStyle.Foreground(v)
 		}
 	}
 	m := list.New(opts)
@@ -305,6 +312,10 @@ func tableOptions(c *cfg.Component, th theme.Theme) table.Options {
 		opts.ActivityColumn = cfg.ActivityColumn(c)
 		opts.BusyWhen = func(r table.KeyedRow) (string, bool) { return busy(r.Data) }
 	}
+	if rev := revisionFunc(c.Activity); rev != nil {
+		opts.Revision = func(r table.KeyedRow) string { return rev(r.Data) }
+	}
+	opts.LoadingLabel = c.LoadingLabel
 	if c.FilterPlaceholder != "" {
 		opts.Filter.Placeholder = c.FilterPlaceholder
 	}
@@ -338,6 +349,9 @@ func tableOptions(c *cfg.Component, th theme.Theme) table.Options {
 		}
 		if v := parseColor(cs.Spinner, th); v != nil {
 			opts.SpinnerStyle = opts.SpinnerStyle.Foreground(v)
+		}
+		if v := parseColor(cs.Mark, th); v != nil {
+			opts.MarkStyle = opts.MarkStyle.Foreground(v)
 		}
 		if n := colorIndexFromSpec(cs.ColumnSeparator, th); n >= 0 {
 			opts.Borders.Vertical = ansi.CellColor(n, "│")
@@ -408,6 +422,35 @@ func NewRemoteTable(c *Component, th theme.Theme, shape remote.Shape[table.Keyed
 	c.Remote = remote.NewTable(opts, shape)
 	initTable(&c.Remote.Model, c.Cfg, opts)
 	c.Table = &c.Remote.Model
+	// A remote filter suggests only what's on the loaded page unless it's
+	// told the values; `distinct: {source:}` arrives later, by fetch.
+	for i, col := range c.Cfg.Columns {
+		if col.Distinct != nil && len(col.Distinct.Values) > 0 {
+			c.Table.SetDistinct(i, col.Distinct.Values)
+		}
+	}
+}
+
+// ApplyDistinct hands column col of a windowed table the values its
+// `distinct: {source:}` answered: a list, each item as a string.
+func ApplyDistinct(c *Component, col int, data any) {
+	if c == nil || c.Table == nil {
+		return
+	}
+	c.Table.SetDistinct(col, distinctValues(data))
+}
+
+// distinctValues reads a source's answer as a list of values, skipping
+// empties.
+func distinctValues(data any) []string {
+	items := ds.Iter(data)
+	values := make([]string, 0, len(items))
+	for _, it := range items {
+		if s := ds.String(it, ""); s != "" {
+			values = append(values, s)
+		}
+	}
+	return values
 }
 
 // resolveSortColumn maps a column reference (1-based number or title-prefix
@@ -440,6 +483,7 @@ func buildLogview(c *cfg.Component, th theme.Theme) logview.Model {
 	opts.Title = c.Title
 	opts.Searchable = c.Searchable
 	opts.MaxLines = c.MaxLines
+	opts.LineNumbers = c.LineNumbers
 	opts.FilterMode = c.FilterMode
 	if c.FilterPlaceholder != "" {
 		opts.Filter.Placeholder = c.FilterPlaceholder
@@ -451,6 +495,9 @@ func buildLogview(c *cfg.Component, th theme.Theme) logview.Model {
 		}
 		if v := parseColor(cs.CurrentLineBG, th); v != nil {
 			opts.CurrentLineStyle = opts.CurrentLineStyle.Background(v)
+		}
+		if v := parseColor(cs.Gutter, th); v != nil {
+			opts.GutterStyle = opts.GutterStyle.Foreground(v)
 		}
 	}
 	m := logview.New(opts)
@@ -546,6 +593,15 @@ func buildTree(c *cfg.Component, th theme.Theme) tree.Model {
 			return "", false
 		}
 	}
+	if rev := revisionFunc(c.Activity); rev != nil {
+		opts.Revision = func(n tree.Node) string {
+			if y, ok := n.(*yamlNode); ok && y.data != nil {
+				return rev(y.data)
+			}
+			return ""
+		}
+	}
+	opts.LoadingLabel = c.LoadingLabel
 	opts.Searchable = c.Searchable
 	opts.Markable = c.Markable
 	opts.InitialDepth = c.InitialDepth
@@ -578,6 +634,9 @@ func buildTree(c *cfg.Component, th theme.Theme) tree.Model {
 		}
 		if v := parseColor(cs.CurrentLineBG, th); v != nil {
 			opts.CurrentLineStyle = opts.CurrentLineStyle.Background(v)
+		}
+		if v := parseColor(cs.Mark, th); v != nil {
+			opts.MarkStyle = opts.MarkStyle.Foreground(v)
 		}
 	}
 	m := tree.New(opts)
@@ -966,6 +1025,14 @@ func eventlogOptions(c *cfg.Component, th theme.Theme) eventlog.Options {
 	opts.Searchable = c.Searchable
 	opts.Filterable = c.Filterable
 	opts.MaxItems = c.MaxItems
+	opts.NoGutter = c.Gutter != nil && !*c.Gutter
+	switch c.NewFor {
+	case "":
+	case "-":
+		opts.NewFor = -1 // tuilib: negative never marks
+	default:
+		opts.NewFor, _ = time.ParseDuration(c.NewFor) // validated at load
+	}
 	if c.FilterPlaceholder != "" {
 		opts.Filter.Placeholder = c.FilterPlaceholder
 	}
@@ -981,6 +1048,21 @@ func eventlogOptions(c *cfg.Component, th theme.Theme) eventlog.Options {
 		}
 		if v := parseColor(cs.Match, th); v != nil {
 			opts.MatchStyle = opts.MatchStyle.Foreground(v)
+		}
+		if v := parseColor(cs.SelectedFG, th); v != nil {
+			opts.SelectedStyle = opts.SelectedStyle.Foreground(v)
+		}
+		if v := parseColor(cs.SelectedBG, th); v != nil {
+			opts.SelectedStyle = opts.SelectedStyle.Background(v)
+		}
+		if v := parseColor(cs.Cell, th); v != nil {
+			opts.CellStyle = opts.CellStyle.Foreground(v)
+		}
+		if v := parseColor(cs.Gutter, th); v != nil {
+			opts.GutterStyle = opts.GutterStyle.Foreground(v)
+		}
+		if v := parseColor(cs.New, th); v != nil {
+			opts.NewStyle = opts.NewStyle.Foreground(v)
 		}
 	}
 	return opts
@@ -1085,6 +1167,15 @@ func busyFunc(a *cfg.Activity) func(data any) (string, bool) {
 		status := ds.FirstString(data, a.Status)
 		return status, values[status]
 	}
+}
+
+// revisionFunc reads `activity.revision:` off a row's source item, for
+// tuilib's Revision. nil without one.
+func revisionFunc(a *cfg.Activity) func(data any) string {
+	if a == nil || len(a.Revision) == 0 {
+		return nil
+	}
+	return func(data any) string { return ds.FirstString(data, a.Revision) }
 }
 
 // SetTitleSuffix redraws c's pane title as its configured title plus

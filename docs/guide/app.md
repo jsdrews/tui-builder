@@ -32,7 +32,7 @@ The shell always provides:
 | `o` | Opens the output console (`app.output_key`) |
 | `t` | Cycles the theme (`app.theme_key`). Data, cursor, filter, sort, marks, expansion and scroll position are kept across the swap |
 | `tab` / `shift+tab` | Moves focus between components |
-| `r` | Refetches every source on the screen |
+| `r` | Refetches every source on the screen, and reconnects any stream that has ended (a live stream is left alone) |
 | `esc` | Goes back one screen (`app.esc_pops: false` turns this off) |
 | `q`, `ctrl+c` | Quits (`app.quit_key`; `ctrl+c` always quits) |
 | `ctrl+z` | Suspends the app (`app.suspend_key`) |

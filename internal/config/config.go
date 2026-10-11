@@ -891,6 +891,16 @@ type Component struct {
 	// commits every change at once. Only windowed tables sort remotely,
 	// so it's a load error anywhere else.
 	SortDebounce string `yaml:"sort_debounce,omitempty"`
+	// LoadingLabel is shown beside the spinner while a list, table or
+	// tree has no data yet. Templated like Title.
+	LoadingLabel string `yaml:"loading_label,omitempty"`
+	// LineNumbers numbers a logview's lines in a gutter.
+	LineNumbers bool `yaml:"line_numbers,omitempty"`
+	// Gutter: false hides an eventlog's position gutter.
+	Gutter *bool `yaml:"gutter,omitempty"`
+	// NewFor is how long an eventlog marks items that just loaded, a
+	// duration; "-" never marks them.
+	NewFor string `yaml:"new_for,omitempty"`
 	// MaxRows caps the table when bound to a streaming source — each
 	// arriving JSON frame is prepended as a new row, oldest rows
 	// dropped past this size. 0 (default) implies 100 for streaming
@@ -1026,6 +1036,10 @@ type Activity struct {
 	// Column is the table column the spinner replaces. Defaults to the
 	// column whose `value:` is Status.
 	Column string `yaml:"column,omitempty"`
+	// Revision is the dot-path to a value that moves when work on the
+	// row finishes, so a request whose status ends where it began still
+	// reads as done (e.g. metadata.resourceVersion).
+	Revision Path `yaml:"revision,omitempty"`
 }
 
 // OnCursor wires a component to another component's cursor state.
@@ -1105,6 +1119,30 @@ type Column struct {
 	// giving up screen real estate. Passed through to tuilib's
 	// table.Column.Hidden (shipped in v0.16.0).
 	Hidden bool `yaml:"hidden,omitempty"`
+	// Distinct supplies the values a windowed table's filter suggests for
+	// this column, which otherwise come only from the page that's loaded.
+	Distinct *Distinct `yaml:"distinct,omitempty"`
+}
+
+// Distinct is a column's `distinct:` — a fixed list of values, or a
+// source whose answer is that list:
+//
+//	distinct: [Running, Pending, Failed]
+//	distinct: {source: phases}
+type Distinct struct {
+	Values []string `yaml:"-"`
+	// Source names a data entry returning a list of strings. It is
+	// fetched (and polled) alongside the table.
+	Source string `yaml:"source,omitempty"`
+}
+
+// UnmarshalYAML accepts the list form or the `{source:}` form.
+func (d *Distinct) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.SequenceNode {
+		return node.Decode(&d.Values)
+	}
+	type plain Distinct
+	return node.Decode((*plain)(d))
 }
 
 // ColorRule pairs a `when:` matcher with a `color:`. Recognised `when:`
@@ -1167,4 +1205,11 @@ type Colors struct {
 	// inspector / logview / tree:
 	Match         string `yaml:"match,omitempty"`
 	CurrentLineBG string `yaml:"current_line_bg,omitempty"`
+
+	// list / table / tree: the ✓ on a marked row off the cursor.
+	Mark string `yaml:"mark,omitempty"`
+	// logview / eventlog: the line-number or position gutter.
+	Gutter string `yaml:"gutter,omitempty"`
+	// eventlog: positions of items that just loaded.
+	New string `yaml:"new,omitempty"`
 }

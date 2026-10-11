@@ -72,11 +72,21 @@ type Multi struct {
 type sourceEntry struct {
 	src    ds.Source
 	loaded bool
-	stream <-chan ds.Event    // non-nil for streaming sources after Subscribe
+	stream <-chan ds.Event    // non-nil while a streaming source is live
 	cancel context.CancelFunc // cancels the stream's context
+	// streaming is set once a source has subscribed, and stays set after
+	// its stream ends, so `r` knows to reconnect it rather than refetch.
+	streaming bool
 	// failing is whether the newest fetch failed outright, for the
 	// "· reads failing" title on a polled source's components.
 	failing bool
+}
+
+// distinctUse is one windowed-table column whose filter suggestions come
+// from a source.
+type distinctUse struct {
+	component string
+	column    int
 }
 
 // fetchMsg carries the result of one source fetch back into Update.
@@ -125,7 +135,10 @@ type Model struct {
 	// out to every consumer.
 	sources     map[string]*sourceEntry
 	sourceUsers map[string][]string // source name -> component names
-	started     bool                // the initial fetch wave has fired
+	// distinctUsers maps a source named by a column's `distinct:
+	// {source:}` to the columns its answer feeds.
+	distinctUsers map[string][]distinctUse
+	started       bool // the initial fetch wave has fired
 
 	// cursorBindings lists every component whose `on_cursor:` block ties
 	// its source refetch to another table's focused row. Scanned when a
@@ -324,6 +337,28 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, entries map[str
 		}
 		m.sources[name] = &sourceEntry{src: src}
 	}
+	// A column's `distinct: {source:}` reads a source nothing displays,
+	// like the growing condition above: fetch and poll it the same way,
+	// and hand each answer to the column (handleFetch).
+	for _, name := range tree.Order {
+		for i, col := range tree.Components[name].Cfg.Columns {
+			if col.Distinct == nil || col.Distinct.Source == "" {
+				continue
+			}
+			ref := col.Distinct.Source
+			if _, ok := m.sources[ref]; !ok {
+				src := reg.Get(ref)
+				if src == nil {
+					return nil, fmt.Errorf("component %q: distinct source %q not defined", name, ref)
+				}
+				m.sources[ref] = &sourceEntry{src: src}
+			}
+			if m.distinctUsers == nil {
+				m.distinctUsers = map[string][]distinctUse{}
+			}
+			m.distinctUsers[ref] = append(m.distinctUsers[ref], distinctUse{name, i})
+		}
+	}
 	m.initWindows()
 	if err := m.initCursor(components, entries); err != nil {
 		return nil, err
@@ -382,15 +417,11 @@ func (m *Model) onEnter() tea.Cmd {
 		// fires alongside so the bound logview can render an empty
 		// initial state via the standard apply path.
 		if streamer, ok := entry.src.(ds.StreamingSource); ok {
-			ctx, cancel := context.WithCancel(context.Background())
-			ch, err := streamer.Subscribe(ctx)
+			pump, err := subscribe(name, entry, streamer)
 			if err == nil {
-				entry.stream = ch
-				entry.cancel = cancel
-				cmds = append(cmds, m.startFetch(name), nextStreamMsg(name, ch))
+				cmds = append(cmds, m.startFetch(name), pump)
 				continue
 			}
-			cancel()
 			// ErrNotStreaming is the source's way of saying "I can't
 			// stream under this config — use my Fetch path instead."
 			// Fall through to the polling branch below. Real errors
@@ -405,6 +436,55 @@ func (m *Model) onEnter() tea.Cmd {
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+// subscribe opens a streaming source's channel and returns the pump that
+// drains it.
+func subscribe(name string, entry *sourceEntry, streamer ds.StreamingSource) (tea.Cmd, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := streamer.Subscribe(ctx)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	entry.stream = ch
+	entry.cancel = cancel
+	entry.streaming = true
+	return nextStreamMsg(name, ch), nil
+}
+
+// reconnect re-subscribes every stream that has ended, marking the break
+// in each bound logview. A stream that's still live is left alone: its
+// Fetch is an empty placeholder, so refetching it would only wipe what
+// it has streamed so far.
+func (m *Model) reconnect() []tea.Cmd {
+	var cmds []tea.Cmd
+	for name, entry := range m.sources {
+		if !entry.streaming || entry.stream != nil {
+			continue
+		}
+		streamer, ok := entry.src.(ds.StreamingSource)
+		if !ok {
+			continue
+		}
+		pump, err := subscribe(name, entry, streamer)
+		if err != nil {
+			cmds = append(cmds, app.Error(fmt.Sprintf("%s: %v", name, err)))
+			continue
+		}
+		m.markStream(name, "— reconnected —")
+		cmds = append(cmds, pump)
+	}
+	return cmds
+}
+
+// markStream adds an annotation line to every logview bound to source.
+func (m *Model) markStream(source, text string) {
+	for _, compName := range m.sourceUsers[source] {
+		if c := m.tree.Components[compName]; c.Kind == build.KLogview {
+			c.Logview.AppendMarker(text)
+		}
+	}
 }
 
 // nextStreamMsg returns the Cmd that reads one event from a streaming
@@ -556,10 +636,11 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 			if cur := m.current(); cur == nil || !componentCapturing(cur) {
 				if len(m.sources) > 0 {
 					var cmds []tea.Cmd
-					for name := range m.sources {
+					for name, entry := range m.sources {
 						// Windowed sources refresh through their
-						// remote table — see refreshWindows.
-						if m.windowedSource(name) {
+						// remote table — see refreshWindows. Streams
+						// reconnect instead — see reconnect.
+						if m.windowedSource(name) || entry.streaming {
 							continue
 						}
 						if cmd := m.startFetch(name); cmd != nil {
@@ -567,6 +648,7 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 						}
 					}
 					cmds = append(cmds, m.refreshWindows()...)
+					cmds = append(cmds, m.reconnect()...)
 					return m, tea.Batch(cmds...)
 				}
 			}
@@ -838,6 +920,11 @@ func (m *Model) handleFetch(msg fetchMsg) tea.Cmd {
 			build.ApplyRead(c, rd, msg.data, readErr, m.th)
 		} else if msg.data != nil {
 			build.ApplyData(c, msg.data, m.th)
+		}
+	}
+	if msg.data != nil {
+		for _, u := range m.distinctUsers[msg.source] {
+			build.ApplyDistinct(m.tree.Components[u.component], u.column, msg.data)
 		}
 	}
 	// A polled source's components say "· reads failing" on their title
@@ -1788,18 +1875,19 @@ func (m *Model) handleStream(x streamMsg) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	if x.err != nil {
-		return app.Error(fmt.Sprintf("%s: %v", x.source, x.err))
-	}
-	if x.done {
-		// Stream ended cleanly. Drop the channel so a manual refresh
+	if x.err != nil || x.done {
+		// The stream is over, cleanly or not. Drop the channel so `r`
 		// can re-subscribe; cancel the context so any lingering
-		// goroutines in the source can exit.
+		// goroutines in the source can exit; mark the break in the log.
 		if entry.cancel != nil {
 			entry.cancel()
 			entry.cancel = nil
 		}
 		entry.stream = nil
+		m.markStream(x.source, "— stream ended —")
+		if x.err != nil {
+			return app.Error(fmt.Sprintf("%s: %v", x.source, x.err))
+		}
 		return nil
 	}
 	// Apply: dispatch per component kind. Logview = append the raw
