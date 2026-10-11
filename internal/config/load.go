@@ -122,6 +122,25 @@ func (c *Config) Validate() error {
 		if comp.SortDebounce != "" && !comp.Windowed {
 			return fmt.Errorf("tui.components.%s: `sort_debounce:` only applies to a table bound to a windowed source — a local sort is instant", name)
 		}
+		// A local filter recomputes its suggestions from the rows it
+		// holds, which would overwrite these on the next change.
+		for i, col := range comp.Columns {
+			if col.Distinct == nil {
+				continue
+			}
+			if !comp.Windowed {
+				return fmt.Errorf("tui.components.%s.columns[%d].distinct: only applies to a table bound to a windowed source — a local filter suggests values from the rows it holds", name, i)
+			}
+			if ref := col.Distinct.Source; ref != "" {
+				src, ok := c.Data.Sources[ref]
+				if !ok {
+					return fmt.Errorf("tui.components.%s.columns[%d].distinct.source: %q not defined in data.sources", name, i, ref)
+				}
+				if src != nil && src.Window != nil {
+					return fmt.Errorf("tui.components.%s.columns[%d].distinct.source: %q is windowed — it answers one page, not the whole list of values", name, i, ref)
+				}
+			}
+		}
 		if ref := comp.Source; ref != "" {
 			if err := validateActivityBinding(name, comp, c.Data.Sources[ref]); err != nil {
 				return err
@@ -456,6 +475,9 @@ func (c *Component) validate(path string) error {
 	if err := c.validateActivity(path); err != nil {
 		return err
 	}
+	if err := c.validateKindOptions(path); err != nil {
+		return err
+	}
 	if c.Type == "table" {
 		if len(c.Columns) == 0 {
 			return fmt.Errorf("%s: table needs columns", path)
@@ -536,6 +558,45 @@ func isAnchored(s *Source) bool { return s != nil && s.Window != nil && s.Window
 
 // validateEventlog checks the eventlog-only fields, and rejects them on
 // every other kind, where they would read as working and do nothing.
+// validateKindOptions rejects options set on a kind that would ignore
+// them, and checks their values.
+func (c *Component) validateKindOptions(path string) error {
+	onlyOn := []struct {
+		field string
+		set   bool
+		kinds []string
+	}{
+		{"loading_label", c.LoadingLabel != "", []string{"list", "table", "tree"}},
+		{"line_numbers", c.LineNumbers, []string{"logview"}},
+		{"gutter", c.Gutter != nil, []string{"eventlog"}},
+		{"new_for", c.NewFor != "", []string{"eventlog"}},
+	}
+	for _, o := range onlyOn {
+		if o.set && !slices.Contains(o.kinds, c.Type) {
+			return fmt.Errorf("%s: `%s:` is only valid on %s", path, o.field, strings.Join(o.kinds, ", "))
+		}
+	}
+	if c.NewFor != "" && c.NewFor != "-" {
+		if d, err := time.ParseDuration(c.NewFor); err != nil || d <= 0 {
+			return fmt.Errorf("%s.new_for: %q is not a positive duration (or \"-\" to never mark new items)", path, c.NewFor)
+		}
+	}
+	for i, col := range c.Columns {
+		d := col.Distinct
+		if d == nil {
+			continue
+		}
+		cp := fmt.Sprintf("%s.columns[%d].distinct", path, i)
+		switch {
+		case len(d.Values) > 0 && d.Source != "":
+			return fmt.Errorf("%s: give a list of values or `{source:}`, not both", cp)
+		case len(d.Values) == 0 && d.Source == "":
+			return fmt.Errorf("%s: needs values or `{source:}`", cp)
+		}
+	}
+	return nil
+}
+
 func (c *Component) validateEventlog(path string) error {
 	if c.MaxItems < 0 {
 		return fmt.Errorf("%s: max_items must be >= 0 (0 = tuilib's default)", path)

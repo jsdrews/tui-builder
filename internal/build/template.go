@@ -177,6 +177,7 @@ func cloneComponent(c *cfg.Component, sel Selection) *cfg.Component {
 	}
 	out := *c
 	out.Title = substitute(c.Title, sel)
+	out.LoadingLabel = substitute(c.LoadingLabel, sel)
 	out.FilterPlaceholder = substitute(c.FilterPlaceholder, sel)
 	out.InitialFilter = substitute(c.InitialFilter, sel)
 	out.InitialQuery = substitute(c.InitialQuery, sel)

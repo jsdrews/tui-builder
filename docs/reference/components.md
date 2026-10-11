@@ -33,6 +33,7 @@ These apply to every kind unless the column says otherwise.
 | `initial_filter` | template | — | list, table | Starts with this filter applied. |
 | `initial_query` | template | — | logview, textview, tree, inspector | Starts with this search or filter query applied. |
 | `initial_cursor` | int | `0` | list, table, tree, inspector | Row the cursor starts on. |
+| `loading_label` | template | — | list, table, tree | Shown beside the spinner while the component has no data yet, e.g. `loading pods…`. |
 | `markable` | bool | `false` | list, table, tree | Multi-select: adds a mark gutter and binds `x` (toggle), `X` (extend from the last mark), `A` (all), `D` (none). Actions with `multi: true` then run once per marked row. |
 | `mark_key` | path | — | source-bound markable table; span table; table with `activity` | The stable identity marks and activity are held by, read from the source item (not the rendered cells), e.g. `metadata.uid`. Required on a markable source-bound table, on every span table and on a table with `activity`. |
 | `activity` | map | — | table, list, tree on a fetched or polled source | Shows a spinner on rows the data says are being worked on. See [`activity`](#activity). |
@@ -41,6 +42,8 @@ These apply to every kind unless the column says otherwise.
 **Validation:**
 
 - `type` is one of the seven kinds; `source:` names a defined entry.
+- `loading_label`, `line_numbers`, `gutter` and `new_for` are errors on a
+  kind their row doesn't list.
 - `markable` only on list, table, tree. On a table bound to a source,
   `mark_key` is required. It isn't accepted on lists (they key on the item
   string), trees (the node path), static tables (row position) or without
@@ -125,6 +128,7 @@ rejects `sortable` columns, `initial_sort` and `sort_debounce`;
 | `sortable` | bool | `false` | — | The column can be sorted from the keyboard. |
 | `sort` | string | `string` | `sortable` | Comparator: `string` (case-insensitive), `number` (commas stripped), `si` (number with K/M/B/G/T suffix). |
 | `hidden` | bool | `false` | — | Not drawn, but still in the row: it matches filters and resolves in `${selection.*}` / `${cursor.*}`. For identity columns a drilldown needs. |
+| `distinct` | list or map | — | windowed tables | The values this column's filter suggests and completes, which otherwise come only from the page that's loaded. A list (`[Running, Pending, Failed]`), or `{source: NAME}` for a source that returns a list of strings; it's fetched and polled alongside the table. The source can't be windowed. |
 | `color_rules` | list | — | — | Colors each cell by its value. See [color rules](#color-rules). |
 
 ```yaml
@@ -156,10 +160,13 @@ natural target for streaming sources.
 | `lines` | list of template | — | static | Initial lines. |
 | `max_lines` | int | `10000` | — | Lines kept before the oldest drop. `-1` is unbounded. |
 | `filter_mode` | bool | `false` | `searchable` | Starts in filter mode: the search hides non-matching lines instead of highlighting matches. |
+| `line_numbers` | bool | `false` | — | Numbers lines in a gutter, from the start of what's held. Numbers locate a line on screen; they shift as old lines drop. |
 
 When source-bound, a `format: text` body is split on newlines, a JSON
 list of strings is used as-is, and a streaming source appends one line
-per event.
+per event. When a stream ends, the log gets a dimmed `— stream ended —`
+line; `r` reconnects it and adds `— reconnected —`. `r` leaves a live
+stream alone.
 
 ```yaml
 pod_logs:
@@ -269,6 +276,8 @@ opens at the end `window.anchor:` names and walks from there.
 | `mark` | path | — | — | Shown as-is in the gutter, normally the server's timestamp. |
 | `start` | string | `oldest` | paged (not Anchored) sources | Where the view opens once the source isn't growing: `oldest` or `newest`. A [growing](sources.md#window) source always opens at the newest item and follows. An [Anchored](sources.md#anchored-windows) source uses `window.anchor:` instead. |
 | `max_items` | int | tuilib's | — | Items held at once; the end furthest from the view is trimmed. |
+| `gutter` | bool | `true` | — | The gutter of positions down the left. `false` hides it. |
+| `new_for` | duration | `2s` | — | How long items that just loaded stay marked in the gutter. `-` never marks them. |
 
 **Keys:** `/` searches the items held, and `n` / `N` jump between
 matches. `f` filters (narrowing the query the source answers) when
@@ -316,6 +325,7 @@ usual.
 | `busy` | list of string | — | not with `busy_when` | The `status` values that mean busy, matched exactly. |
 | `busy_when` | expr | — | not with `busy` | An [expression](templating.md#expressions) over the row's item, true while it's busy, for when busy-ness isn't one field's value: `status.observedGeneration < generation`. |
 | `column` | string | the column whose `value:` is `status` | table | The column the spinner draws in. A list or tree draws it beside the row. |
+| `revision` | path | — | — | A value that moves when work on the row finishes, e.g. `metadata.resourceVersion`. With it, a request whose status ends where it began (`Synced`, then `Synced`) still ends the spinner as done, and the report can say whether anything changed. Without it, the spinner waits out the claim's `settle`. |
 
 ```yaml
 pods_table:
@@ -373,16 +383,19 @@ including `theme:<token>`, which follows the palette when themes cycle.
 | `border_inactive` | color | theme | all | Border color when unfocused. |
 | `spinner` | color | theme | all | The loading spinner. |
 | `selected` | color | theme | list | The focused item. |
-| `selected_fg` | color | theme | table | Focused row text. |
-| `selected_bg` | color | theme | table | Focused row background. |
+| `selected_fg` | color | theme | table, eventlog | Focused row text. |
+| `selected_bg` | color | theme | table, eventlog | Focused row background. |
 | `header` | color | theme | table | Header text. |
-| `cell` | color | theme | table | Ordinary cell text. |
+| `cell` | color | theme | table, eventlog | Ordinary cell text. |
 | `column_separator` | color | theme | table | The line between columns. Palette colors only (named or 0–255). |
 | `header_rule` | color | theme | table | The line under the header. Palette colors only. |
 | `label` | color | theme | inspector | Field labels. |
 | `value` | color | theme | inspector | Field values. |
 | `match` | color | theme | inspector, logview, tree | Search-match highlight. |
 | `current_line_bg` | color | theme | inspector, logview, tree | Background of the cursor line. |
+| `mark` | color | theme | list, table, tree | The ✓ on a marked row that isn't under the cursor. |
+| `gutter` | color | theme | logview, eventlog | The line-number or position gutter. |
+| `new` | color | theme | eventlog | Positions of items that just loaded. |
 
 ## `on_cursor`
 

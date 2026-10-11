@@ -34,6 +34,7 @@ var referencePages = map[string][]string{
 	"ZStack":         {"app.md"},
 	"Component":      {"components.md"},
 	"Column":         {"components.md"},
+	"Distinct":       {"components.md"},
 	"Sort":           {"components.md"},
 	"ColorRule":      {"components.md"},
 	"TreeNode":       {"components.md"},

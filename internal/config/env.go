@@ -158,7 +158,7 @@ func validateEnvSpecs(specs []EnvSpec) error {
 //     dot-paths or expression-language strings, not templates.
 //   - Screens: Title.
 //   - Actions: Run argv, Confirm, Notice.
-//   - Components: Title, Items, Lines, Rows (string cells).
+//   - Components: Title, LoadingLabel, Items, Lines, Rows (string cells).
 //
 // Static Data (any type) isn't walked — if a user puts an env token
 // in a static payload they're probably doing it deliberately.
@@ -268,6 +268,7 @@ func walkTemplates(c *Config, fn func(*string)) {
 			continue
 		}
 		fn(&comp.Title)
+		fn(&comp.LoadingLabel)
 		fn(&comp.FilterPlaceholder)
 		fn(&comp.InitialFilter)
 		fn(&comp.InitialQuery)
