@@ -146,3 +146,43 @@ books:
 
 `window:` works with `exec` too, with the request templated into the
 argv. See [Reference → `window`](../reference/sources.md#window).
+
+### Walking from an edge
+
+Some APIs can't jump to row N at all: Elasticsearch past 10,000 hits
+(`search_after`), logs filtered by "before / after this timestamp", and
+anything that pages with an `?after=<token>`. Declare `cursor:` in the
+window and the source is *Anchored*: each request walks from the oldest
+or newest item held, using that item's cursor.
+
+```yaml
+logs:
+  type: http
+  method: POST
+  url: ${env.ES_URL}/app-logs/_search
+  root: hits.hits
+  body: '{"query": {"match_all": {}}, "size": ${window.limit}}'
+  window:
+    cursor: sort
+    older: {sort: [{"@timestamp": desc}], search_after: "${window.cursor}"}
+    newer: {sort: [{"@timestamp": asc}],  search_after: "${window.cursor}"}
+```
+
+`older:` and `newer:` are what the request changes for each direction,
+merged into the body. An eventlog or a table can bind an Anchored source.
+See [Reference → Anchored windows](../reference/sources.md#anchored-windows).
+
+### Still growing
+
+A running job keeps adding events. `window.growing:` says so, either
+always (`true`) or while another source says the job is running:
+
+```yaml
+window:
+  growing: {source: job, while: 'status in ["pending", "running"]'}
+  follow_every: 2s
+```
+
+While it grows, a bound eventlog follows the newest item and polls; scroll
+away and new items are counted instead of moving you.
+

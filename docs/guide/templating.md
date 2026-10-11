@@ -18,7 +18,9 @@ it's used. The full list is in
 
 `${selection}` alone is a list's item or a table's first cell;
 `${selection.Name}` is the cell in the column titled `Name`, and
-`${selection.2}` the second cell. `${cursor…}` works the same way.
+`${selection.2}` the second cell. `${cursor…}` works the same way. On an
+eventlog item, `${selection}` is the item's key and every field is a
+path: `${selection.event}`, `${selection.event_data.host}`.
 
 ## Keep sources reusable
 

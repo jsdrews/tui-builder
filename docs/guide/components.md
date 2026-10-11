@@ -12,6 +12,7 @@ in a layout.
 | `textview` | one block of text | `content:`, or a source |
 | `tree` | a hierarchy | `root:`, or `source:` + `label:` and `children:` or `group_by:` |
 | `inspector` | one record as label/value pairs | `fields:`, or `source:` with `auto: true` |
+| `eventlog` | a long timeline of events or lines, read a page at a time | a windowed source + `key:` and `text:` |
 
 Every field is in [Reference → Components](../reference/components.md).
 
@@ -104,3 +105,59 @@ repo_detail:
 ```
 
 Rows already visited are served from the source's parameter cache.
+
+## Rows that are being worked on
+
+`activity:` makes rows spin while the data says work is running on them:
+a pod `Pending`, a sync `Running`. Every poll re-reads every row, so a row
+starts and stops spinning when the server says so.
+
+```yaml
+pods_table:
+  type: table
+  source: pods            # refresh: 5s
+  mark_key: metadata.uid
+  activity:
+    status: status.phase
+    busy: [Pending, Terminating]
+  columns:
+    - {title: Name,  value: metadata.name}
+    - {title: Phase, value: status.phase, width: 14}
+```
+
+When a polled source's reads start failing, its panes say
+`· reads failing` on the title until a read succeeds, and the error is
+reported once. Actions can make their rows spin straight away with a
+[claim](actions.md#claim-the-rows-you-act-on).
+
+## Long timelines: the eventlog
+
+A job's events, a search index, an application log: too long to hold, so
+an `eventlog` reads them a page at a time from a
+[windowed source](data.md#big-remote-sets) and fetches more as you scroll.
+Each item draws as the lines of its `text:`.
+
+```yaml
+events:
+  type: eventlog
+  source: job_events      # declares window:
+  key: id
+  text: stdout
+  mark: created
+  searchable: true        # / searches what's loaded
+  filterable: true        # f narrows on the server
+```
+
+Enter on an item runs a `key: enter` action with the item as
+`${selection}`, or, with none bound, opens its raw fields in an inspector.
+A source that's still growing (a running job) makes the eventlog follow
+the newest item; see [data](data.md#still-growing).
+
+## Tables over Anchored sources
+
+A table bound to an [Anchored](data.md#walking-from-an-edge) source is a
+*span table*: it holds a run of rows walked from the newest (or oldest),
+grows as you scroll towards either end, and is capped by `max_items:`.
+Rows are keyed by `mark_key:`, which it requires, so marks hold as more
+rows load. Its order is the walk's, so columns can't be sorted.
+

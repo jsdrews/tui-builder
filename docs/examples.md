@@ -409,6 +409,50 @@ task example NAME=exec_window
     --8<-- "examples/exec_window.yaml"
     ```
 
+## Event logs and Anchored sources
+
+### eventlog
+
+An `eventlog` paging a 2,000-event job log through an exec window: search what's loaded, filter on the "server", enter to open an event.
+
+```sh
+task example NAME=eventlog
+```
+
+??? example "eventlog.yaml"
+
+    ```yaml
+    --8<-- "examples/eventlog.yaml"
+    ```
+
+### anchored
+
+An eventlog over an **Anchored** source: a log walked by timestamp with `window.cursor:` (the `search_after` shape), opening at the newest line.
+
+```sh
+task example NAME=anchored
+```
+
+??? example "anchored.yaml"
+
+    ```yaml
+    --8<-- "examples/anchored.yaml"
+    ```
+
+### span_table
+
+A **span table** over the same Anchored log: rows walked from the newest, marks that hold as older pages load, and a `multi` action over them.
+
+```sh
+task example NAME=span_table
+```
+
+??? example "span_table.yaml"
+
+    ```yaml
+    --8<-- "examples/span_table.yaml"
+    ```
+
 ## Streaming
 
 ### stream_exec
@@ -595,6 +639,22 @@ task example NAME=action_http_argocd
 
     ```yaml
     --8<-- "examples/action_http_argocd.yaml"
+    ```
+
+## Row activity
+
+### activity
+
+Pods spin while Pending or Terminating, read from the data every 2s poll; enter claims a row for a pretend restart. Start with `FAIL=1` for the "reads failing" title.
+
+```sh
+task example NAME=activity
+```
+
+??? example "activity.yaml"
+
+    ```yaml
+    --8<-- "examples/activity.yaml"
     ```
 
 ## Kubernetes

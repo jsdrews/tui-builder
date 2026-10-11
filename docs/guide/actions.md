@@ -98,6 +98,28 @@ while several rows are marked rather than picking one.
 `exclusive:` (on by default for http) refuses a second run against a row
 that's already being worked on.
 
+## Claim the rows you act on
+
+On a component with [`activity:`](components.md#rows-that-are-being-worked-on),
+a row only spins once a poll reports it busy. A `claim:` makes the rows an
+action targets spin as soon as it starts:
+
+```yaml
+actions:
+  restart:
+    run: [kubectl, rollout, restart, "deploy/${inputs.name}", --wait]
+    inputs: {name: {required: true}}
+    claim: Restarting                          # spins until the command returns
+  sync:
+    type: http
+    url: ${env.ARGOCD_URL}/api/v1/applications/${inputs.app}/sync
+    inputs: {app: {required: true}}
+    claim: {label: Running, until: status}    # the API answers 202; the poll takes over
+```
+
+A failed run stops its rows at once, and fan-out claims each row on its
+own. See [Reference → Claims](../reference/actions.md#claims).
+
 ## Interactive commands
 
 `interactive: true` on a binding hands the terminal to the command
