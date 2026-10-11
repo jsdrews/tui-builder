@@ -770,10 +770,6 @@ type Component struct {
 	// Activity. Table, list and tree only, bound to a fetched or polled
 	// source.
 	Activity *Activity `yaml:"activity,omitempty"`
-	// ClaimSettle is derived: the largest `claim.settle` among the
-	// actions bound with this component as `from:`. tuilib takes settle
-	// per component, not per claim.
-	ClaimSettle int `yaml:"-"`
 
 	// list fields
 	Items []string `yaml:"items,omitempty"`

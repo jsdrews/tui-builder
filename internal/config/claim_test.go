@@ -71,11 +71,10 @@ func TestClaimShorthandAndSettle(t *testing.T) {
 		t.Errorf("until: status should default to settle 1, got %+v (%d)", a.Long, a.Long.SettleReads())
 	}
 
-	c := claimConfig(func(c *Config) { c.Actions["restart"].Claim = &Claim{Label: "Running", Until: "status", Settle: 3} })
-	if err := c.Validate(); err != nil {
-		t.Fatal(err)
+	if got := (&Claim{Label: "Running", Until: "status", Settle: 3}).SettleReads(); got != 3 {
+		t.Errorf("explicit settle = %d, want 3", got)
 	}
-	if got := c.TUI.Components["pods"].ClaimSettle; got != 3 {
-		t.Errorf("component settle = %d, want 3 from the claim bound to it", got)
+	if got := a.Short.SettleReads(); got != 0 {
+		t.Errorf("an until: done claim has no settle, got %d", got)
 	}
 }

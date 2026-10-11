@@ -187,15 +187,18 @@ func CursorKey(c *Component) string {
 
 // Dispatch opens a claim on rows of c: they spin with label from now
 // until Done says the work is over (Held) or the data takes over
-// (Observed). The command is the spinner's first tick.
-func Dispatch(c *Component, keys []string, label string, mode activity.Mode) (activity.Op, tea.Cmd) {
+// (Observed). settle is this claim's own allowance of unchanged reads
+// (an Observed claim's `settle:`). The command is the spinner's first
+// tick.
+func Dispatch(c *Component, keys []string, label string, mode activity.Mode, settle int) (activity.Op, tea.Cmd) {
+	opts := activity.DispatchOptions{Settle: &settle}
 	switch c.Kind {
 	case KTable:
-		return c.Table.Dispatch(keys, label, mode)
+		return c.Table.DispatchWith(keys, label, mode, opts)
 	case KList:
-		return c.List.Dispatch(keys, label, mode)
+		return c.List.DispatchWith(keys, label, mode, opts)
 	case KTree:
-		return c.Tree.Dispatch(keys, label, mode)
+		return c.Tree.DispatchWith(keys, label, mode, opts)
 	}
 	return activity.Op{}, nil
 }

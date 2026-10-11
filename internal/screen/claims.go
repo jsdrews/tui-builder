@@ -79,7 +79,7 @@ func (m *Model) openClaim(tag string) tea.Cmd {
 	if cr.claim.IsObserved() {
 		mode = activity.Observed
 	}
-	op, cmd := build.Dispatch(c, cr.keys, cr.claim.Label, mode)
+	op, cmd := build.Dispatch(c, cr.keys, cr.claim.Label, mode, cr.claim.SettleReads())
 	cr.op, cr.open = op, true
 	if m.claimOps == nil {
 		m.claimOps = map[uint64]*claimRun{}

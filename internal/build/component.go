@@ -184,7 +184,6 @@ func buildList(c *cfg.Component, th theme.Theme) list.Model {
 	if busy := busyFunc(c.Activity); busy != nil {
 		opts.BusyWhen = func(it list.KeyedItem) (string, bool) { return busy(it.Data) }
 	}
-	opts.Activity.Settle = c.ClaimSettle
 	if c.FilterPlaceholder != "" {
 		opts.Filter.Placeholder = c.FilterPlaceholder
 	}
@@ -240,7 +239,6 @@ func tableOptions(c *cfg.Component, th theme.Theme) table.Options {
 		opts.ActivityColumn = cfg.ActivityColumn(c)
 		opts.BusyWhen = func(r table.KeyedRow) (string, bool) { return busy(r.Data) }
 	}
-	opts.Activity.Settle = c.ClaimSettle
 	if c.FilterPlaceholder != "" {
 		opts.Filter.Placeholder = c.FilterPlaceholder
 	}
@@ -496,7 +494,6 @@ func convertTree(n *cfg.TreeNode) tree.Node {
 func buildTree(c *cfg.Component, th theme.Theme) tree.Model {
 	opts := th.Tree()
 	opts.Title = c.Title
-	opts.Activity.Settle = c.ClaimSettle
 	if busy := busyFunc(c.Activity); busy != nil {
 		opts.BusyWhen = func(n tree.Node) (string, bool) {
 			if y, ok := n.(*yamlNode); ok && y.data != nil {

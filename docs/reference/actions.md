@@ -90,7 +90,7 @@ take over.
 |---|---|---|---|---|
 | `label` | string | — | required | Shown beside the spinner. Use the server's own word for the work (`Running`), so the row reads the same from the keypress to the poll that confirms it. `claim: Restarting` is shorthand for `{label: Restarting}`. |
 | `until` | string | `done` | — | Who knows when the work ends. `done`: the action does; the claim ends when it returns (a command that blocks until it's finished). `status`: the server does; the action only acknowledges (an HTTP 202), and the claim hands over to the polled status. |
-| `settle` | int | `1` | `until: status` | How many reads may repeat the status from before the action before the claim gives up, for a server that reports new work late. tuilib applies it per component, so the largest `settle` among the claims bound to a component is used for all of them. |
+| `settle` | int | `1` | `until: status` | How many reads may repeat the status from before the action before the claim gives up, for a server that reports new work late. Each claim has its own, so a slow verb's allowance doesn't hold up a fast one on the same component. |
 
 - **Targets** are the binding's selection: the marked rows, or the cursor
   row, of its `from:` component, which must have `activity:`.

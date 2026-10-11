@@ -15,7 +15,7 @@ import (
 	cfg "github.com/jsdrews/tui-builder/internal/config"
 )
 
-func newClaimHarness(t *testing.T, srv *podsStub, claim *cfg.Claim, multi bool) *windowHarness {
+func newClaimHarness(t *testing.T, srv *podsStub, claim *cfg.Claim, multi bool, extra ...cfg.ActionBinding) *windowHarness {
 	t.Helper()
 	c := cfg.Config{
 		Data: cfg.DataBlock{Sources: map[string]*cfg.Source{
@@ -42,6 +42,14 @@ func newClaimHarness(t *testing.T, srv *podsStub, claim *cfg.Claim, multi bool) 
 			Run: []string{"true"}, Inputs: map[string]*cfg.Parameter{"name": {Required: true}},
 			Claim: claim, Multi: multi,
 		}},
+	}
+	// Extra bindings each fire a "slow" action: until status, settle 3.
+	for _, b := range extra {
+		c.Actions[b.Action] = &cfg.Action{
+			Run: []string{"true"}, Inputs: map[string]*cfg.Parameter{"name": {Required: true}},
+			Claim: &cfg.Claim{Label: "Syncing", Until: "status", Settle: 3},
+		}
+		c.TUI.Screen.Actions = append(c.TUI.Screen.Actions, b)
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
@@ -213,5 +221,29 @@ func TestClaimRidesARealRun(t *testing.T) {
 	// The statusbar truncates at this width; "Restarting complet…".
 	if got := h.view(); !strings.Contains(got, "Restarting compl") {
 		t.Errorf("the claim's default success message didn't reach the statusbar; view:\n%s", got)
+	}
+}
+
+// settle is each claim's own: a slow verb on the same table with settle 3
+// doesn't make this one's claim linger past its own single read.
+func TestSettleIsPerClaim(t *testing.T) {
+	srv := newPodsStub()
+	defer srv.Close()
+	h := newClaimHarness(t, srv, &cfg.Claim{Label: "Running", Until: "status"}, false,
+		cfg.ActionBinding{Key: "s", Action: "slow", From: "pods", Bind: map[string]string{"name": "${selection.Name}"}})
+	tbl := h.root.tree.Components["pods"].Table
+	base := tbl.ActivityCount()
+
+	h.model, _ = h.model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	var tag string
+	for t := range h.root.claims {
+		tag = t
+	}
+	h.send(runner.CaptureStarted{Tag: tag})
+	h.send(runner.Captured{Tag: tag})
+	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if got := tbl.ActivityCount(); got != base {
+		t.Errorf("%d rows busy after two unchanged reads, want %d — this claim's settle is 1, whatever another verb on the table uses", got, base)
 	}
 }
