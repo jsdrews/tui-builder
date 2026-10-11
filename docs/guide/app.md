@@ -27,17 +27,21 @@ The shell always provides:
 
 | Key | Does |
 |---|---|
-| `?` | Opens the key overlay for the focused component, searchable |
+| `?` | Opens the key overlay for the focused component, searchable (`app.help_key`) |
 | `a` | Opens the action menu (`app.actions_key`) |
 | `o` | Opens the output console (`app.output_key`) |
 | `t` | Cycles the theme (`app.theme_key`). Data, cursor, filter, sort, marks, expansion and scroll position are kept across the swap |
 | `tab` / `shift+tab` | Moves focus between components |
 | `r` | Refetches every source on the screen |
-| `esc` | Goes back one screen |
-| `q`, `ctrl+c` | Quits |
-| `ctrl+z` | Suspends the app |
+| `esc` | Goes back one screen (`app.esc_pops: false` turns this off) |
+| `q`, `ctrl+c` | Quits (`app.quit_key`; `ctrl+c` always quits) |
+| `ctrl+z` | Suspends the app (`app.suspend_key`) |
 
-Set any of the three configurable keys to `-` to turn that feature off.
+The keys with an `app.*` setting can be rebound. Setting the menu,
+console, theme or suspend key to `-` turns that feature off; quit and
+help can be moved but not turned off. `app.keys` remaps navigation in
+every list, table and tree (`up`, `down`, `filter`, …); see
+[`app.keys`](../reference/app.md#appkeys).
 `glyphs:` and `borders:` change the marks and border shapes every
 palette draws with; see [`examples/chrome.yaml`](../examples.md#chrome).
 

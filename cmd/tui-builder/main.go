@@ -16,10 +16,13 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jsdrews/tuilib/pkg/action"
 	"github.com/jsdrews/tuilib/pkg/app"
+	tconfig "github.com/jsdrews/tuilib/pkg/config"
 	"github.com/jsdrews/tuilib/pkg/form"
 	"github.com/jsdrews/tuilib/pkg/geom"
 	"github.com/jsdrews/tuilib/pkg/mouse"
+	"github.com/jsdrews/tuilib/pkg/output"
 	tscreen "github.com/jsdrews/tuilib/pkg/screen"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
@@ -49,12 +52,13 @@ func run() error {
 	// app.theme names — cycling themes (`t`) walks the whole slice, and
 	// the chrome vocabulary shouldn't change halfway through.
 	themes := build.ApplyChrome(theme.All(), &c.App)
-	initial := themes[0]
-	if c.App.Theme != "" {
-		if t, ok := theme.ByName(themes, c.App.Theme); ok {
-			initial = t
-		}
-	}
+	// The keymap, form spacing and mask reach inside components and
+	// forms, which every builder (and every theme-swap rebuild) reads.
+	build.SetAppChrome(&c.App)
+	// The user's own tuilib config file. A missing or unreadable file is
+	// the normal case and means "no preferences".
+	user, _ := tconfig.Load()
+	initial := initialTheme(themes, os.Getenv(themeEnvVar), c.App.Theme, user.Theme)
 
 	// Pre-flight: if the config declares app-level prompts, collect
 	// them BEFORE building the screen so URL / argv / header
@@ -91,51 +95,129 @@ func run() error {
 		return err
 	}
 
-	prog := tea.NewProgram(
-		app.New(app.Options{
-			Root:    root,
-			Themes:  themes,
-			Version: c.App.Version,
-			// The output console. Everything a subprocess streams and
-			// every statusbar message lands here, with a badge counting
-			// events and a picker for killing what's still in flight.
-			// Zero binding (app.output_key: "-") leaves it off entirely.
-			OutputKey: outputBinding(c.App.OutputConsoleKey()),
-			// Theme cycling. A zero binding disables it, which is what
-			// this was until now — so `theme.All()`, reorderThemes and
-			// every "press t" in the docs described something that
-			// couldn't happen. Zero binding (app.theme_key: "-") pins
-			// the palette.
-			ThemeKey: keyBinding(c.App.ThemeCycleKey(), "theme"),
-			// The action menu. One switch for the whole feature: the
-			// overlay, the confirm modal, the goroutine, cancellation,
-			// the console entry, the badge, the kill picker and the
-			// per-target exclusivity check all come from the shell once
-			// this is bound. The screen supplies verbs by implementing
-			// action.Provider.
-			ActionsKey: keyBinding(c.App.ActionMenuKey(), "actions"),
-			// Every component we build (list / table / tree / logview /
-			// inspector / textview) hit-tests mouse events against its
-			// own rect, so clicking is uniformly useful. The cost is the
-			// terminal's native click-drag text selection, which mouse
-			// reporting takes over — hold shift (or alt on iTerm2) to get
-			// it back for a copy.
-			Mouse: app.MouseClick,
-		}),
-		tea.WithAltScreen(),
-	)
+	shell := app.New(app.Options{
+		Root:    root,
+		Themes:  themes,
+		Version: c.App.Version,
+		// tui-builder resolves the initial theme itself (initialTheme)
+		// so app.theme beats the user's config file; tuilib's own
+		// resolution would put the file first.
+		SkipConfig:          true,
+		DoubleClickInterval: doubleClick(c.App.DoubleClick, user.DoubleClickMs),
+		QuitKey:             keyBinding(c.App.QuitKeyName(), "quit", "ctrl+c"),
+		HelpKey:             keyBinding(c.App.HelpKeyName(), "help"),
+		SuspendKey:          keyBinding(c.App.SuspendKeyName(), "suspend"),
+		DisableSuspend:      c.App.SuspendKeyName() == "",
+		DisableAutoEscPop:   !c.App.EscPopsScreens(),
+		Actions:             action.Options{Title: c.App.ActionsTitle},
+		Output:              outputOptions(c.App.Output),
+		// The output console. Everything a subprocess streams and
+		// every statusbar message lands here, with a badge counting
+		// events and a picker for killing what's still in flight.
+		// Zero binding (app.output_key: "-") leaves it off entirely.
+		OutputKey: outputBinding(c.App.OutputConsoleKey()),
+		// Theme cycling. A zero binding disables it, which is what
+		// this was until now — so `theme.All()`, reorderThemes and
+		// every "press t" in the docs described something that
+		// couldn't happen. Zero binding (app.theme_key: "-") pins
+		// the palette.
+		ThemeKey: keyBinding(c.App.ThemeCycleKey(), "theme"),
+		// The action menu. One switch for the whole feature: the
+		// overlay, the confirm modal, the goroutine, cancellation,
+		// the console entry, the badge, the kill picker and the
+		// per-target exclusivity check all come from the shell once
+		// this is bound. The screen supplies verbs by implementing
+		// action.Provider.
+		ActionsKey: keyBinding(c.App.ActionMenuKey(), "actions"),
+		// Every component we build (list / table / tree / logview /
+		// inspector / textview) hit-tests mouse events against its
+		// own rect, so clicking is uniformly useful. The cost is the
+		// terminal's native click-drag text selection, which mouse
+		// reporting takes over — hold shift (or alt on iTerm2) to get
+		// it back for a copy. app.mouse: off hands it back for good.
+		Mouse: mouseMode(c.App.Mouse),
+	})
+	var model tea.Model = shell
+	if c.App.Title != "" {
+		model = titled{Model: shell, title: c.App.Title}
+	}
+	prog := tea.NewProgram(model, tea.WithAltScreen())
 	_, err = prog.Run()
 	return err
+}
+
+// themeEnvVar picks the starting palette for one run, ahead of the config.
+const themeEnvVar = "TUI_BUILDER_THEME"
+
+// initialTheme picks the starting palette. Most specific wins: the person
+// running it right now (env), then the config's author (app.theme), then
+// the user's machine-wide default (their tuilib config file), then the
+// first theme. An unknown name at any step falls through to the next.
+func initialTheme(themes []theme.Theme, env, appTheme, userTheme string) theme.Theme {
+	for _, name := range []string{env, appTheme, userTheme} {
+		if name == "" {
+			continue
+		}
+		if t, ok := theme.ByName(themes, name); ok {
+			return t
+		}
+	}
+	return themes[0]
+}
+
+// doubleClick is app.double_click, else the user's tuilib config file's
+// double_click_ms, else zero (tuilib's default). Validation has already
+// rejected an unparseable app.double_click.
+func doubleClick(app string, userMs int) time.Duration {
+	if d, err := time.ParseDuration(app); err == nil && d > 0 {
+		return d
+	}
+	if userMs > 0 {
+		return time.Duration(userMs) * time.Millisecond
+	}
+	return 0
+}
+
+// mouseMode maps app.mouse onto the shell's modes.
+func mouseMode(m string) app.MouseMode {
+	if m == "off" {
+		return app.MouseOff
+	}
+	return app.MouseClick
+}
+
+// outputOptions carries app.output's non-visual knobs to the console;
+// the shell fills in the theme's colors around them.
+func outputOptions(o *cfg.OutputConfig) output.Options {
+	if o == nil {
+		return output.Options{}
+	}
+	return output.Options{MaxRecords: o.MaxRecords, ExportDir: o.ExportDir}
+}
+
+// titled sets the terminal window's title (app.title) when the program
+// starts, and is otherwise the shell unchanged.
+type titled struct {
+	tea.Model
+	title string
+}
+
+func (t titled) Init() tea.Cmd { return tea.Batch(t.Model.Init(), tea.SetWindowTitle(t.title)) }
+
+func (t titled) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m, cmd := t.Model.Update(msg)
+	t.Model = m
+	return t, cmd
 }
 
 // keyBinding turns a configured global key into the binding app.Options
 // wants. A zero Binding is the shell's "off" switch for each of these,
 // so an empty key must produce one rather than a binding on "".
-func keyBinding(k, help string) key.Binding {
+func keyBinding(k, help string, also ...string) key.Binding {
 	if k == "" {
 		return key.Binding{}
 	}
-	return key.NewBinding(key.WithKeys(k), key.WithHelp(k, help))
+	return key.NewBinding(key.WithKeys(append([]string{k}, also...)...), key.WithHelp(k, help))
 }
 
 // outputBinding is keyBinding for the console key.
@@ -161,7 +243,7 @@ func initialOr(key, fallback string) string {
 // modal in spirit — you can see the value and just press enter.
 func collectAppPrompts(prompts []cfg.Prompt, th theme.Theme) error {
 	m := &promptModel{
-		form:  form.New(th.Form().With(promptFields(prompts))),
+		form:  form.New(build.FormOptions(th).With(promptFields(prompts))),
 		mouse: mouse.NewTracker(0),
 	}
 	prog := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
@@ -220,6 +302,7 @@ func promptFields(prompts []cfg.Prompt) []form.Field {
 				Placeholder: p.Placeholder,
 				Initial:     initialOr(p.Key, p.Default),
 				Required:    p.Required,
+				MaskChar:    build.MaskChar(),
 			})
 		default:
 			// Required and the type check are enforced by the form, the

@@ -56,6 +56,9 @@ func (c *Config) Validate() error {
 	}
 	// 0b. App chrome. Presentation only, but both halves fail quietly
 	//     when they're wrong — see validateChrome.
+	if err := validateShell(&c.App); err != nil {
+		return err
+	}
 	if err := validateChrome(&c.App); err != nil {
 		return err
 	}
@@ -160,7 +163,7 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("tui.components.%s: referenced %d times in tui.screen.layout — each component may be placed only once per screen", name, n)
 			}
 		}
-		if err := validateActionBindings(c.TUI.Screen.Actions, refs, c.TUI.Components, c.Actions, "tui.screen", c.App.OutputConsoleKey(), c.App.ThemeCycleKey(), c.App.ActionMenuKey()); err != nil {
+		if err := validateActionBindings(c.TUI.Screen.Actions, refs, c.TUI.Components, c.Actions, "tui.screen", &c.App); err != nil {
 			return err
 		}
 		if err := validateOnCursor(refs, c.TUI.Components, "tui.screen"); err != nil {
@@ -189,7 +192,7 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("tui.screens.%s: components.%s referenced %d times — each component may be placed only once per screen", name, cname, n)
 			}
 		}
-		if err := validateActionBindings(s.Actions, refs, c.TUI.Components, c.Actions, fmt.Sprintf("tui.screens.%s", name), c.App.OutputConsoleKey(), c.App.ThemeCycleKey(), c.App.ActionMenuKey()); err != nil {
+		if err := validateActionBindings(s.Actions, refs, c.TUI.Components, c.Actions, fmt.Sprintf("tui.screens.%s", name), &c.App); err != nil {
 			return err
 		}
 		if err := validateOnCursor(refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name)); err != nil {
@@ -309,6 +312,10 @@ func validateChrome(a *App) error {
 		{"sort_desc", a.Glyphs.SortDesc},
 		{"column_sep", a.Glyphs.ColumnSep},
 		{"placeholder", a.Glyphs.Placeholder},
+		{"mask", a.Glyphs.Mask},
+		{"activity_ok", a.Glyphs.ActivityOK},
+		{"activity_fail", a.Glyphs.ActivityFail},
+		{"activity_changed", a.Glyphs.ActivityChanged},
 	} {
 		// Empty means "keep the default", not "draw nothing".
 		if g.value == "" {

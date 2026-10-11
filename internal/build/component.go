@@ -239,6 +239,7 @@ func hasColorRules(c *cfg.Component) bool {
 
 func buildList(c *cfg.Component, th theme.Theme) list.Model {
 	opts := th.List()
+	remapListKeys(&opts.Keys)
 	opts.Title = c.Title
 	if c.Source == "" {
 		opts.Items = staticListItems(c, th)
@@ -296,6 +297,7 @@ func buildTable(c *cfg.Component, th theme.Theme) table.Model {
 // the same options as an ordinary one.
 func tableOptions(c *cfg.Component, th theme.Theme) table.Options {
 	opts := th.Table()
+	remapTableKeys(&opts.Keys)
 	opts.Title = c.Title
 	opts.Filterable = c.Filterable
 	opts.Markable = c.Markable
@@ -534,6 +536,7 @@ func convertTree(n *cfg.TreeNode) tree.Node {
 
 func buildTree(c *cfg.Component, th theme.Theme) tree.Model {
 	opts := th.Tree()
+	remapTreeKeys(&opts.Keys)
 	opts.Title = c.Title
 	if busy := busyFunc(c.Activity); busy != nil {
 		opts.BusyWhen = func(n tree.Node) (string, bool) {

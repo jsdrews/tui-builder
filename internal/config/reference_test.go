@@ -25,6 +25,7 @@ var referencePages = map[string][]string{
 	"Borders":        {"app.md"},
 	"Prompt":         {"app.md"},
 	"EnvSpec":        {"app.md"},
+	"OutputConfig":   {"app.md"},
 	"DataBlock":      {"app.md"},
 	"TUIBlock":       {"app.md"},
 	"Screen":         {"app.md"},
@@ -162,6 +163,7 @@ var enumPages = []struct {
 	{"operator kinds", "pipelines.md", func() []string { return keys(operatorTypes) }},
 	{"border shapes", "app.md", func() []string { return BorderShapeNames }},
 	{"slot brackets", "app.md", func() []string { return SlotBracketNames }},
+	{"keymap bindings", "app.md", func() []string { return KeymapNames }},
 }
 
 func keys(m map[string]bool) []string {

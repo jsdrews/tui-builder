@@ -308,7 +308,7 @@ const DefaultWindowPageSize = 100
 
 // App configures the surrounding tuilib app shell.
 type App struct {
-	// Title prefixes the breadcrumb (the screen title appears after it).
+	// Title is the terminal window's title, set once at startup.
 	Title string `yaml:"title,omitempty"`
 	// Version renders on the right side of the statusbar.
 	Version string `yaml:"version,omitempty"`
@@ -356,6 +356,40 @@ type App struct {
 	// validator rejects that rather than letting one silently shadow
 	// the other.
 	OutputKey string `yaml:"output_key,omitempty"`
+	// QuitKey quits from the root screen. Defaults to "q"; ctrl+c always
+	// quits as well. It can be rebound but not turned off ("-" is an
+	// error): an app nobody can close is a bug, not a preference.
+	QuitKey string `yaml:"quit_key,omitempty"`
+	// SuspendKey suspends the app to the shell. Defaults to "ctrl+z";
+	// "-" turns suspending off.
+	SuspendKey string `yaml:"suspend_key,omitempty"`
+	// HelpKey opens the key overlay. Defaults to "?". It can be rebound
+	// but not turned off: the overlay is the one place every binding is
+	// discoverable.
+	HelpKey string `yaml:"help_key,omitempty"`
+	// Mouse is the mouse mode: "click" (default) or "off". Off gives the
+	// terminal back its own click-drag text selection.
+	Mouse string `yaml:"mouse,omitempty"`
+	// DoubleClick is the double-click window, a duration. Unset defers
+	// to the user's tuilib config file (double_click_ms), then tuilib's
+	// default.
+	DoubleClick string `yaml:"double_click,omitempty"`
+	// EscPops makes esc go back one screen. Defaults to true; false
+	// leaves going back to actions.
+	EscPops *bool `yaml:"esc_pops,omitempty"`
+	// Output configures the output console's non-visual knobs. Its
+	// colors come from the theme.
+	Output *OutputConfig `yaml:"output,omitempty"`
+	// ActionsTitle titles the action menu. Defaults to tuilib's
+	// "Actions".
+	ActionsTitle string `yaml:"actions_title,omitempty"`
+	// FormSpacing is the number of blank lines between form fields, in
+	// action-input forms and boot prompts alike. Defaults to 0.
+	FormSpacing int `yaml:"form_spacing,omitempty"`
+	// Keys remaps the navigation keys of every list, table and tree, by
+	// binding name (KeymapNames). A remap is a personal habit rather
+	// than a per-pane choice, so there are no per-component keymaps.
+	Keys map[string]KeyList `yaml:"keys,omitempty"`
 	// Prompts collected at boot, before any screen renders. Each
 	// prompt's Key becomes an env var (set via os.Setenv) whose value
 	// is whatever the user typed / picked, so the existing
@@ -426,6 +460,45 @@ type Glyphs struct {
 	ColumnSep string `yaml:"column_sep,omitempty"`
 	// Placeholder fills a row a windowed table hasn't received yet.
 	Placeholder string `yaml:"placeholder,omitempty"`
+	// Mask is drawn per typed character in a masked input.
+	Mask string `yaml:"mask,omitempty"`
+	// ActivityOK / ActivityFail / ActivityChanged report how a row's
+	// work ended: done, failed, or done and changed something.
+	ActivityOK      string `yaml:"activity_ok,omitempty"`
+	ActivityFail    string `yaml:"activity_fail,omitempty"`
+	ActivityChanged string `yaml:"activity_changed,omitempty"`
+}
+
+// OutputConfig is `app.output:`.
+type OutputConfig struct {
+	// MaxRecords caps the console's scrollback. 0 keeps tuilib's default.
+	MaxRecords int `yaml:"max_records,omitempty"`
+	// ExportDir is where the console writes exported logs. Empty keeps
+	// tuilib's default.
+	ExportDir string `yaml:"export_dir,omitempty"`
+}
+
+// KeyList is one or more key names. In YAML it is a single string or a
+// list: `filter: /` or `up: [k, up]`.
+type KeyList []string
+
+// UnmarshalYAML accepts a scalar or a sequence, like Path.
+func (k *KeyList) UnmarshalYAML(node *yaml.Node) error {
+	var p Path
+	if err := p.UnmarshalYAML(node); err != nil {
+		return fmt.Errorf("keys: expected a key or a list of keys, got %s", node.Tag)
+	}
+	*k = KeyList(p)
+	return nil
+}
+
+// KeymapNames are the bindings `app.keys` may remap. Each applies to
+// every list, table and tree that has it (sorting and column moves are
+// table-only).
+var KeymapNames = []string{
+	"up", "down", "top", "bottom", "half_up", "half_down", "filter",
+	"mark", "mark_all", "clear_marks", "mark_range",
+	"sort_prev", "sort_next", "sort_dir", "col_prev", "col_next",
 }
 
 // Borders picks the border shapes a theme draws with. Values come from
@@ -520,6 +593,38 @@ func (a *App) ThemeCycleKey() string {
 	}
 	return a.ThemeKey
 }
+
+// QuitKeyName returns the quit key with the default applied. ctrl+c
+// quits too, whatever this says.
+func (a *App) QuitKeyName() string {
+	if a.QuitKey == "" {
+		return "q"
+	}
+	return a.QuitKey
+}
+
+// SuspendKeyName returns the suspend key with the default applied, or
+// "" when the config turned suspending off with "-".
+func (a *App) SuspendKeyName() string {
+	switch a.SuspendKey {
+	case "":
+		return "ctrl+z"
+	case "-":
+		return ""
+	}
+	return a.SuspendKey
+}
+
+// HelpKeyName returns the help-overlay key with the default applied.
+func (a *App) HelpKeyName() string {
+	if a.HelpKey == "" {
+		return "?"
+	}
+	return a.HelpKey
+}
+
+// EscPopsScreens reports whether esc goes back one screen.
+func (a *App) EscPopsScreens() bool { return a.EscPops == nil || *a.EscPops }
 
 // OutputConsoleKey returns the console key with the default applied, or
 // "" when the config disabled it with "-". Callers use this rather than
