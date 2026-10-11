@@ -1,4 +1,8 @@
-# http_countries.yaml — table driven by a public REST API (restcountries.com).
+# http_countries.yaml — table driven by public JSON over HTTP.
+#
+# The data is the mledoze/countries dataset (the one restcountries.com was
+# built from), fetched from GitHub. It needs no account or API key, which
+# restcountries.com itself now does.
 #
 # Lifecycle:
 #   - On screen activate, every bound source fetches once.
@@ -8,7 +12,9 @@
 #   - `r` re-fetches every source on this screen (suppressed while a
 #     filter is engaged so 'r' typed into search isn't hijacked).
 #   - `refresh:` on a source schedules polling — this example polls every
-#     5 minutes so the table stays current without hammering the API.
+#     5 minutes (GitHub caches the file for 5 minutes anyway). The dataset
+#     rarely changes; the point is that cursor, filter and sort survive
+#     each refresh.
 #
 # Mapping syntax:
 #   data_sources.countries.url           where to fetch
@@ -20,13 +26,13 @@
 #   components.countries.columns[].value dot-path per cell, evaluated per
 #                                        element of the iterable root
 app:
-  title: REST Countries
+  title: Countries
   theme: nord
 data:
   sources:
     countries:
       type: http
-      url: https://restcountries.com/v3.1/all?fields=name,region,capital,population,languages,cca2
+      url: https://raw.githubusercontent.com/mledoze/countries/master/countries.json
       refresh: 5m
       timeout: 15s
     all_countries:
@@ -43,7 +49,7 @@ tui:
         - {title: Name, width: 26, sortable: true, value: name.common}
         - {title: Region, width: 16, sortable: true, value: region}
         - {title: Capital, width: 22, sortable: true, value: capital.0}
-        - {title: Population, width: 14, sortable: true, sort: si, align: right, value: population}
+        - {title: Area km², width: 14, sortable: true, sort: number, align: right, value: area}
       source: all_countries
   screen:
     title: Countries
