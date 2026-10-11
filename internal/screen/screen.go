@@ -1766,7 +1766,9 @@ func selectionFrom(c *build.Component) build.Selection {
 		if len(cells) > 0 {
 			first = cells[0]
 		}
-		return build.Selection{String: first, Cells: cells, Columns: titles, Key: build.CursorKey(c)}
+		sel := build.Selection{String: first, Cells: cells, Columns: titles, Key: build.CursorKey(c)}
+		// A metric column's cell is glyphs; the selection wants its value.
+		return build.RawSelection(c, sel)
 	case build.KEventlog:
 		it, ok := c.Eventlog.Selected()
 		if !ok || it.Hole {
@@ -2037,7 +2039,9 @@ func (m *Model) handleCursorChange(t taggedCursorMsg) tea.Cmd {
 	if t.empty {
 		m.cursorState[t.driver] = build.Selection{}
 	} else {
-		m.cursorState[t.driver] = t.sel
+		// The focus message carries drawn cells; a metric column's value
+		// comes from the focused row's item instead.
+		m.cursorState[t.driver] = build.RawSelection(m.tree.Components[t.driver], t.sel)
 	}
 	var cmds []tea.Cmd
 	for _, b := range m.cursorBindings {

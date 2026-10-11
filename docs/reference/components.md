@@ -130,6 +130,7 @@ rejects `sortable` columns, `initial_sort` and `sort_debounce`;
 | `hidden` | bool | `false` | — | Not drawn, but still in the row: it matches filters and resolves in `${selection.*}` / `${cursor.*}`. For identity columns a drilldown needs. |
 | `distinct` | list or map | — | windowed tables | The values this column's filter suggests and completes, which otherwise come only from the page that's loaded. A list (`[Running, Pending, Failed]`), or `{source: NAME}` for a source that returns a list of strings; it's fetched and polled alongside the table. The source can't be windowed. |
 | `color_rules` | list | — | — | Colors each cell by its value. See [color rules](#color-rules). |
+| `metric` | map | — | source-bound tables; not with `value`, `color_rules` or `sortable` | Draws the cell as a badge, ratio, progress bar or sparkline. See [metrics](#metrics). |
 
 ```yaml
 pods_table:
@@ -149,6 +150,42 @@ pods_table:
         - {when: "~Err|Crash", color: red}
     - {title: Restarts, value: status.containerStatuses.0.restartCount, align: right, sortable: true, sort: number}
 ```
+
+### Metrics
+
+`metric:` on a column or an [inspector field](#inspector-fields) draws a
+small inline summary instead of text. It takes exactly one kind key, whose
+inputs are dot-paths into the row's item, in this order. Compute anything
+that isn't already a field with a [`derive`](pipelines.md) operator.
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `badge` | list of 3 paths | — | one kind key | Status counts, ok / warn / down: `12✓ 3⚠ 1✗`. Zero counts are left out. |
+| `ratio` | list of 2 paths | — | one kind key | Done / total, `3/5`: green when complete, yellow partway, red at zero. |
+| `bar` | path | — | one kind key | A value drawn as a progress bar against `max`. |
+| `spark` | path | — | one kind key | A list of numbers drawn as a sparkline. The data must hold the series. |
+| `max` | number or path | — | `bar`, required | The bar's full value. |
+| `width` | int | the column's `width`, else `10` | `bar`, `spark` | Width in cells. |
+| `color` | color | severity colors (bar), blue (spark) | `bar`, `spark` | A fixed color: a name or a 0–255 index. |
+
+`${selection.<column>}` and `${cursor.<column>}` read a metric column's
+first input, not its glyphs, so `ratio: [ready, desired]` binds the ready
+count.
+
+```yaml
+columns:
+  - {title: Ready,  metric: {ratio: [status.readyReplicas, spec.replicas]}}
+  - {title: Health, metric: {badge: [ok, warn, down]}}
+  - {title: CPU,    metric: {bar: cpu_pct, max: 100, color: blue}}
+  - {title: Trend,  metric: {spark: latency_series}}
+```
+
+**Validation:** exactly one kind key, with the right number of paths; a
+bar needs `max`, and `max`, `color` and `width` are errors on the other
+kinds. A metric needs a source-bound table or inspector, and can't share a
+column with `value`, `color_rules` or `sortable: true` (or a field with
+`value`, `path` or `color_rules`). Lists and trees have no metrics: a row
+there is one string, and a table already puts a metric next to text.
 
 ## `logview`
 
@@ -247,6 +284,7 @@ Label/value pairs for one record, with nested groups that expand.
 | `path` | string | — | source-bound | Dot-path into the source's value; overrides `value`. |
 | `color_rules` | list | — | — | Colors the value. See [color rules](#color-rules). |
 | `children` | list | — | — | Nested fields, shown as an expandable group. |
+| `metric` | map | — | source-bound; not with `value`, `path` or `color_rules` | Draws the value as a badge, ratio, bar or sparkline. See [metrics](#metrics). |
 
 ```yaml
 pod_detail:

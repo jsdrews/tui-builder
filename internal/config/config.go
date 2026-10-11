@@ -1160,9 +1160,113 @@ type Column struct {
 	// giving up screen real estate. Passed through to tuilib's
 	// table.Column.Hidden (shipped in v0.16.0).
 	Hidden bool `yaml:"hidden,omitempty"`
+	// Metric draws the cell as a badge, ratio, progress bar or sparkline
+	// from one or more paths, instead of the text at `value:`.
+	Metric *Metric `yaml:"metric,omitempty"`
 	// Distinct supplies the values a windowed table's filter suggests for
 	// this column, which otherwise come only from the page that's loaded.
 	Distinct *Distinct `yaml:"distinct,omitempty"`
+}
+
+// Metric is `metric:` on a table column or an inspector field: an inline
+// summary drawn by tuilib's pkg/metrics. Exactly one kind key is set, and
+// its inputs are dot-paths in the order tuilib's function takes them.
+// Anything computed belongs in a derive operator, not here.
+//
+//	metric: {ratio: [status.readyReplicas, spec.replicas]}
+//	metric: {badge: [ok, warn, down]}
+//	metric: {bar: cpu_pct, max: 100, color: blue}
+//	metric: {spark: latency_series}
+type Metric struct {
+	// Badge is three paths: the ok, warn and down counts ("12✓ 3⚠ 1✗").
+	Badge []string `yaml:"badge,omitempty"`
+	// Ratio is two paths: done and total ("3/5", colored by completion).
+	Ratio []string `yaml:"ratio,omitempty"`
+	// Bar is the path to a value drawn as a progress bar against Max.
+	Bar string `yaml:"bar,omitempty"`
+	// Spark is the path to a list of numbers drawn as a sparkline.
+	Spark string `yaml:"spark,omitempty"`
+	// Max is the bar's full value: a number, or a path to one. Required
+	// with Bar.
+	Max string `yaml:"max,omitempty"`
+	// Width is the bar's or sparkline's width in cells. Defaults to the
+	// column's width, else 10.
+	Width int `yaml:"width,omitempty"`
+	// Color fixes a bar's or sparkline's color (a color name or a 0–255
+	// index) instead of tuilib's severity colors.
+	Color string `yaml:"color,omitempty"`
+}
+
+// Kind names the metric's one kind key, or "" when none (or several)
+// are set.
+func (m *Metric) Kind() string {
+	kinds := []struct {
+		name string
+		set  bool
+	}{{"badge", m.Badge != nil}, {"ratio", m.Ratio != nil}, {"bar", m.Bar != ""}, {"spark", m.Spark != ""}}
+	kind := ""
+	for _, k := range kinds {
+		if k.set {
+			if kind != "" {
+				return ""
+			}
+			kind = k.name
+		}
+	}
+	return kind
+}
+
+// FirstInput is the path whose raw value `${selection.<col>}` captures:
+// a metric column's glyphs are no use in a URL or argv.
+func (m *Metric) FirstInput() string {
+	switch m.Kind() {
+	case "badge":
+		return m.Badge[0]
+	case "ratio":
+		return m.Ratio[0]
+	case "bar":
+		return m.Bar
+	case "spark":
+		return m.Spark
+	}
+	return ""
+}
+
+// validate checks the metric's own shape.
+func (m *Metric) validate(path string) error {
+	n := 0
+	for _, set := range []bool{m.Badge != nil, m.Ratio != nil, m.Bar != "", m.Spark != ""} {
+		if set {
+			n++
+		}
+	}
+	if n != 1 {
+		return fmt.Errorf("%s: set exactly one of badge, ratio, bar, spark", path)
+	}
+	switch m.Kind() {
+	case "badge":
+		if len(m.Badge) != 3 {
+			return fmt.Errorf("%s.badge: needs three paths (ok, warn, down), got %d", path, len(m.Badge))
+		}
+	case "ratio":
+		if len(m.Ratio) != 2 {
+			return fmt.Errorf("%s.ratio: needs two paths (done, total), got %d", path, len(m.Ratio))
+		}
+	case "bar":
+		if m.Max == "" {
+			return fmt.Errorf("%s: a bar needs `max:` (a number or a path)", path)
+		}
+	}
+	if m.Max != "" && m.Kind() != "bar" {
+		return fmt.Errorf("%s: `max:` only applies to a bar", path)
+	}
+	if k := m.Kind(); (m.Color != "" || m.Width != 0) && k != "bar" && k != "spark" {
+		return fmt.Errorf("%s: `color:` and `width:` only apply to a bar or a sparkline (a %s colors itself and sizes to its text)", path, k)
+	}
+	if m.Width < 0 {
+		return fmt.Errorf("%s.width: can't be negative", path)
+	}
+	return nil
 }
 
 // Distinct is a column's `distinct:` — a fixed list of values, or a
@@ -1216,6 +1320,9 @@ type InspectorField struct {
 	// when a rule matches. Same syntax as Column.ColorRules.
 	ColorRules []ColorRule      `yaml:"color_rules,omitempty"`
 	Children   []InspectorField `yaml:"children,omitempty"`
+	// Metric draws the value as a badge, ratio, bar or sparkline read
+	// from the inspector's data, in place of Value / Path.
+	Metric *Metric `yaml:"metric,omitempty"`
 }
 
 // Colors is the per-component palette override. Each field maps to one

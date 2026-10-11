@@ -35,6 +35,7 @@ var referencePages = map[string][]string{
 	"Component":      {"components.md"},
 	"Column":         {"components.md"},
 	"Distinct":       {"components.md"},
+	"Metric":         {"components.md"},
 	"Sort":           {"components.md"},
 	"ColorRule":      {"components.md"},
 	"TreeNode":       {"components.md"},

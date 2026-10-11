@@ -67,7 +67,7 @@ func ApplyStreamLine(c *Component, line string, th theme.Theme) {
 // renderStreamRows hands a streaming table every event it holds. Called
 // per event, and by Rebuild to recolor them after a theme swap.
 func renderStreamRows(c *Component, th theme.Theme) {
-	if markable(c.Cfg) {
+	if markable(c.Cfg) || hasMetrics(c.Cfg) {
 		// Works in both stream modes. Keyed-upsert rows are stable by
 		// construction; ring-buffer rows slide down as events arrive,
 		// and a mark travels with its row because it is held by key.
@@ -164,7 +164,7 @@ func projectAllRows(items []any, cols []cfg.Column, th theme.Theme) []table.Row 
 	for i, it := range items {
 		cells := make([]string, len(cols))
 		for j, col := range cols {
-			cells[j] = applyColorRules(ds.FirstString(it, col.Value), col.ColorRules, th)
+			cells[j] = columnCell(col, it, th)
 		}
 		out[i] = table.Row(cells)
 	}
@@ -334,7 +334,9 @@ func listItems(c *Component, data any, th theme.Theme) []list.KeyedItem {
 
 func applyTable(c *Component, data any, th theme.Theme) {
 	items := ds.Iter(data)
-	if markable(c.Cfg) || c.Cfg.Activity != nil {
+	// Metric columns need each row's item at hand, so a selection can
+	// carry the metric's value rather than its glyphs (RawSelection).
+	if markable(c.Cfg) || c.Cfg.Activity != nil || hasMetrics(c.Cfg) {
 		rows, byKey := KeyedTableRows(c, items, th)
 		c.RowsByKey = byKey
 		c.Table.SetKeyedRows(rows)
@@ -408,7 +410,7 @@ func TableRows(c *Component, items []any, th theme.Theme) []table.Row {
 	for _, it := range items {
 		cells := make([]string, len(c.Cfg.Columns))
 		for i, col := range c.Cfg.Columns {
-			cells[i] = applyColorRules(ds.FirstString(it, col.Value), col.ColorRules, th)
+			cells[i] = columnCell(col, it, th)
 		}
 		rows = append(rows, table.Row(cells))
 	}
@@ -554,6 +556,9 @@ func buildInspectorFields(in []cfg.InspectorField, data any, th theme.Theme) []i
 			v = ds.String(data, f.Path)
 		}
 		v = applyColorRules(v, f.ColorRules, th)
+		if f.Metric != nil {
+			v = renderMetric(f.Metric, data, 0, th)
+		}
 		out[i] = inspector.Field{
 			Label:    f.Label,
 			Value:    v,

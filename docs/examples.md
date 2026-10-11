@@ -179,6 +179,20 @@ task example NAME=marking
     --8<-- "examples/marking.yaml"
     ```
 
+### metrics
+
+Inline badges, ratios, progress bars and sparklines with `metric:` on table columns and inspector fields.
+
+```sh
+task example NAME=metrics
+```
+
+??? example "metrics.yaml"
+
+    ```yaml
+    --8<-- "examples/metrics.yaml"
+    ```
+
 ## Layout, theme and chrome
 
 ### layout

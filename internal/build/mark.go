@@ -79,10 +79,16 @@ func KeyedTableRows(c *Component, items []any, th theme.Theme) ([]table.KeyedRow
 	byKey := make(map[string]Selection, len(rows))
 	for i, r := range rows {
 		key := ds.FirstString(items[i], c.Cfg.MarkKey)
+		if len(c.Cfg.MarkKey) == 0 {
+			// Only a table keyed for its metric columns has no mark_key
+			// (markable and activity tables require one). Position keeps
+			// the cursor where it was across a refresh, like SetRows.
+			key = strconv.Itoa(i)
+		}
 		// Data rides along for activity's BusyWhen, which reads fields
-		// the table needn't show.
+		// the table needn't show, and for metric columns' raw values.
 		keyed[i] = table.KeyedRow{Key: key, Cells: r, Data: items[i]}
-		byKey[key] = selectionFromCells(r, titles)
+		byKey[key] = withRawMetrics(selectionFromCells(r, titles), c.Cfg.Columns, items[i])
 	}
 	return keyed, byKey
 }
@@ -141,7 +147,7 @@ func MarkedSelections(c *Component) []Selection {
 			}
 			for _, k := range keys {
 				if r, ok := byKey[k]; ok {
-					out = append(out, selectionFromCells(r.Cells, titles))
+					out = append(out, withRawMetrics(selectionFromCells(r.Cells, titles), c.Cfg.Columns, r.Data))
 				}
 			}
 			return out
