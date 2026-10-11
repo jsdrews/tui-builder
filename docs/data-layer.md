@@ -39,8 +39,29 @@ type StreamingSource interface {
 
 `Fetch` returns the value with `root:` already applied. `Refresh`
 reports the polling interval. Streaming sources also implement
-`Subscribe`, pushing one `Event` per frame until cancelled. The TUI and
-`wrangl` consume sources through these interfaces and nothing else.
+`Subscribe`, pushing one `Event` per frame until cancelled.
+
+Two more interfaces cover sets too big to hold whole:
+
+```go
+type WindowedSource interface {
+    Source
+    FetchWindow(ctx context.Context, q WindowQuery) (WindowPage, error)
+}
+
+type AnchoredSource interface {
+    Source
+    FetchEdge(ctx context.Context, q EdgeQuery) (EdgePage, error)
+}
+```
+
+A source with `window:` is **windowed**: the request carries which rows,
+matching what filter, in what sort order, and the answer is one page.
+With `window.cursor:` it is **Anchored** instead: it's walked from an
+edge (older or newer than a cursor) rather than paged by offset. Both
+still implement `Fetch`, which returns the first page, so `wrangl` sees
+representative data. The TUI and `wrangl` consume sources through these
+interfaces and nothing else.
 
 ## Lifecycle
 
@@ -60,6 +81,12 @@ Two independent properties, both inferred from the config (there is no
 
 They combine: `polled (refresh: 5s) · needs params`,
 `streamed (follow) · needs params`.
+
+A windowed source is fetched a page at a time as the bound component
+scrolls, filters and sorts, rather than on a cadence. One with
+`window.growing:` also polls its newest end every `window.follow_every`
+(default `2s`) while its `while:` expression holds; `refresh:` can't be
+combined with it.
 
 ## wrangl
 

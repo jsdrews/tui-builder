@@ -42,7 +42,8 @@ status board).
 
 ## Filter, search and sort
 
-`filterable: true` (list, table, inspector) makes `/` narrow the rows.
+`filterable: true` (list, table, inspector, eventlog) makes `/` narrow the rows
+(on an eventlog the key is `f`).
 Terms are space-separated and all must match:
 
 | Term | Matches |
@@ -52,7 +53,7 @@ Terms are space-separated and all must match:
 | `~^web-\d+` | a case-insensitive regex |
 | `status:~crash` | a regex in one column |
 
-`searchable: true` (logview, textview, tree) makes `/` highlight matches
+`searchable: true` (logview, textview, tree, eventlog) makes `/` highlight matches
 instead; `n` and `N` move between them.
 
 Columns marked `sortable: true` can be sorted: `[` and `]` step the sort

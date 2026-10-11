@@ -7,7 +7,7 @@ Four small languages appear in the schema:
 - **Dot-paths** name a value inside data (`root`, a column's `value`, a
   field's `path`).
 - **Expressions** compute a value per item (`where`, `keep`, `compute`,
-  `by`, `on`, `success`).
+  `by`, `on`, `success`, `activity.busy_when`, `window.growing.while`).
 - **Color values** are used in `color_rules` and `colors`.
 
 Field tables in the other pages give each field's type as `template`,
@@ -19,14 +19,14 @@ Field tables in the other pages give each field's type as `template`,
 |---|---|---|
 | `${env.NAME}` | The environment variable `NAME`; empty when unset | Everywhere a template is accepted |
 | `${params.NAME}` | A bound source parameter | A source's `url`, `method`, `body`, `headers`, `path`, `command`, `env`, `initial_messages` |
-| `${selection}` | The focused row of a binding's `from:` component: a list's item, a table's first cell, a tree node's label | Binding `bind:` and `confirm:`; a pushed screen's title, component content and source fields |
+| `${selection}` | The focused row of a binding's `from:` component: a list's item, a table's first cell, a tree node's label, an eventlog item's key (`${selection.PATH}` reads that item's fields) | Binding `bind:` and `confirm:`; a pushed screen's title, component content and source fields |
 | `${selection.N}` | A table row's Nth cell, 1-based | As above |
 | `${selection.Title}` | The cell in the column titled `Title` (case-insensitive, exact) | As above |
 | `${cursor}` … | The live focused row of an `on_cursor` driver (see [below](#cursor)) | `on_cursor.bind` |
 | `${inputs.NAME}` | An action input, after `bind:` and the form | An action's `run`, `url`, `method`, `headers`, `body`, `message`, `error_message`; a binding's `confirm` |
 | `${code}`, `${output}` | Exit or HTTP status; stdout or response body | `message`, `error_message` |
 | `${body.PATH}` | A field of the action's JSON response, by dot-path | `message`, `error_message` |
-| `${window.*}` | The window being requested (offset, limit, filter, sort) | A windowed exec source's `command`; see [sources.md](sources.md#window) |
+| `${window.*}` | The window being requested (offset, limit, filter, sort; on Anchored sources cursor, dir and limit) | A windowed exec source's `command`; an Anchored http source's `body`, `older` and `newer`; see [sources.md](sources.md#window) |
 
 ### When tokens resolve
 
@@ -51,7 +51,7 @@ Field tables in the other pages give each field's type as `template`,
 
 Fields that name data rather than display text are never templated:
 dot-paths (`root`, `value`, `path`, `item`, `label`) and expressions
-(`where`, `keep`, `compute`, `by`, `on`, `success`).
+(`where`, `keep`, `compute`, `by`, `on`, `success`, `busy_when`, `while`).
 
 A good habit: let sources reference only `${params.*}` and `${env.*}`,
 and map selections onto parameters in `bind:`. The source then works the
@@ -92,7 +92,8 @@ value:
 
 ## Expressions
 
-Operator fields and an action's `success:` use
+Operator fields, an action's `success:`, `activity.busy_when` and
+`window.growing.while` use
 [expr-lang](https://expr-lang.org/docs/language-definition) expressions.
 
 - **In operators**, each item's top-level fields are in scope
@@ -101,13 +102,17 @@ Operator fields and an action's `success:` use
   operator's own parameters are `params.NAME` (strings; convert with
   `int(params.min)`).
 - **In `success:`**, the variables are `code`, `output` and `body`.
+- **In `activity.busy_when`**, the row's item is in scope, the same way
+  as in operators. **In `window.growing.while`**, it's the value of the
+  growing `source:`.
 - A missing field is `nil`, not an error.
 - A predicate (`where`) is true for `true`, non-zero numbers and
   non-empty strings, and false for `false`, `nil`, zero and `""`.
 - **Functions:** expr-lang's built-ins (`len`, `hasPrefix`, `hasSuffix`,
   `indexOf`, `contains`, `matches`, `in`, `int`, `float`, `string`,
-  `trim`, `split`, `join`, date functions, …) plus `lower`, `upper` and
-  `now`.
+  `trim`, `split`, `join`, date functions, …) plus `lower`, `upper`,
+  `now` and `parseTime` (accepts RFC 3339, with or without fractional
+  seconds, and `2006-01-02`).
 - **Index syntax** is `items[0]`, not the dotted `items.0` form that
   dot-paths accept.
 
@@ -136,4 +141,5 @@ success: "code == 0 or output contains 'already exists'"
 ## Durations
 
 Go duration strings: `250ms`, `5s`, `1m30s`, `2h`. Used by `refresh`,
-`timeout`, `ttl` and `type: duration` inputs.
+`timeout`, `ttl`, `sort_debounce`, `window.follow_every` and
+`type: duration` inputs.

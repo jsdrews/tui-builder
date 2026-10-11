@@ -422,13 +422,16 @@ func (n *Node) validate(path string, components map[string]*Component, refs map[
 	return nil
 }
 
+// ComponentKinds is every `type:` a component may have, in the order the
+// reference documents them. The docs coverage test reads it too.
+var ComponentKinds = []string{"list", "table", "logview", "tree", "inspector", "textview", "eventlog"}
+
 func (c *Component) validate(path string) error {
-	switch c.Type {
-	case "list", "table", "logview", "tree", "inspector", "textview", "eventlog":
-	case "":
+	switch {
+	case c.Type == "":
 		return fmt.Errorf("%s: missing type", path)
-	default:
-		return fmt.Errorf("%s: unknown component type %q (want list|table|logview|tree|inspector|textview|eventlog)", path, c.Type)
+	case !slices.Contains(ComponentKinds, c.Type):
+		return fmt.Errorf("%s: unknown component type %q (want %s)", path, c.Type, strings.Join(ComponentKinds, "|"))
 	}
 	if err := c.validateEventlog(path); err != nil {
 		return err
