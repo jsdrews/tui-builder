@@ -721,7 +721,48 @@ type Parameter struct {
 	// alphabetically, so leaving Order unset everywhere is stable, just
 	// alphabetical.
 	Order int `yaml:"order,omitempty"`
+	// Validate is an expression over `value` (the field's answer: a
+	// string, or a bool for a yes/no field), true when it's acceptable.
+	// Only where a form collects the value: action inputs and
+	// app.prompts.
+	Validate string `yaml:"validate,omitempty"`
+	// Invalid is the message shown when Validate is false. Needs
+	// Validate.
+	Invalid string `yaml:"invalid,omitempty"`
 }
+
+// Confirm is a binding's `confirm:` — the message, and which button the
+// modal starts on:
+//
+//	confirm: "Delete ${selection}?"
+//	confirm: {message: "Restart ${selection}?", default: yes}
+type Confirm struct {
+	Message string `yaml:"message,omitempty"`
+	// Default is "no" (the default: Cancel starts highlighted, the safe
+	// side for a destructive action) or "yes".
+	Default string `yaml:"default,omitempty"`
+}
+
+// UnmarshalYAML accepts the bare message or the map form.
+func (c *Confirm) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		return node.Decode(&c.Message)
+	}
+	type plain Confirm
+	return node.Decode((*plain)(c))
+}
+
+// MarshalYAML writes the short form back when there's no default.
+func (c Confirm) MarshalYAML() (any, error) {
+	if c.Default == "" {
+		return c.Message, nil
+	}
+	type plain Confirm
+	return plain(c), nil
+}
+
+// IsZero lets `omitempty` drop an unset confirm.
+func (c Confirm) IsZero() bool { return c.Message == "" && c.Default == "" }
 
 // Prompt is one field in the boot-time form (`app.prompts:`), which
 // runs before any screen renders and os.Setenv's each value under its

@@ -58,7 +58,7 @@ func podsWithDeleteConfig(marker string) *cfg.Config {
 						Label:       "delete",
 						From:        "pods_table",
 						Interactive: &no,
-						Confirm:     "Delete pod ${selection.Name} in ${selection.Namespace}? This cannot be undone.",
+						Confirm:     cfg.Confirm{Message: "Delete pod ${selection.Name} in ${selection.Namespace}? This cannot be undone."},
 					},
 				},
 			},
@@ -104,7 +104,7 @@ func TestActionConfirm_MessageNotTruncated(t *testing.T) {
 // message tail and both buttons visible.
 func TestActionConfirm_WrapsMultiLine(t *testing.T) {
 	c := podsWithDeleteConfig(filepath.Join(t.TempDir(), "marker"))
-	c.TUI.Screen.Actions[0].Confirm = "Delete pod ${selection.Name} in namespace " +
+	c.TUI.Screen.Actions[0].Confirm.Message = "Delete pod ${selection.Name} in namespace " +
 		"${selection.Namespace}? This permanently removes the pod and cannot be " +
 		"undone; the owning controller may immediately recreate it under a new name."
 	m := deleteScreen(t, c)
@@ -168,5 +168,22 @@ func TestActionConfirm_EnterDefaultsToNo(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); err == nil {
 		t.Errorf("Enter should default to No and NOT dispatch, but the command ran")
+	}
+}
+
+// `confirm: {default: yes}` starts the dialog on Yes; the plain form
+// keeps Cancel, the safe side.
+func TestActionConfirm_DefaultPicksTheStartingButton(t *testing.T) {
+	for want, def := range map[bool]string{false: "", true: "yes"} {
+		c := podsWithDeleteConfig(filepath.Join(t.TempDir(), "marker"))
+		c.TUI.Screen.Actions[0].Confirm.Default = def
+		m := deleteScreen(t, c)
+		runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+		if m.confirmModal == nil {
+			t.Fatalf("default %q: expected a confirm modal", def)
+		}
+		if got := m.confirmModal.Value(); got != want {
+			t.Errorf("default %q: dialog starts on yes=%v, want %v", def, got, want)
+		}
 	}
 }

@@ -145,7 +145,7 @@ func TestConfirmIsSubstitutedForTheMenu(t *testing.T) {
 	m := menuModel(t,
 		[]cfg.ActionBinding{{
 			Key: "d", Action: "del", Label: "delete",
-			Confirm: "Delete ${inputs.name}?",
+			Confirm: cfg.Confirm{Message: "Delete ${inputs.name}?"},
 		}},
 		map[string]*cfg.Action{
 			"del": {Run: []string{"echo", "${inputs.name}"},
@@ -192,7 +192,7 @@ func TestGeneratedSetIsValid(t *testing.T) {
 		[]cfg.ActionBinding{
 			{Key: "d", Action: "describe", Label: "describe"},
 			{Key: "l", Action: "logs", Label: "logs"},
-			{Key: "x", Action: "del", Label: "delete", Confirm: "Sure?"},
+			{Key: "x", Action: "del", Label: "delete", Confirm: cfg.Confirm{Message: "Sure?"}},
 		},
 		map[string]*cfg.Action{
 			"describe": {Run: []string{"echo", "d"}},
@@ -392,7 +392,7 @@ func TestFanOutResolvesPerRow(t *testing.T) {
 // author couldn't have written.
 func TestFanOutConfirmStatesTheArity(t *testing.T) {
 	bs, reg := restartBindings()
-	bs[0].Confirm = "Restart ${selection}?"
+	bs[0].Confirm.Message = "Restart ${selection}?"
 	m := markableModel(t, bs, reg)
 
 	markRows(t, m, "web")
@@ -492,5 +492,33 @@ func TestBindingKeyIsAMenuShortcut(t *testing.T) {
 	chosen, ok := cmd().(taction.ChosenMsg)
 	if !ok || chosen.Action.Label != "describe" {
 		t.Errorf("pressing d produced %#v, want ChosenMsg for describe", chosen)
+	}
+}
+
+// Each verb carries its registry name as its ID, so "exclusive" follows
+// the action rather than its label. On keyed rows the Set also names the
+// row keys it will act on, so the shell holds "exclusive" per row; rows
+// without keys leave Targets empty, which is the shell's old behaviour.
+func TestActionsCarryIDAndTargets(t *testing.T) {
+	bindings := []cfg.ActionBinding{{Key: "d", Action: "describe", Label: "show it"}}
+	reg := map[string]*cfg.Action{"describe": {Run: []string{"echo", "d"}}}
+
+	m := menuModel(t, bindings, reg)
+	runToQuiescence(t, m, drainCmd(m.OnEnter(nil))...)
+	set := m.Actions()
+	if a, _ := find(set, "show it"); a.ID != "describe" {
+		t.Errorf("ID = %q, want the registry name", a.ID)
+	}
+	if len(set.Targets) != 0 {
+		t.Errorf("unkeyed rows: Targets = %v, want none", set.Targets)
+	}
+
+	m = menuModel(t, bindings, reg)
+	m.tree.Components["pods"].Cfg.Markable = true
+	m.tree.Components["pods"].Rebuild(theme.Nord())
+	runToQuiescence(t, m, drainCmd(m.OnEnter(nil))...)
+	set = m.Actions()
+	if len(set.Targets) != 1 || set.Targets[0] != "web" {
+		t.Errorf("keyed rows: Targets = %v, want [web]", set.Targets)
 	}
 }

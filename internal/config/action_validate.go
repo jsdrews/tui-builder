@@ -193,6 +193,9 @@ func validateActionDefs(actions map[string]*Action) error {
 			if p.Mask && len(p.Options) > 0 {
 				return fmt.Errorf("%s.inputs.%s: `mask: true` and `options:` conflict — a select shows every choice on screen, so there is nothing to mask", path, pname)
 			}
+			if err := p.validateCheck(fmt.Sprintf("%s.inputs.%s", path, pname)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -270,7 +273,15 @@ func validateActionBindings(bindings []ActionBinding, refs map[string]int, compo
 				break
 			}
 		}
-		if strings.Contains(b.Confirm, "${selection") {
+		switch b.Confirm.Default {
+		case "", "yes", "no":
+		default:
+			return fmt.Errorf("%s.confirm.default: %q (want yes|no)", bp, b.Confirm.Default)
+		}
+		if b.Confirm.Default != "" && b.Confirm.Message == "" {
+			return fmt.Errorf("%s.confirm: needs a `message:`", bp)
+		}
+		if strings.Contains(b.Confirm.Message, "${selection") {
 			needsSel = true
 		}
 		switch {

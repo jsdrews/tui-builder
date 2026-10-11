@@ -98,7 +98,7 @@ func TestEventlogEnterRunsTheBoundAction(t *testing.T) {
 		}}
 		c.TUI.Screen.Actions = []cfg.ActionBinding{{
 			Key: "enter", Action: "open", From: "events",
-			Bind: map[string]string{"title": "${selection.title}"}, Confirm: "Open ${selection.title}?",
+			Bind: map[string]string{"title": "${selection.title}"}, Confirm: cfg.Confirm{Message: "Open ${selection.title}?"},
 		}}
 	})
 	h.drain(h.model.Init())

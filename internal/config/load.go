@@ -387,6 +387,22 @@ func validatePrompts(prompts []Prompt, path string) error {
 		if p.Mask && len(p.Options) > 0 {
 			return fmt.Errorf("%s[%d]: `mask: true` and `options:` conflict — a select shows every choice on screen, so there is nothing to mask", path, i)
 		}
+		if err := p.Parameter.validateCheck(fmt.Sprintf("%s[%d]", path, i)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateCheck checks a form field's `validate:` / `invalid:`.
+func (p *Parameter) validateCheck(path string) error {
+	if p.Invalid != "" && p.Validate == "" {
+		return fmt.Errorf("%s: `invalid:` needs `validate:` — it's the message shown when that check fails", path)
+	}
+	if p.Validate != "" {
+		if _, err := expr.Compile(p.Validate); err != nil {
+			return fmt.Errorf("%s.validate: %v", path, err)
+		}
 	}
 	return nil
 }
@@ -912,6 +928,11 @@ func validateParametersMap(params map[string]*Parameter, path string) error {
 		}
 		if p.Required && p.Default != "" {
 			return fmt.Errorf("%s.parameters.%s: `required: true` and `default:` are mutually exclusive — defaults imply optional", path, name)
+		}
+		// A source parameter is bound by on_cursor, a push or wrangl
+		// --param, never typed into a form, so there's nothing to check.
+		if p.Validate != "" || p.Invalid != "" {
+			return fmt.Errorf("%s.parameters.%s: `validate:` / `invalid:` only apply where a form collects the value (action inputs and app.prompts)", path, name)
 		}
 	}
 	return nil

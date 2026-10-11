@@ -134,7 +134,7 @@ so every input is fillable one way or another.
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
 | `type` | string | `string` | — | The data type: `string`, `int`, `bool` or `duration`. It also picks the form widget: `bool` is a yes/no toggle, anything else a text input, unless `options:` makes it a select. |
-| `required` | bool | `false` | not with `default` | Must have a value before the action runs. |
+| `required` | bool | `false` | not with `default` | Must have a value before the action runs. On a select, the form starts with nothing highlighted, so the answer is picked on purpose. |
 | `default` | string | — | not with `required` | The value when nothing else supplies one, and the form field's starting value. For `bool`, `"true"` / `"false"`; with `options:`, one of the options. |
 | `description` | string | — | — | Shown by `wrangl --list-actions`. |
 | `label` | string | the input name | — | The form field's caption. |
@@ -142,9 +142,22 @@ so every input is fillable one way or another.
 | `options` | list of string | — | not with `mask` | Turns the field into a select over these values. |
 | `mask` | bool | `false` | not with `options` | Shows typed characters as bullets. Display only: the real value is used everywhere else. |
 | `order` | int | `0` | — | Field order in the form; ties break alphabetically. |
+| `validate` | expr | — | — | An [expression](templating.md#expressions) over `value` (the answer: a string, or a bool for a yes/no field), true when it's acceptable. The form won't submit until it is: `value matches '^[a-z0-9-]+$'`, `int(value) <= 10`. An empty optional answer isn't checked. |
+| `invalid` | string | `not accepted` | `validate` | The message shown on the field when `validate` is false. |
+
+```yaml
+inputs:
+  name:
+    validate: "value matches '^[a-z0-9-]+$'"
+    invalid: lowercase letters, digits and dashes only
+  replicas: {type: int, validate: "int(value) <= 10", invalid: at most 10}
+  region: {options: [eu, us], required: true}
+```
 
 **Validation:** `type` is one of the four; `required` and `default` are
-mutually exclusive; `mask` and `options` conflict.
+mutually exclusive; `mask` and `options` conflict; `validate` must
+compile, and `invalid` needs it. `validate` / `invalid` are errors on a
+source's `parameters:`, which no form collects.
 
 ## Bindings
 
@@ -161,7 +174,7 @@ map at load, so the two forms behave identically.
 | `label` | string | action name; a push: `open <screen>` | — | The action's name in the menu and help. |
 | `from` | string | — | see validation | The list, table, tree or eventlog whose focused row supplies `${selection.*}` (or whose marked rows a `multi` action runs over). |
 | `bind` | map of template | — | — | Fills the action's `inputs:` (or, on a push, the destination's source `parameters:`) from `${selection.*}` and `${env.*}`. |
-| `confirm` | template | — | — | Shows a yes/no dialog before running. Takes `${selection.*}` and `${inputs.*}` (resolved values, after the form). |
+| `confirm` | template or map | — | — | Shows a yes/no dialog before running. Takes `${selection.*}` and `${inputs.*}` (resolved values, after the form). The map form, `{message: …, default: yes}`, starts the dialog on Yes; the default is `no` (Cancel). See [`confirm`](#confirm). |
 | `interactive` | bool | `false` | exec | Hands the terminal to the process (vim, ssh, `kubectl exec`) instead of capturing its output into the console. |
 | `notice` | template | — | `interactive` | Printed once after the TUI suspends, before the process starts. |
 
@@ -176,6 +189,31 @@ map at load, so the two forms behave identically.
   table, tree or eventlog placed on this screen.
 - Every `bind:` key is a declared input (except on a push).
 - `interactive: true` isn't allowed on http actions or with `multi`.
+
+### `confirm`
+
+A string is the message. The map form also picks the button the dialog
+starts on.
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `message` | template | — | required | The question, as in the string form. |
+| `default` | string | `no` | — | `no` starts on Cancel, the safe side for a destructive action; `yes` starts on Yes. |
+
+```yaml
+- key: R
+  action: restart
+  from: pods
+  confirm: {message: "Restart ${selection}?", default: yes}
+```
+
+`default: yes` applies when the action runs from `enter`, after its
+input form, or over marked rows. A single-row action picked from the
+action menu is confirmed by the app shell's own dialog, which always
+starts on Cancel.
+
+**Validation:** `default` is `yes` or `no`, and the map form needs a
+`message`.
 
 ### Reserved keys
 

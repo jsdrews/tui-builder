@@ -268,55 +268,10 @@ func promptFields(prompts []cfg.Prompt) []form.Field {
 		if label == "" {
 			label = p.Key
 		}
-		// Widget follows the data type, same rule the generated action
-		// input form uses: Options means select, bool means toggle,
-		// everything else is a text input.
-		switch {
-		case len(p.Options) > 0:
-			initial := 0
-			for j, o := range p.Options {
-				if o == p.Default {
-					initial = j
-				}
-			}
-			fields[i] = form.Select(form.SelectOptions{
-				Key:     p.Key,
-				Label:   label,
-				Options: append([]string(nil), p.Options...),
-				Initial: initial,
-			})
-		case p.Type == "bool":
-			fields[i] = form.Confirm(form.ConfirmOptions{
-				Key:     p.Key,
-				Label:   label,
-				Initial: p.Default == "true",
-			})
-		case p.Mask:
-			// Pre-fills from the environment like a text prompt does, so
-			// `TOKEN=… tui-builder …` still skips the typing. The value
-			// is masked either way, so pre-filling doesn't put it on
-			// screen.
-			fields[i] = form.Password(form.PasswordOptions{
-				Key:         p.Key,
-				Label:       label,
-				Placeholder: p.Placeholder,
-				Initial:     initialOr(p.Key, p.Default),
-				Required:    p.Required,
-				MaskChar:    build.MaskChar(),
-			})
-		default:
-			// Required and the type check are enforced by the form, the
-			// same as an action input's: without them `required: true`
-			// passed load and then let an empty value through.
-			fields[i] = form.Text(form.TextOptions{
-				Key:         p.Key,
-				Label:       label,
-				Placeholder: p.Placeholder,
-				Initial:     initialOr(p.Key, p.Default),
-				Required:    p.Required,
-				Validate:    tqscreen.ValidatorFor(p.Type),
-			})
-		}
+		// The same field an action input gets, so the widget, required
+		// and validate behave identically. A text field pre-fills from
+		// the environment.
+		fields[i] = build.FormField(p.Key, label, p.Parameter, initialOr(p.Key, p.Default))
 	}
 	return fields
 }

@@ -49,7 +49,7 @@ func TestSubstituteEnvCoversEveryTemplatedField(t *testing.T) {
 			Screen: Screen{
 				Title: tok,
 				Actions: []ActionBinding{{
-					Key: "x", Action: "run", Confirm: tok, Notice: tok,
+					Key: "x", Action: "run", Confirm: Confirm{Message: tok}, Notice: tok,
 					Bind: map[string]string{"arg": tok},
 				}},
 			},
