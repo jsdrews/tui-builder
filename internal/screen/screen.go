@@ -23,9 +23,12 @@ import (
 
 	"github.com/jsdrews/tuilib/pkg/app"
 	"github.com/jsdrews/tuilib/pkg/confirm"
+	"github.com/jsdrews/tuilib/pkg/eventlog"
 	"github.com/jsdrews/tuilib/pkg/focus"
 	"github.com/jsdrews/tuilib/pkg/form"
+	"github.com/jsdrews/tuilib/pkg/geom"
 	"github.com/jsdrews/tuilib/pkg/help"
+	"github.com/jsdrews/tuilib/pkg/inspector"
 	"github.com/jsdrews/tuilib/pkg/layout"
 	"github.com/jsdrews/tuilib/pkg/list"
 	"github.com/jsdrews/tuilib/pkg/mouse"
@@ -149,12 +152,12 @@ type Model struct {
 	// repeated params.
 	cursorAllSources map[string]*cfg.Source
 
-	// windows holds one tuilib coordinator per windowed table, keyed by
-	// component name (not source name — two tables could window the same
+	// windows lists the windowed tables (each a tuilib remote.Table),
+	// keyed by component name (not source name — two tables could window the same
 	// source at different scroll positions). See window.go.
 	windows map[string]*windowEntry
 	// windowDefs is the `window:` block per source name, for the page
-	// size / prefetch the coordinator needs and the column-title →
+	// size / prefetch the remote table needs and the column-title →
 	// query-parameter map the query translation needs.
 	windowDefs map[string]*cfg.WindowConfig
 
@@ -177,7 +180,10 @@ type Model struct {
 	// Parameter. pendingBinding / pendingInputs / pendingSel carry the
 	// action context across the modal so onSubmit can resume the flow;
 	// pendingFields sizes the overlay.
-	formModal      *form.Model
+	formModal *form.Model
+	// inspectModal shows an eventlog item's raw data when enter has no
+	// action bound to it. esc closes it.
+	inspectModal   *inspector.Model
 	pendingBinding cfg.ActionBinding
 	pendingInputs  action.Inputs
 	pendingSel     build.Selection
@@ -289,6 +295,24 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, entries map[str
 			m.windowDefs[boundName] = def.Window
 		}
 	}
+	// A growing condition reads another source — a job's status, beside
+	// its events. Nothing displays that source, so register it here to be
+	// fetched and polled like any bound one; handleFetch evaluates the
+	// condition each time it answers.
+	for _, def := range m.windowDefs {
+		if def.Growing == nil || def.Growing.Always {
+			continue
+		}
+		name := def.Growing.Source
+		if _, ok := m.sources[name]; ok {
+			continue
+		}
+		src := reg.Get(name)
+		if src == nil {
+			return nil, fmt.Errorf("window.growing: source %q not defined", name)
+		}
+		m.sources[name] = &sourceEntry{src: src}
+	}
 	m.initWindows()
 	if err := m.initCursor(components, entries); err != nil {
 		return nil, err
@@ -324,7 +348,7 @@ func (m *Model) onEnter() tea.Cmd {
 	m.started = true
 	var cmds []tea.Cmd
 	// Windowed sources open with a request for the first page instead of
-	// a whole-set Fetch. Their coordinators drive everything after that.
+	// a whole-set Fetch. Their remote tables drive everything after that.
 	cmds = append(cmds, m.startWindows()...)
 	for name, entry := range m.sources {
 		// A windowed source's rows arrive through SetWindow. Fetching it
@@ -404,6 +428,11 @@ func (m *Model) Layout() layout.Node {
 		// Fitted size (see newConfirmModal) so long confirm messages wrap
 		// and stay fully visible instead of clipping at the 60-col edge.
 		return layout.ZStack(body, layout.Center(m.confirmW, m.confirmH, layout.Sized(m.confirmModal)))
+	case m.inspectModal != nil:
+		modal := m.inspectModal
+		return layout.ZStack(body, layout.RenderFunc(func(r geom.Rect) string {
+			return layout.Center(r.W*4/5, r.H*4/5, layout.Sized(modal)).Render(r)
+		}))
 	case m.formModal != nil:
 		// Height scales with the field count: 3 rows per field (input
 		// is bordered) + 3 for title + submit button + breathing room.
@@ -449,6 +478,19 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		next, cmd := m.formModal.Update(msg)
 		m.formModal = &next
 		return m, cmd
+	}
+	// The item inspector holds the keyboard while it's open; esc closes
+	// it. Everything else (fetches, ticks) carries on underneath.
+	if m.inspectModal != nil {
+		if k, ok := msg.(tea.KeyMsg); ok {
+			if k.String() == "esc" {
+				m.inspectModal = nil
+				return m, nil
+			}
+			next, cmd := m.inspectModal.Update(k)
+			m.inspectModal = &next
+			return m, cmd
+		}
 	}
 	// Confirm modal takes precedence — it's a real modal so every key
 	// goes to it until it resolves. We also watch for its Confirmed /
@@ -505,7 +547,7 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 					var cmds []tea.Cmd
 					for name := range m.sources {
 						// Windowed sources refresh through their
-						// coordinator — see refreshWindows.
+						// remote table — see refreshWindows.
 						if m.windowedSource(name) {
 							continue
 						}
@@ -524,10 +566,6 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		return m, nil
 	}
 
-	if cmd := m.updateWindows(msg); cmd != nil {
-		return m, cmd
-	}
-
 	switch x := msg.(type) {
 	case fetchMsg:
 		return m, m.handleFetch(x)
@@ -539,10 +577,6 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		return m, m.handleCursorChange(x)
 	case cursorFetchMsg:
 		return m, m.applyCursorFetch(x)
-	case windowRequestMsg:
-		return m, m.handleWindowRequest(x)
-	case windowFetchedMsg:
-		return m, m.handleWindowFetched(x)
 	case windowViewportMsg:
 		return m, m.handleWindowViewport(x)
 	case windowQueryMsg:
@@ -581,6 +615,28 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		// a key press takes.
 		if cmd, ok := m.startAction(x.binding); ok {
 			return m, cmd
+		}
+		return m, nil
+	case eventlog.ActivatedMsg:
+		// enter (or a double click) on an item. A bound `key: enter`
+		// action gets the item as ${selection}; with none, the item
+		// opens in an inspector, since the eventlog draws only its text.
+		for i, c := range m.tree.All() {
+			if c.Kind != build.KEventlog || c.Eventlog.FocusToken() != x.Token {
+				continue
+			}
+			if i != m.focus {
+				m.focus = i
+				m.applyFocus()
+			}
+			if cmd, handled := m.activate(); handled {
+				return m, cmd
+			}
+			_, key := build.SplitAnchoredKey(x.Key)
+			ins := build.ItemInspector(key, x.Data, m.th)
+			ins.Focus()
+			m.inspectModal = &ins
+			return m, nil
 		}
 		return m, nil
 	case list.ActivatedMsg, table.ActivatedMsg:
@@ -754,6 +810,9 @@ func (m *Model) handleFetch(msg fetchMsg) tea.Cmd {
 	firstFetch := !entry.loaded
 	if msg.data != nil {
 		entry.loaded = true
+		if cmd := m.updateGrowth(msg.source, msg.data); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	}
 	if msg.err != nil {
 		if firstFetch && msg.data == nil {
@@ -808,6 +867,9 @@ func setLoading(c *build.Component, on bool) tea.Cmd {
 		return c.Inspector.SetLoading(on)
 	case build.KTextview:
 		return c.Textview.SetLoading(on)
+	case build.KEventlog:
+		// A remote eventlog shows its own loading state.
+		return nil
 	}
 	return nil
 }
@@ -816,7 +878,7 @@ func setLoading(c *build.Component, on bool) tea.Cmd {
 // keystrokes (filter typing). Also true while any modal is showing so
 // q/t/esc-pop are routed to the modal, not the app shell.
 func (m *Model) IsCapturingKeys() bool {
-	if m.confirmModal != nil || m.formModal != nil {
+	if m.confirmModal != nil || m.formModal != nil || m.inspectModal != nil {
 		return true
 	}
 	c := m.current()
@@ -915,6 +977,8 @@ func componentHelpSections(c *build.Component) []help.Section {
 		return c.Inspector.HelpSections()
 	case build.KTextview:
 		return c.Textview.HelpSections()
+	case build.KEventlog:
+		return c.Eventlog.HelpSections()
 	}
 	return nil
 }
@@ -973,6 +1037,8 @@ func focusableOf(c *build.Component) focus.Focusable {
 		return c.Inspector
 	case build.KTextview:
 		return c.Textview
+	case build.KEventlog:
+		return c.Eventlog
 	}
 	return nil
 }
@@ -1029,6 +1095,8 @@ func componentCapturing(c *build.Component) bool {
 		return c.Inspector.Searching()
 	case build.KTextview:
 		return c.Textview.Searching()
+	case build.KEventlog:
+		return c.Eventlog.IsCapturingKeys()
 	}
 	return false
 }
@@ -1047,6 +1115,8 @@ func componentHelp(c *build.Component) []key.Binding {
 		return c.Inspector.Help()
 	case build.KTextview:
 		return c.Textview.Help()
+	case build.KEventlog:
+		return c.Eventlog.Help()
 	}
 	return nil
 }
@@ -1545,6 +1615,8 @@ func componentActivated(c *build.Component, msg tea.Msg) bool {
 		return c.List.IsActivate(msg)
 	case build.KTable:
 		return c.Table.IsActivate(msg)
+	case build.KEventlog:
+		return c.Eventlog.IsActivate(msg)
 	}
 	return false
 }
@@ -1603,6 +1675,13 @@ func selectionFrom(c *build.Component) build.Selection {
 			first = cells[0]
 		}
 		return build.Selection{String: first, Cells: cells, Columns: titles}
+	case build.KEventlog:
+		it, ok := c.Eventlog.Selected()
+		if !ok || it.Hole {
+			return build.Selection{}
+		}
+		_, key := build.SplitAnchoredKey(it.Key)
+		return build.ItemSelection(key, it.Data)
 	}
 	return build.Selection{}
 }
@@ -1655,6 +1734,13 @@ func updateComponent(c *build.Component, msg tea.Msg) tea.Cmd {
 		*c.List = m
 		return cmd
 	case build.KTable:
+		if c.Remote != nil {
+			// Every message, not just keys: remote routes its own fetch
+			// results and timers through here.
+			cmd := c.Remote.Update(msg)
+			c.LandAtNewest()
+			return cmd
+		}
 		m, cmd := c.Table.Update(msg)
 		*c.Table = m
 		return cmd
@@ -1673,6 +1759,13 @@ func updateComponent(c *build.Component, msg tea.Msg) tea.Cmd {
 	case build.KTextview:
 		m, cmd := c.Textview.Update(msg)
 		*c.Textview = m
+		return cmd
+	case build.KEventlog:
+		if c.RemoteLog != nil {
+			return c.RemoteLog.Update(msg)
+		}
+		m, cmd := c.Eventlog.Update(msg)
+		*c.Eventlog = m
 		return cmd
 	}
 	return nil

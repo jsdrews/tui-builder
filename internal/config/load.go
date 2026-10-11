@@ -3,11 +3,14 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 	"slices"
 	"strings"
 	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/jsdrews/tui-builder/internal/expr"
 )
 
 // Load reads a YAML file at path and returns a validated Config.
@@ -96,6 +99,26 @@ func (c *Config) Validate() error {
 				return err
 			}
 		}
+		// An Anchored source says where it starts with window.anchor;
+		// a second, conflicting knob on the component would only confuse.
+		if comp.Type == "eventlog" && comp.Start != "" && isAnchored(c.Data.Sources[comp.Source]) {
+			return fmt.Errorf("tui.components.%s: `start:` doesn't apply to an Anchored source — set `window.anchor: newest|oldest` on %q instead", name, comp.Source)
+		}
+		// An eventlog has no whole-set mode: it exists to page through
+		// what's too big to hold.
+		if comp.Type == "eventlog" && !comp.Windowed {
+			return fmt.Errorf("tui.components.%s: an eventlog binds only to a source that declares `window:` (a stream or a whole response belongs in a logview)", name)
+		}
+		// max_items caps what's resident, which only an eventlog or a
+		// span table holds a bounded run of.
+		if comp.MaxItems != 0 && comp.Type != "eventlog" && !comp.Spanned {
+			return fmt.Errorf("tui.components.%s: `max_items:` applies to an eventlog or a table over an Anchored source", name)
+		}
+		// A local sort is instant, so there's nothing to debounce: the
+		// setting would read as working and do nothing.
+		if comp.SortDebounce != "" && !comp.Windowed {
+			return fmt.Errorf("tui.components.%s: `sort_debounce:` only applies to a table bound to a windowed source — a local sort is instant", name)
+		}
 		// After bindWindowed: the windowed check below needs the flag
 		// it sets.
 		if err := validateMarkable(comp, "tui.components."+name); err != nil {
@@ -105,6 +128,10 @@ func (c *Config) Validate() error {
 	// 5. Windowed sources can't be fed through operators — see
 	//    validateWindowedUpstreams.
 	if err := validateWindowedUpstreams(c.Data.Sources); err != nil {
+		return err
+	}
+
+	if err := validateGrowing(c.Data.Sources); err != nil {
 		return err
 	}
 
@@ -222,7 +249,7 @@ func validateOnCursor(refs map[string]int, components map[string]*Component, pat
 // Runs after bindWindowed, which is what sets Windowed.
 func validateMarkable(c *Component, path string) error {
 	if !c.Markable {
-		if len(c.MarkKey) > 0 {
+		if len(c.MarkKey) > 0 && !c.Spanned {
 			return fmt.Errorf("%s: `mark_key:` set without `markable: true` — it does nothing on its own", path)
 		}
 		return nil
@@ -239,7 +266,7 @@ func validateMarkable(c *Component, path string) error {
 		return nil
 	}
 	// Tables from here down.
-	if c.Windowed {
+	if c.Windowed && !c.Spanned {
 		return fmt.Errorf("%s: `markable: true` and a windowed source are mutually exclusive — a window holds one page of rows without keys, so marking there is inert", path)
 	}
 	if c.Source == "" {
@@ -392,11 +419,14 @@ func (n *Node) validate(path string, components map[string]*Component, refs map[
 
 func (c *Component) validate(path string) error {
 	switch c.Type {
-	case "list", "table", "logview", "tree", "inspector", "textview":
+	case "list", "table", "logview", "tree", "inspector", "textview", "eventlog":
 	case "":
 		return fmt.Errorf("%s: missing type", path)
 	default:
-		return fmt.Errorf("%s: unknown component type %q (want list|table|logview|tree|inspector|textview)", path, c.Type)
+		return fmt.Errorf("%s: unknown component type %q (want list|table|logview|tree|inspector|textview|eventlog)", path, c.Type)
+	}
+	if err := c.validateEventlog(path); err != nil {
+		return err
 	}
 	if c.Type == "table" {
 		if len(c.Columns) == 0 {
@@ -413,6 +443,14 @@ func (c *Component) validate(path string) error {
 					return fmt.Errorf("%s.columns[%d].color_rules[%d]: color is required", path, i, j)
 				}
 			}
+		}
+	}
+	if c.SortDebounce != "" {
+		if c.Type != "table" {
+			return fmt.Errorf("%s: `sort_debounce:` is only valid on a table bound to a windowed source", path)
+		}
+		if d, err := time.ParseDuration(c.SortDebounce); err != nil || d < 0 {
+			return fmt.Errorf("%s: invalid sort_debounce %q (want a duration such as 300ms, or 0 to sort on every change)", path, c.SortDebounce)
 		}
 	}
 	if c.Type == "tree" && c.Root == nil && c.Source == "" {
@@ -466,6 +504,45 @@ func (c *Component) validate(path string) error {
 	return nil
 }
 
+func isAnchored(s *Source) bool { return s != nil && s.Window != nil && s.Window.Cursor != "" }
+
+// validateEventlog checks the eventlog-only fields, and rejects them on
+// every other kind, where they would read as working and do nothing.
+func (c *Component) validateEventlog(path string) error {
+	if c.MaxItems < 0 {
+		return fmt.Errorf("%s: max_items must be >= 0 (0 = tuilib's default)", path)
+	}
+	if c.Type != "eventlog" {
+		for field, set := range map[string]bool{
+			"key": len(c.Key) > 0, "text": len(c.Text) > 0, "mark": len(c.Mark) > 0,
+			"start": c.Start != "",
+		} {
+			if set {
+				return fmt.Errorf("%s: `%s:` is only valid on an eventlog", path, field)
+			}
+		}
+		return nil
+	}
+	if c.Source == "" {
+		return fmt.Errorf("%s: an eventlog needs `source:` — a source that declares `window:`", path)
+	}
+	if len(c.Key) == 0 || c.Key[0] == "" {
+		return fmt.Errorf("%s: an eventlog needs `key:` (dot-path to each item's identity, e.g. id)", path)
+	}
+	if len(c.Text) == 0 || c.Text[0] == "" {
+		return fmt.Errorf("%s: an eventlog needs `text:` (dot-path to the text each item draws as, e.g. stdout)", path)
+	}
+	switch c.Start {
+	case "", "oldest", "newest":
+	default:
+		return fmt.Errorf("%s: unknown start %q (want oldest|newest)", path, c.Start)
+	}
+	if c.MaxItems < 0 {
+		return fmt.Errorf("%s: max_items must be >= 0 (0 = tuilib's default)", path)
+	}
+	return nil
+}
+
 // bindWindowed marks a component as windowed when the entry it binds to
 // declares `window:`, rejecting the bindings that can't hold a sparse
 // window. Only tuilib's table has SetWindow — a list or inspector fed a
@@ -475,8 +552,30 @@ func bindWindowed(name string, comp *Component, ref string, entry *Source) error
 	if entry == nil || entry.Window == nil {
 		return nil
 	}
-	if comp.Type != "table" {
-		return fmt.Errorf("tui.components.%s: source %q declares `window:` but this is a %s component — only `type: table` can hold a windowed source (it's the one component that renders a sparse slice of a larger set)", name, ref, comp.Type)
+	if comp.Type != "table" && comp.Type != "eventlog" {
+		return fmt.Errorf("tui.components.%s: source %q declares `window:` but this is a %s component — only a table or an eventlog can hold a windowed source (they render a slice of a larger set)", name, ref, comp.Type)
+	}
+	if comp.Type == "table" && entry.Window.Cursor != "" {
+		// A span table: rows walked from an edge, keyed by cursor plus
+		// mark_key, in the walk's order.
+		if len(comp.MarkKey) == 0 || comp.MarkKey[0] == "" {
+			return fmt.Errorf("tui.components.%s: a table over an Anchored source (`window.cursor:`) needs `mark_key:` — each row's identity, held with its cursor so rows that share a cursor stay apart", name)
+		}
+		for i, col := range comp.Columns {
+			if col.Sortable {
+				return fmt.Errorf("tui.components.%s: columns[%d] (%q) is sortable, but a table over an Anchored source shows rows in the order it walks them", name, i, col.Title)
+			}
+		}
+		if comp.InitialSort != nil {
+			return fmt.Errorf("tui.components.%s: `initial_sort:` doesn't apply to a table over an Anchored source — rows are in the order it walks them", name)
+		}
+		if comp.SortDebounce != "" {
+			return fmt.Errorf("tui.components.%s: `sort_debounce:` doesn't apply to a table over an Anchored source — there's no sort to debounce", name)
+		}
+		comp.Spanned = true
+	}
+	if comp.Type == "table" && entry.Window.Growing != nil {
+		return fmt.Errorf("tui.components.%s: source %q declares `window.growing:`, which only an eventlog can follow", name, ref)
 	}
 	// Sorting is answered by the server under a window, so a sortable
 	// column with no `sort_param:` is a control that can't do anything.
@@ -488,6 +587,32 @@ func bindWindowed(name string, comp *Component, ref string, entry *Source) error
 		}
 	}
 	comp.Windowed = true
+	return nil
+}
+
+// validateGrowing checks each `window.growing:` condition names a defined
+// source and compiles, so a typo fails at load rather than leaving the
+// eventlog following forever.
+func validateGrowing(sources map[string]*Source) error {
+	for name, s := range sources {
+		if s == nil || s.Window == nil || s.Window.Growing == nil {
+			continue
+		}
+		g := s.Window.Growing
+		path := "data.sources." + name + ".window.growing"
+		if g.Always {
+			continue
+		}
+		if g.Source == "" || g.While == "" {
+			return fmt.Errorf("%s: set `true`, or both `source:` and `while:`", path)
+		}
+		if _, ok := sources[g.Source]; !ok {
+			return fmt.Errorf("%s: source %q not defined in data.sources", path, g.Source)
+		}
+		if _, err := expr.Compile(g.While); err != nil {
+			return fmt.Errorf("%s.while: %w", path, err)
+		}
+	}
 	return nil
 }
 

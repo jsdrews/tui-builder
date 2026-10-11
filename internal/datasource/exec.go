@@ -95,6 +95,13 @@ func (s *execSource) Fetch(ctx context.Context) (any, error) {
 		return "", nil
 	}
 
+	if s.window != nil && s.window.Cursor != "" {
+		page, err := s.FetchEdge(ctx, EdgeQuery{Limit: s.pageSize()})
+		if err != nil {
+			return nil, err
+		}
+		return page.Items, nil
+	}
 	if s.window != nil {
 		// A windowed source has no "everything" to hand back. Return the
 		// first page so wrangl and any non-table consumer see
@@ -205,6 +212,30 @@ func (s *execSource) FetchWindow(ctx context.Context, q WindowQuery) (WindowPage
 		}
 	}
 	return page, nil
+}
+
+// FetchEdge implements AnchoredSource for exec: the command reads
+// ${window.cursor}, ${window.dir} (older|newer) and ${window.limit}, and
+// answers an older walk newest first, the same as an http source's
+// `older:` sort does.
+func (s *execSource) FetchEdge(ctx context.Context, q EdgeQuery) (EdgePage, error) {
+	if s.window == nil || s.window.Cursor == "" {
+		return EdgePage{}, ErrNotWindowed
+	}
+	vals := edgeTokens(q, s.window.Filters)
+	argv := renderTokenArgv(s.argv, vals)
+	if len(argv) == 0 {
+		return EdgePage{}, fmt.Errorf("window: rendered an empty command")
+	}
+	raw, err := s.run(ctx, argv)
+	if err != nil {
+		return EdgePage{}, err
+	}
+	parsed, err := s.parseJSON(raw)
+	if err != nil {
+		return EdgePage{}, err
+	}
+	return edgePage(Iter(applyRoot(parsed, s.root)), q, s.window.Cursor), nil
 }
 
 // Subscribe implements StreamingSource for follow mode. Starts the

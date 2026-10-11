@@ -1,0 +1,81 @@
+# span_table.yaml — a table over an Anchored source: a span table.
+#
+# The same synthetic log as anchored.yaml, as rows and columns. A table
+# bound to a source with `window.cursor:` holds a run of rows walked from
+# an edge: oldest at the top, newest at the bottom, opening at the newest
+# and growing as you scroll up (or `g`). It's trimmed past `max_items`.
+#
+# Rows are keyed by their cursor and `mark_key:`, so marks stay on their
+# rows as more arrive: mark a few with `x`, scroll up so older pages load,
+# then open the menu with `a` and run "show marked" over all of them.
+#
+# The order is the walk's, so columns can't be sorted; `/` filters on the
+# "server" (the script) and re-walks from the newest matching row.
+app:
+  title: Requests
+  theme: nord
+data:
+  sources:
+    requests:
+      type: exec
+      command:
+        - sh
+        - -c
+        - |
+          # ${window.dir} is older or newer; ${window.cursor} is the edge
+          # line's timestamp (empty on the first request); ${window.limit}
+          # is one more than a page. An older walk answers newest first.
+          awk -v dir="${window.dir}" -v cur="${window.cursor}" -v lim="${window.limit}" -v q="${window.search}" 'BEGIN {
+            split("INFO INFO INFO WARN INFO ERROR", lvl, " "); n = 0; out = ""
+            if (dir == "older") { from = 999; to = 0; step = -1 } else { from = 0; to = 999; step = 1 }
+            for (i = from; (step > 0 ? i <= to : i >= to); i += step) {
+              ts = int(i / 2)
+              if (cur != "" && ((dir == "older" && ts >= cur) || (dir == "newer" && ts <= cur))) continue
+              level = lvl[i % 6 + 1]
+              msg = sprintf("%s request %d served in %dms", level, i, (i * 37) % 900)
+              if (q != "" && index(tolower(msg), tolower(q)) == 0) continue
+              if (n >= lim) break
+              out = out (out == "" ? "" : ",") sprintf("{\"id\":\"req-%04d\",\"ts\":%d,\"at\":\"12:%02d:%02d\",\"level\":\"%s\",\"msg\":\"%s\"}", i, ts, int(ts / 60) % 60, ts % 60, level, msg)
+              n++
+            }
+            printf "[%s]", out
+          }'
+      window:
+        page_size: 50
+        cursor: ts
+tui:
+  components:
+    requests_table:
+      type: table
+      title: Requests
+      source: requests
+      mark_key: id
+      markable: true
+      filterable: true
+      max_items: 400
+      columns:
+        - {title: At, value: at, width: 9}
+        - title: Level
+          value: level
+          width: 6
+          color_rules:
+            - {when: ERROR, color: red}
+            - {when: WARN, color: yellow}
+        - {title: Message, value: msg, flex: 1}
+        - {title: Id, value: id, hidden: true}
+  screen:
+    title: Requests
+    layout:
+      component: requests_table
+    actions:
+      - action: show_marked
+        label: show marked
+        from: requests_table
+        bind: {id: "${selection.Id}"}
+actions:
+  show_marked:
+    description: Print a request id (fans out over marked rows)
+    multi: true
+    run: [echo, "${inputs.id}"]
+    inputs:
+      id: {required: true}

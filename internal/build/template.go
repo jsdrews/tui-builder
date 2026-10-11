@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -280,7 +281,9 @@ func substituteCell(v any, sel Selection) any {
 //	                          generated form
 //
 // The first capture group is the namespace; the second is the optional suffix.
-var tokenRe = regexp.MustCompile(`\$\{(selection|cursor|env|inputs)(?:\.([A-Za-z0-9_]+))?\}`)
+// The key may be dotted: an eventlog item's nested fields are columns
+// named by their path (${selection.event_data.host}).
+var tokenRe = regexp.MustCompile(`\$\{(selection|cursor|env|inputs)(?:\.([A-Za-z0-9_.]+))?\}`)
 
 func substitute(s string, sel Selection) string {
 	return substituteAll(s, sel, nil)
@@ -415,4 +418,42 @@ func resolveSelection(key string, sel Selection) string {
 		}
 	}
 	return fmt.Sprintf("${selection.%s}", key) // pass-through if unresolved
+}
+
+// ItemSelection is the Selection for an eventlog item, which has no
+// columns: bare ${selection} is the item's key, and every scalar field of
+// its data is a column named by its dot-path, so ${selection.event} and
+// ${selection.event_data.host} read straight off the raw item.
+func ItemSelection(key string, data any) Selection {
+	sel := Selection{String: key}
+	var walk func(prefix string, v any, depth int)
+	walk = func(prefix string, v any, depth int) {
+		switch x := v.(type) {
+		case map[string]any:
+			if depth > 4 {
+				return
+			}
+			names := make([]string, 0, len(x))
+			for k := range x {
+				names = append(names, k)
+			}
+			sort.Strings(names)
+			for _, k := range names {
+				name := k
+				if prefix != "" {
+					name = prefix + "." + k
+				}
+				walk(name, x[k], depth+1)
+			}
+		case []any, nil:
+			// Lists don't map onto one cell, and nil has nothing to say.
+		default:
+			if prefix != "" {
+				sel.Columns = append(sel.Columns, prefix)
+				sel.Cells = append(sel.Cells, fmt.Sprint(x))
+			}
+		}
+	}
+	walk("", data, 0)
+	return sel
 }

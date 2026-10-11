@@ -7,20 +7,24 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/jsdrews/tuilib/pkg/ansi"
+	"github.com/jsdrews/tuilib/pkg/eventlog"
 	"github.com/jsdrews/tuilib/pkg/inspector"
 	"github.com/jsdrews/tuilib/pkg/list"
 	"github.com/jsdrews/tuilib/pkg/logview"
+	"github.com/jsdrews/tuilib/pkg/remote"
 	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/textview"
 	"github.com/jsdrews/tuilib/pkg/theme"
 	"github.com/jsdrews/tuilib/pkg/tree"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
+	ds "github.com/jsdrews/tui-builder/internal/datasource"
 )
 
 // Kind enumerates the supported leaf component types.
@@ -33,6 +37,7 @@ const (
 	KTree
 	KInspector
 	KTextview
+	KEventlog
 )
 
 // Component is a live, themed component pointer plus the originating config
@@ -48,6 +53,24 @@ type Component struct {
 	Tree      *tree.Model
 	Inspector *inspector.Model
 	Textview  *textview.Model
+	Eventlog  *eventlog.Model
+
+	// Remote is set on a table bound to a windowed source, which tuilib's
+	// pkg/remote drives; Table then points at its embedded table. Every
+	// message goes through Remote.Update rather than Table.Update.
+	Remote *remote.Table
+	// AtNewest is set on a span table anchored at its newest row. tuilib
+	// puts a span table's cursor on its first row whenever a new answer
+	// lands, which for a view anchored at the newest is the wrong end and
+	// leaves it at the older edge, loading older rows by itself. The
+	// screen moves it to the newest row instead; landed records which
+	// answer it last did that for.
+	AtNewest bool
+	landed   string
+	// RemoteLog is the eventlog's counterpart: an eventlog always binds a
+	// windowed source, and Eventlog points at this binding's embedded
+	// model once the screen has built it.
+	RemoteLog *remote.Eventlog
 
 	// StreamRows is the ring buffer used by KTable components bound to
 	// a streaming source. Newest events first; trimmed to Cfg.MaxRows
@@ -83,6 +106,11 @@ func NewComponent(c *cfg.Component, th theme.Theme) (*Component, error) {
 	case "textview":
 		m := buildTextview(c, th)
 		return &Component{Cfg: c, Kind: KTextview, Textview: &m}, nil
+	case "eventlog":
+		// A stand-in until the screen binds it to its source with
+		// NewRemoteEventlog; it draws an empty pane meanwhile.
+		m := eventlog.New(eventlogOptions(c, th))
+		return &Component{Cfg: c, Kind: KEventlog, Eventlog: &m}, nil
 	}
 	return nil, fmt.Errorf("unknown component type %q", c.Type)
 }
@@ -105,6 +133,10 @@ func (c *Component) Rebuild(th theme.Theme) {
 		*c.List = buildList(c.Cfg, th)
 		c.List.Restore(st)
 	case KTable:
+		if c.Remote != nil {
+			c.Remote.Restyle(tableOptions(c.Cfg, th))
+			return
+		}
 		st := c.Table.State()
 		*c.Table = buildTable(c.Cfg, th)
 		c.Table.Restore(st)
@@ -124,6 +156,14 @@ func (c *Component) Rebuild(th theme.Theme) {
 		st := c.Textview.State()
 		*c.Textview = buildTextview(c.Cfg, th)
 		c.Textview.Restore(st)
+	case KEventlog:
+		if c.RemoteLog != nil {
+			c.RemoteLog.Restyle(eventlogOptions(c.Cfg, th))
+			return
+		}
+		st := c.Eventlog.State()
+		*c.Eventlog = eventlog.New(eventlogOptions(c.Cfg, th))
+		c.Eventlog.Restore(st)
 	}
 }
 
@@ -176,6 +216,17 @@ func buildList(c *cfg.Component, th theme.Theme) list.Model {
 // --------------------------------------------------------------- table ---
 
 func buildTable(c *cfg.Component, th theme.Theme) table.Model {
+	opts := tableOptions(c, th)
+	m := table.New(opts)
+	initTable(&m, c, opts)
+	return m
+}
+
+// tableOptions is everything about a table that comes from its config and
+// the theme. Split from buildTable so a windowed table, which tuilib's
+// remote.NewTable constructs, and its Restyle on a theme swap start from
+// the same options as an ordinary one.
+func tableOptions(c *cfg.Component, th theme.Theme) table.Options {
 	opts := th.Table()
 	opts.Title = c.Title
 	opts.Filterable = c.Filterable
@@ -253,7 +304,24 @@ func buildTable(c *cfg.Component, th theme.Theme) table.Model {
 			opts.Rows[i] = table.Row(cells)
 		}
 	}
-	m := table.New(opts)
+	if c.Spanned {
+		opts.MaxItems = c.MaxItems
+	}
+	if c.SortDebounce != "" {
+		// Validated at load. tuilib reads zero as its default, so "0"
+		// (sort on every change) is its negative value.
+		if d, err := time.ParseDuration(c.SortDebounce); err == nil {
+			if d == 0 {
+				d = -1
+			}
+			opts.SortDebounce = d
+		}
+	}
+	return opts
+}
+
+// initTable applies the config's starting state to a freshly built table.
+func initTable(m *table.Model, c *cfg.Component, opts table.Options) {
 	// Same reason as buildList: Options.Rows carries cells but no
 	// keys. A static table's rows are fixed at load, so position is a
 	// legitimate identity — nothing repolls them into a new order.
@@ -271,7 +339,17 @@ func buildTable(c *cfg.Component, th theme.Theme) table.Model {
 			m.SetSort(idx, c.InitialSort.Desc)
 		}
 	}
-	return m
+}
+
+// NewRemoteTable turns c into a table bound to a remote source through
+// tuilib's pkg/remote, which routes the viewport, the filter and the sort
+// to the source and installs what comes back. c.Table keeps pointing at
+// the embedded table, so everything that reads a table reads this one.
+func NewRemoteTable(c *Component, th theme.Theme, shape remote.Shape[table.KeyedRow]) {
+	opts := tableOptions(c.Cfg, th)
+	c.Remote = remote.NewTable(opts, shape)
+	initTable(&c.Remote.Model, c.Cfg, opts)
+	c.Table = &c.Remote.Model
 }
 
 // resolveSortColumn maps a column reference (1-based number or title-prefix
@@ -369,7 +447,7 @@ type yamlNode struct {
 	children []tree.Node
 }
 
-func (n *yamlNode) Label() string      { return n.label }
+func (n *yamlNode) Label() string         { return n.label }
 func (n *yamlNode) Children() []tree.Node { return n.children }
 
 // sourceTreeRootLabel picks the display label for a source-bound tree's
@@ -768,4 +846,111 @@ func parseSI(s string) float64 {
 	}
 	f, _ := strconv.ParseFloat(strings.TrimSpace(s), 64)
 	return f * mult
+}
+
+// ------------------------------------------------------------- eventlog ---
+
+// eventlogOptions is an eventlog's config and theme as tuilib options,
+// shared by the stand-in NewComponent builds, the remote binding and its
+// Restyle on a theme swap.
+func eventlogOptions(c *cfg.Component, th theme.Theme) eventlog.Options {
+	opts := th.Eventlog()
+	opts.Title = c.Title
+	opts.Searchable = c.Searchable
+	opts.Filterable = c.Filterable
+	opts.MaxItems = c.MaxItems
+	if c.FilterPlaceholder != "" {
+		opts.Filter.Placeholder = c.FilterPlaceholder
+	}
+	if cs := c.Colors; cs != nil {
+		if v := parseColor(cs.BorderActive, th); v != nil {
+			opts.ActiveColor = v
+		}
+		if v := parseColor(cs.BorderInactive, th); v != nil {
+			opts.InactiveColor = v
+		}
+		if v := parseColor(cs.Spinner, th); v != nil {
+			opts.SpinnerStyle = opts.SpinnerStyle.Foreground(v)
+		}
+		if v := parseColor(cs.Match, th); v != nil {
+			opts.MatchStyle = opts.MatchStyle.Foreground(v)
+		}
+	}
+	return opts
+}
+
+// NewRemoteEventlog binds c to its windowed source through tuilib's
+// pkg/remote. Eventlog keeps pointing at the binding's embedded model, so
+// everything that reads the eventlog reads this one.
+func NewRemoteEventlog(c *Component, th theme.Theme, shape remote.Shape[eventlog.Item]) {
+	c.RemoteLog = remote.NewEventlog(eventlogOptions(c.Cfg, th), shape)
+	c.Eventlog = &c.RemoteLog.Model
+	// tuilib's eventlog starts out following the newest item, and stops
+	// following by itself when an Anchored source is anchored at its
+	// oldest. A Seekable log opens at the top unless `start: newest` asks
+	// otherwise. A growing source turns following back on through
+	// SetGrowing, whatever `start:` says.
+	if _, anchored := shape.(remote.Anchored[eventlog.Item]); !anchored {
+		c.Eventlog.SetFollow(c.Cfg.Start == "newest")
+	}
+}
+
+// EventlogItems turns a page of source items into eventlog items: the key
+// and mark plucked by dot-path, the text split into lines with the
+// component's color rules applied per line, and the raw item kept as Data
+// for enter and the inspector.
+func EventlogItems(c *Component, items []any, th theme.Theme) []eventlog.Item {
+	out := make([]eventlog.Item, len(items))
+	for i, it := range items {
+		var lines []string
+		if text := ds.FirstString(it, c.Cfg.Text); text != "" {
+			for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+				lines = append(lines, applyColorRules(line, c.Cfg.ColorRules, th))
+			}
+		}
+		out[i] = eventlog.Item{
+			Key:   ds.FirstString(it, c.Cfg.Key),
+			Lines: lines,
+			Data:  it,
+			Mark:  ds.FirstString(it, c.Cfg.Mark),
+		}
+	}
+	return out
+}
+
+// keySep joins an Anchored item's cursor to its component key in the key
+// tuilib holds. tuilib treats an item's key as its cursor, so two items
+// with the same cursor (Prefect logs stamped the same millisecond) would
+// collapse into one; prefixing the component key keeps them apart.
+// JSON never contains a raw unit separator, so the split is unambiguous.
+const keySep = "\x1f"
+
+// AnchoredKey is the key tuilib holds for an Anchored item.
+func AnchoredKey(cursor, key string) string { return cursor + keySep + key }
+
+// SplitAnchoredKey recovers the cursor and component key from an
+// AnchoredKey. A key with no separator is a plain (Seekable) key.
+func SplitAnchoredKey(k string) (cursor, key string) {
+	if i := strings.Index(k, keySep); i >= 0 {
+		return k[:i], k[i+len(keySep):]
+	}
+	return "", k
+}
+
+// LandAtNewest puts a span table anchored at its newest row on that row
+// each time a new answer lands: the first page, and the first page of a
+// re-anchor after a filter. Called after every message the remote table
+// handles; it does nothing between answers, so scrolling is left alone.
+func (c *Component) LandAtNewest() {
+	if !c.AtNewest || c.Table == nil {
+		return
+	}
+	a, ok := c.Table.Answered()
+	if !ok || c.Table.Stale() {
+		return
+	}
+	if key := a.Raw + "\x00" + a.Sort; key != c.landed {
+		c.landed = key
+		c.Table.SetCursor(len(c.Table.Rows()) - 1)
+	}
 }

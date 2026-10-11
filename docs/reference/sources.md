@@ -253,6 +253,12 @@ Supported on `http` (the request goes in the query string) and `exec`
 | `sort_param` | string | — | http only | Query parameter for the sort field. |
 | `sorts` | map of string | — | http only; needs `sort_param` | Maps a column title to the sort field the API expects. Unlisted columns send their title. |
 | `sort_desc_prefix` | string | — | http only; needs `sort_param` | Prepended for a descending sort, e.g. `-` for Django REST (`ordering=-created`). Empty means both directions send the same value. |
+| `cursor` | string | — | eventlog and span-table sources | Makes the source **Anchored**: walked from an edge instead of paged by offset. The dot-path to each item's cursor, the value the next request walks from (ES `sort`, a timestamp, an id). See [Anchored windows](#anchored-windows). |
+| `older` | map | — | http, with `cursor` | What the request changes to walk towards older items, merged into `body:` or set as query parameters. |
+| `newer` | map | — | http, with `cursor` | The same, walking towards newer items. |
+| `anchor` | string | `newest` | with `cursor` | Where an Anchored view starts: `newest` (and follows), or `oldest` (and walks newer as you scroll down). |
+| `growing` | `true` or map | — | eventlog only; not with `refresh` | The set is still gaining items at its newest end. A bound eventlog follows the newest item and the source is polled every `follow_every`; when growth stops, one final read picks up the last items. `true` grows for as long as the screen is open. The map form ties it to another source; see [growing](#growing). |
+| `follow_every` | duration | `2s` | needs `growing` | Poll interval while growing. |
 
 On exec, `command:` uses these tokens instead of the `*_param` fields:
 
@@ -264,6 +270,8 @@ On exec, `command:` uses these tokens instead of the `*_param` fields:
 | `${window.filters.NAME}` | A scoped term's value, where `NAME` is what `filters:` maps the column to. |
 | `${window.sort}` | The sort column's title; the command maps it itself. |
 | `${window.sort_dir}` | `asc` or `desc`; empty when unsorted. |
+| `${window.cursor}` | Anchored only: the edge item's cursor; empty on the first request. |
+| `${window.dir}` | Anchored only: `older` or `newer`. |
 
 An argv element whose window tokens all resolve empty is dropped, so
 `--author=${window.filters.author}` disappears when no author term is
@@ -276,12 +284,95 @@ parameter the window also sets is overwritten, so `?q=x` on the URL acts
 as a default search the user's filter replaces. `refresh:` and `r`
 refetch the window on screen in place.
 
+### Anchored windows
+
+Some APIs can't jump to row N: Elasticsearch past 10,000 hits
+(`search_after`), log APIs filtered by timestamp, and any API that pages
+with an `?after=<token>`. They're **Anchored**: read by walking from an
+edge item to the items before or after it. Setting `cursor:` makes a
+window Anchored. An eventlog bound to one opens at the newest item and
+walks older as you scroll up, or, with `anchor: oldest`, opens at the
+oldest and walks newer.
+
+Each request carries the edge item's cursor, which direction to walk,
+and the page size:
+
+- **http:** the `older:` or `newer:` map is merged into `body:` (a JSON
+  object), or, for a request with no body, set as query parameters. A
+  value that is exactly `${window.cursor}` takes the cursor's JSON value
+  (an ES sort array stays an array) and is left out of the first request,
+  which has no cursor yet. Inside `body:` text, `${window.limit}` is a
+  number and `${window.search}` / `${window.filters.NAME}` are escaped for
+  a JSON string. `search_param` and, with no body, `filters:` still name
+  query parameters.
+- **exec:** the command reads `${window.cursor}` (a string cursor
+  unquoted, anything else as JSON), `${window.dir}` (`older` or `newer`)
+  and `${window.limit}`, plus the usual filter tokens.
+
+Answer an older walk newest first, as a descending sort does; tui-builder
+reverses it. `${window.limit}` is one more than the page size: whether the
+extra item comes back is how tui-builder knows that edge has more.
+
+Items are held by cursor plus the component's `key:`, so two items with
+the same cursor (log lines stamped the same millisecond) both stay.
+
+```yaml
+logs:
+  type: http
+  method: POST
+  url: ${env.ES_URL}/app-logs/_search
+  root: hits.hits
+  body: '{"query": {"query_string": {"query": "${window.search}*"}}, "size": ${window.limit}}'
+  window:
+    cursor: sort
+    older: {sort: [{"@timestamp": desc}, {_id: desc}], search_after: "${window.cursor}"}
+    newer: {sort: [{"@timestamp": asc},  {_id: asc}],  search_after: "${window.cursor}"}
+```
+
+An Anchored window has no offsets, total or user sort, so `offset_param`,
+`total_path`, `sort_param`, `sorts`, `sort_desc_prefix` and `prefetch`
+don't apply. Where it opens is `anchor:`; the eventlog's `start:` is for
+paged sources and is rejected here. An eventlog or a table can bind one;
+a table over an Anchored source is a span table (see
+[components.md](components.md#table)).
+
+### Growing
+
+`growing:` as a map names another source and a condition on its value,
+re-evaluated every time that source answers. That source needn't be shown
+anywhere: the screen fetches it when it opens, and polls it on its own
+`refresh:`, so give it one.
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `source` | string | — | required | The entry whose value decides, e.g. the job a list of events belongs to. |
+| `while` | expr | — | required | True while items are still arriving, over that source's value. |
+
+```yaml
+data:
+  sources:
+    job:
+      type: http
+      url: ${env.AWX_HOST}/api/v2/jobs/${params.id}/
+      refresh: 5s
+    job_events:
+      type: exec
+      command: [awx-events, --job, "${params.id}", --offset, "${window.offset}", --limit, "${window.limit}", --search, "${window.search}"]
+      window:
+        total_path: count
+        growing: {source: job, while: 'status in ["pending", "waiting", "running"]'}
+        follow_every: 2s
+```
+
 **Validation:**
 
 - `window:` only on `http` and `exec`, with json format, not with
   `follow` or `paginate`.
-- Only a `type: table` may bind a windowed source, and an operator can't
-  consume one (it would see one page and present it as everything).
+- Only a `type: table` or an `eventlog` may bind a windowed source, and
+  an operator can't consume one (it would see one page and present it as
+  everything). `growing:` is eventlog-only, can't be combined with
+  `refresh:`, and its `source:` must exist and its `while:` compile;
+  `follow_every` needs `growing`.
 - http: `offset_param` and `limit_param` are required, and at least one
   of `search_param` / `filters` (otherwise the filter bar has nowhere to
   send input). `sorts` and `sort_desc_prefix` need `sort_param`.
@@ -291,6 +382,9 @@ refetch the window on screen in place.
   window token.
 - A `sortable` column on the bound table needs `sort_param` (http).
 - `page_size` and `prefetch` are not negative.
+- With `cursor:`: http needs both `older:` and `newer:`, which are
+  http-only; exec must reference `${window.cursor}`, `${window.dir}` and
+  `${window.limit}`; the offset, total and sort fields are rejected.
 
 `wrangl` on a windowed source returns its first page.
 
