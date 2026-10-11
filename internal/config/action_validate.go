@@ -11,17 +11,15 @@ import (
 // both are silent, which is why this is a hard load error rather than a
 // doc note.
 //
-// The app-shell keys (q / ctrl+c / ctrl+z / ? / esc) are consumed before
-// the screen's Update ever sees them, so an action bound there simply
-// never fires — the user presses the key and the app quits instead. The
-// screen keys (tab / shift+tab / r) do reach us, and an action would
-// shadow them, silently costing focus cycling or manual refresh.
+// esc is consumed by the shell before the screen's Update ever sees it,
+// so an action bound there simply never fires. The screen keys (tab /
+// shift+tab / r) do reach us, and an action would shadow them, silently
+// costing focus cycling or manual refresh.
 //
-// The output-console, theme-cycle and action-menu keys are NOT in this
-// map: all three are configurable (`app.output_key`, `app.theme_key`,
-// `app.actions_key`), so their reserved value depends on the config
-// being validated. validateActionBindings takes them as arguments and
-// reports them with the knob to change, which a static map can't do.
+// The shell's configurable keys (quit, suspend, help, output console,
+// theme cycle, action menu) are NOT in this map: their reserved value
+// depends on the config being validated. App.shellKeys lists them, with
+// the knob to change, which a static map can't do.
 //
 // Deliberately NOT reserved:
 //
@@ -39,10 +37,6 @@ import (
 // any more — main bound it, which is exactly why the note said the
 // README's claim was false. It is now a configurable key like `o`.
 var reservedKeys = map[string]string{
-	"q":         "quits the app",
-	"ctrl+c":    "quits the app",
-	"ctrl+z":    "suspends the app",
-	"?":         "opens the key overlay",
 	"esc":       "pops the current screen",
 	"tab":       "cycles focus forward",
 	"shift+tab": "cycles focus backward",
@@ -206,7 +200,8 @@ func validateActionDefs(actions map[string]*Action) error {
 
 // validateActionBindings checks one screen's action bindings against the
 // action registry and the components actually placed in its layout.
-func validateActionBindings(bindings []ActionBinding, refs map[string]int, components map[string]*Component, actions map[string]*Action, path, outputKey, themeKey, actionsKey string) error {
+func validateActionBindings(bindings []ActionBinding, refs map[string]int, components map[string]*Component, actions map[string]*Action, path string, app *App) error {
+	shell := app.shellKeys()
 	seen := map[string]int{}
 	for i, b := range bindings {
 		bp := fmt.Sprintf("%s.actions[%d]", path, i)
@@ -223,15 +218,11 @@ func validateActionBindings(bindings []ActionBinding, refs map[string]int, compo
 			if why, bad := menuKeys[b.Key]; bad {
 				return fmt.Errorf("%s: key %q is the action menu's own key — it %s, so a menu shortcut on it would never fire", bp, b.Key, why)
 			}
-			// The two the shell claims but the config can move.
-			if outputKey != "" && b.Key == outputKey {
-				return fmt.Errorf("%s: key %q opens the output console (app.output_key) — pick another, or set app.output_key to \"-\" to disable the console", bp, b.Key)
-			}
-			if themeKey != "" && b.Key == themeKey {
-				return fmt.Errorf("%s: key %q cycles the theme (app.theme_key) — pick another, or set app.theme_key to \"-\" to pin the palette", bp, b.Key)
-			}
-			if actionsKey != "" && b.Key == actionsKey {
-				return fmt.Errorf("%s: key %q opens the action menu (app.actions_key) — pick another, or set app.actions_key to \"-\" to turn the menu off", bp, b.Key)
+			// The keys the shell claims but the config can move.
+			for _, sk := range shell {
+				if b.Key == sk.key {
+					return fmt.Errorf("%s: key %q %s — %s", bp, b.Key, sk.does, sk.fix)
+				}
 			}
 			if prev, dup := seen[b.Key]; dup {
 				return fmt.Errorf("%s: key %q already bound at %s.actions[%d]", bp, b.Key, path, prev)

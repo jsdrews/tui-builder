@@ -167,8 +167,10 @@ map at load, so the two forms behave identically.
 
 **Validation:**
 
-- A `key` can't be reserved or one of the menu's own keys (below), can't be `app.actions_key`,
-  `app.output_key` or `app.theme_key`, and can't repeat on one screen.
+- A `key` can't be reserved or one of the menu's own keys (below), can't be
+  any shell key as configured (`app.quit_key`, `app.suspend_key`,
+  `app.help_key`, `app.actions_key`, `app.output_key`, `app.theme_key`),
+  and can't repeat on one screen.
 - `from:` is required when `bind:` or `confirm:` reads `${selection…}`,
   or the action is a push, and forbidden otherwise. It must be a list,
   table, tree or eventlog placed on this screen.
@@ -179,9 +181,9 @@ map at load, so the two forms behave identically.
 
 | Key | Owned by |
 |---|---|
-| `q`, `ctrl+c` | quits the app |
-| `ctrl+z` | suspends the app |
-| `?` | opens the key overlay |
+| `q` (`app.quit_key`), `ctrl+c` | quits the app |
+| `ctrl+z` (`app.suspend_key`) | suspends the app |
+| `?` (`app.help_key`) | opens the key overlay |
 | `esc` | pops the current screen |
 | `tab`, `shift+tab` | cycles focus |
 | `r` | refreshes every bound source |

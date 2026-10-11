@@ -46,14 +46,24 @@ actions:
 
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
-| `title` | string | — | — | Prefixes the breadcrumb; the current screen's title follows it. |
+| `title` | string | — | — | The terminal window's title, set when the app starts. The breadcrumb shows each screen's own `title:`. |
 | `version` | string | — | — | Shown on the right of the statusbar. |
-| `theme` | string | first built-in | — | The starting palette. An unknown name falls back to the first theme. Names: `dark`, `accent`, `light`, `solarized`, `nord`, `dracula`, `gruvbox`, `catppuccin-mocha`, `catppuccin-latte`, `tokyo-night`, `rose-pine`, `rose-pine-dawn`, `one-dark`, `monokai`, `everforest-dark`, `base16-ocean`, `base16-eighties`, `base16-railscasts`, `base16-tomorrow-night`. |
+| `theme` | string | first built-in | — | The starting palette. The `TUI_BUILDER_THEME` environment variable overrides it for one run; when neither is set, the `theme:` in your own `$XDG_CONFIG_HOME/tuilib/config.yaml` is used. An unknown name falls through to the next of those, then to the first theme. Names: `dark`, `accent`, `light`, `solarized`, `nord`, `dracula`, `gruvbox`, `catppuccin-mocha`, `catppuccin-latte`, `tokyo-night`, `rose-pine`, `rose-pine-dawn`, `one-dark`, `monokai`, `everforest-dark`, `base16-ocean`, `base16-eighties`, `base16-railscasts`, `base16-tomorrow-night`. |
 | `glyphs` | map | — | — | Overrides the single-character marks components draw. See [`app.glyphs`](#appglyphs). |
 | `borders` | map | — | — | Border shapes and how a pane title meets its border. See [`app.borders`](#appborders). |
 | `actions_key` | string | `a` | — | Opens the action menu. `-` turns the menu off, which also turns off right-click targeting and menu shortcuts. No action may bind this key. |
 | `theme_key` | string | `t` | — | Cycles through every built-in palette, live. `-` pins the app to `theme:`. No action may bind this key. |
 | `output_key` | string | `o` | — | Opens the output console: every statusbar message and everything a subprocess streams, with a badge counting events and a picker for killing running work. `-` disables it. No action may bind this key. |
+| `quit_key` | string | `q` | — | Quits from the root screen. `ctrl+c` always quits too. Can be rebound but not turned off. |
+| `suspend_key` | string | `ctrl+z` | — | Suspends the app to the shell. `-` turns suspending off. |
+| `help_key` | string | `?` | — | Opens the key overlay. Can be rebound but not turned off. |
+| `mouse` | string | `click` | — | `click` makes components clickable; `off` leaves the mouse to the terminal, so click-drag selects text without holding shift. |
+| `double_click` | duration | your tuilib config's `double_click_ms`, else tuilib's | — | How quickly a second click must follow to count as a double click. |
+| `esc_pops` | bool | `true` | — | `esc` goes back one screen. `false` leaves going back to actions. |
+| `output` | map | — | — | The output console's scrollback cap and export directory. See [`app.output`](#appoutput). |
+| `actions_title` | string | `Actions` | — | The action menu's title. |
+| `form_spacing` | int | `0` | — | Blank lines between fields in action-input forms and boot prompts. |
+| `keys` | map | — | — | Remaps navigation keys in every list, table and tree. See [`app.keys`](#appkeys). |
 | `prompts` | list | — | — | A form shown at boot, before any screen renders. See [`app.prompts`](#appprompts). |
 | `env` | list | — | — | Environment variables the config depends on, checked at load. See [`app.env`](#appenv). |
 
@@ -79,6 +89,10 @@ Every field is optional; an unset one keeps tuilib's default.
 | `sort_desc` | string | tuilib's | — | Follows the sorted column's title, descending. |
 | `column_sep` | string | tuilib's | — | Divides table columns. |
 | `placeholder` | string | tuilib's | — | Fills a row a windowed table hasn't received yet. |
+| `mask` | string | tuilib's | — | Drawn for each typed character in a masked input or prompt. |
+| `activity_ok` | string | tuilib's | — | Shown when a row's work finished. |
+| `activity_fail` | string | tuilib's | — | Shown when a row's work failed. |
+| `activity_changed` | string | tuilib's | — | Shown when a row's work finished and changed it. |
 
 **Validation:** each value must be exactly one character. A wider glyph
 shifts every row it's drawn on, so it's rejected.
@@ -101,6 +115,52 @@ app:
   glyphs: {cursor: ">", mark: "*"}
   borders: {active: rounded, inactive: rounded, overlay: double, slot_brackets: corners}
 ```
+
+### `app.output`
+
+The console's colors come from the theme; these are its other settings.
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `max_records` | int | tuilib's | — | How many entries the console keeps before dropping the oldest. |
+| `export_dir` | string | tuilib's | — | Where the console writes an exported log. |
+
+### `app.keys`
+
+Remaps navigation keys in every list, table and tree, by binding name.
+Each value is one key or a list of keys, and replaces that binding's
+default keys. There are no per-component keymaps: a remap is a habit,
+not a per-pane choice.
+
+| Binding | Default | On |
+|---|---|---|
+| `up`, `down` | `↑`/`k`, `↓`/`j` | list, table, tree |
+| `top`, `bottom` | `g`, `G` | list, table, tree |
+| `half_up`, `half_down` | `ctrl+u`, `ctrl+d` | list, table |
+| `filter` | `/` | list, table; on a tree, its `/` search |
+| `mark`, `mark_all`, `clear_marks`, `mark_range` | `x`, `A`, `D`, `X` | list, table, tree with `markable:` |
+| `sort_prev`, `sort_next`, `sort_dir` | `[`, `]`, `s` | table |
+| `col_prev`, `col_next` | `shift+left`, `shift+right` | table |
+
+```yaml
+app:
+  keys:
+    up: [k, up]
+    down: [j, down]
+    filter: /
+```
+
+**Validation:** names must be from the table; each needs at least one
+key; a key can't be one the shell or the screen already owns (the
+quit, suspend, help, console, theme and menu keys, `ctrl+c`, `esc`,
+`tab`, `shift+tab`, `r`).
+
+### Shell keys
+
+**Validation:** `quit_key` and `help_key` can't be `-`. Two shell
+features can't share a key, and none can be `esc`, `tab`, `shift+tab` or
+`r`. `mouse` is `click` or `off`; `double_click` is a positive duration;
+`form_spacing` and `output.max_records` can't be negative.
 
 ### `app.prompts`
 

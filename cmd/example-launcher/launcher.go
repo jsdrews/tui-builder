@@ -114,6 +114,10 @@ func loadScreen(path string, th theme.Theme) (tscreen.Screen, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The example's keymap, form spacing and mask reach inside its
+	// components and forms, so they can follow it here. Its shell
+	// settings (keys, mouse, title) can't: the launcher owns the shell.
+	build.SetAppChrome(&c.App)
 	if len(c.TUI.Screens) > 0 {
 		multi := &tqscreen.Multi{
 			Screens:    c.TUI.Screens,

@@ -1547,6 +1547,7 @@ func (m *Model) newInputForm(def *cfg.Action, names []string) form.Model {
 				Label:       labelOr(p.Label, name),
 				Placeholder: p.Placeholder,
 				Initial:     p.Default,
+				MaskChar:    build.MaskChar(),
 			})
 		default:
 			// Required and Validate are the form's own enforcement:
@@ -1565,7 +1566,7 @@ func (m *Model) newInputForm(def *cfg.Action, names []string) form.Model {
 			})
 		}
 	}
-	opts := m.th.Form().With(fields)
+	opts := build.FormOptions(m.th).With(fields)
 	opts.SubmitText = "Run"
 	return form.New(opts)
 }

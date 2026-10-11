@@ -66,6 +66,9 @@ func overrideGlyphs(base glyph.Set, o *cfg.Glyphs) glyph.Set {
 		{&base.SortDesc, o.SortDesc},
 		{&base.ColumnSep, o.ColumnSep},
 		{&base.Placeholder, o.Placeholder},
+		{&base.ActivityOK, o.ActivityOK},
+		{&base.ActivityFail, o.ActivityFail},
+		{&base.ActivityChanged, o.ActivityChanged},
 	} {
 		if f.src != "" {
 			*f.dst = f.src
