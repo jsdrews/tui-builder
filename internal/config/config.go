@@ -764,6 +764,13 @@ type Component struct {
 	// silently do the other's job.
 	MarkKey Path `yaml:"mark_key,omitempty"`
 
+	// Activity makes rows show a spinner while the data says work is
+	// running on them — a pod Pending, a sync Running, a job queued. The
+	// server's data is the truth: every fetch re-evaluates every row. See
+	// Activity. Table, list and tree only, bound to a fetched or polled
+	// source.
+	Activity *Activity `yaml:"activity,omitempty"`
+
 	// list fields
 	Items []string `yaml:"items,omitempty"`
 
@@ -891,6 +898,28 @@ type Component struct {
 	// "table on top, detail below" interfaces where scrolling the top
 	// pane refreshes the bottom.
 	OnCursor *OnCursor `yaml:"on_cursor,omitempty"`
+}
+
+// Activity is a component's `activity:` block: which field says what a
+// row is doing, and which of its values mean "busy".
+//
+//	activity:
+//	  status: status.phase           # the field; shown beside the spinner
+//	  busy: [Pending, Terminating]   # these values are busy, or…
+//	  busy_when: 'observedGeneration < generation'   # …an expression
+//	  column: Status                 # table only: where the spinner draws
+type Activity struct {
+	// Status is the dot-path to the field that says what a row is doing.
+	// Its value is the label shown beside the spinner while busy.
+	Status Path `yaml:"status,omitempty"`
+	// Busy lists the Status values that mean work is running. Exactly
+	// one of Busy and BusyWhen.
+	Busy []string `yaml:"busy,omitempty"`
+	// BusyWhen is an expression over the row's item, true while busy.
+	BusyWhen string `yaml:"busy_when,omitempty"`
+	// Column is the table column the spinner replaces. Defaults to the
+	// column whose `value:` is Status.
+	Column string `yaml:"column,omitempty"`
 }
 
 // OnCursor wires a component to another component's cursor state.

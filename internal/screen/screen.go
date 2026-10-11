@@ -21,6 +21,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
 
+	"github.com/jsdrews/tuilib/pkg/activity"
 	"github.com/jsdrews/tuilib/pkg/app"
 	"github.com/jsdrews/tuilib/pkg/confirm"
 	"github.com/jsdrews/tuilib/pkg/eventlog"
@@ -73,6 +74,9 @@ type sourceEntry struct {
 	loaded bool
 	stream <-chan ds.Event    // non-nil for streaming sources after Subscribe
 	cancel context.CancelFunc // cancels the stream's context
+	// failing is whether the newest fetch failed outright, for the
+	// "· reads failing" title on a polled source's components.
+	failing bool
 }
 
 // fetchMsg carries the result of one source fetch back into Update.
@@ -80,6 +84,9 @@ type fetchMsg struct {
 	source string
 	data   any
 	err    error
+	// reads holds the activity read each activity component stamped when
+	// the fetch was issued, by component name.
+	reads map[string]activity.Read
 }
 
 // tickMsg signals "time to refetch source X." Emitted by the per-source
@@ -765,9 +772,21 @@ func (m *Model) startFetch(name string) tea.Cmd {
 			}
 		}
 	}
+	// Stamp the read for every component tracking activity now, when the
+	// fetch is issued: that's what lets the reply be told apart from one
+	// a newer fetch overtook, or one that raced a write.
+	var reads map[string]activity.Read
+	for _, compName := range m.sourceUsers[name] {
+		if c := m.tree.Components[compName]; build.HasActivity(c) {
+			if reads == nil {
+				reads = map[string]activity.Read{}
+			}
+			reads[compName] = build.BeginRead(c)
+		}
+	}
 	cmds = append(cmds, func() tea.Msg {
 		data, err := entry.src.Fetch(context.Background())
-		return fetchMsg{source: name, data: data, err: err}
+		return fetchMsg{source: name, data: data, err: err, reads: reads}
 	})
 	return tea.Batch(cmds...)
 }
@@ -787,15 +806,39 @@ func (m *Model) handleFetch(msg fetchMsg) tea.Cmd {
 	// non-nil err while still handing back the surviving union. Apply
 	// whatever data we got, then surface the error (if any) so the
 	// user sees both halves of the story.
+	// A failure that still brought data (merge with on_error: skip) is a
+	// read that landed; only a fetch with nothing to show failed.
+	failed := msg.data == nil && msg.err != nil
+	var readErr error
+	if failed {
+		readErr = msg.err
+	}
 	for _, compName := range m.sourceUsers[msg.source] {
 		c := m.tree.Components[compName]
 		if !entry.loaded {
 			setLoading(c, false)
 		}
-		if msg.data != nil {
+		if rd, ok := msg.reads[compName]; ok {
+			build.ApplyRead(c, rd, msg.data, readErr, m.th)
+		} else if msg.data != nil {
 			build.ApplyData(c, msg.data, m.th)
 		}
 	}
+	// A polled source's components say "· reads failing" on their title
+	// for as long as its reads fail, so a pane that's quietly stale is
+	// marked as such. Always on; one-shot sources have no poll to fail.
+	polled := entry.src.Refresh() > 0
+	startedFailing := failed && !entry.failing
+	if polled && failed != entry.failing {
+		suffix := ""
+		if failed {
+			suffix = " · reads failing"
+		}
+		for _, compName := range m.sourceUsers[msg.source] {
+			build.SetTitleSuffix(m.tree.Components[compName], suffix)
+		}
+	}
+	entry.failing = failed
 	// Track whether this fetch is the FIRST attempt (entry.loaded was
 	// false going in). The "still false after this fetch" case is the
 	// "I just opened the screen and nothing works" path — it gets the
@@ -820,7 +863,10 @@ func (m *Model) handleFetch(msg fetchMsg) tea.Cmd {
 				fmt.Sprintf("%s: initial fetch failed", msg.source),
 				msg.err.Error(),
 			))
-		} else {
+		} else if !polled || !failed || startedFailing {
+			// A polled source reports an outage once, when its reads
+			// start failing; the title carries it after that, rather
+			// than a fresh error on the statusbar every poll.
 			cmds = append(cmds, app.Error(fmt.Sprintf("%s: %v", msg.source, msg.err)))
 		}
 	}
@@ -989,6 +1035,15 @@ func (m *Model) SetTheme(t theme.Theme) {
 	m.th = t
 	for _, c := range m.tree.All() {
 		c.Rebuild(t)
+	}
+	// A rebuild takes the configured title back; put the outage marker
+	// back on what's still failing.
+	for name, entry := range m.sources {
+		if entry.failing && entry.src.Refresh() > 0 {
+			for _, compName := range m.sourceUsers[name] {
+				build.SetTitleSuffix(m.tree.Components[compName], " · reads failing")
+			}
+		}
 	}
 	// Rebuild() may have reset pane focus state — re-apply the screen's
 	// focus highlight on top.

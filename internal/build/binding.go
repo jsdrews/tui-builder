@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jsdrews/tuilib/pkg/activity"
 	"github.com/jsdrews/tuilib/pkg/inspector"
+	"github.com/jsdrews/tuilib/pkg/list"
 	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/theme"
+	"github.com/jsdrews/tuilib/pkg/tree"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
 	ds "github.com/jsdrews/tui-builder/internal/datasource"
@@ -293,29 +296,93 @@ func applyLogview(c *Component, data any, th theme.Theme) {
 }
 
 func applyList(c *Component, data any, th theme.Theme) {
+	if markable(c.Cfg) || c.Cfg.Activity != nil {
+		// SetItems nils the key slice, which would leave the gutter
+		// drawn and every mark press inert, and gives activity no keys.
+		c.List.SetKeyedItems(listItems(c, data, th))
+		return
+	}
 	items := ds.Iter(data)
 	out := make([]string, 0, len(items))
 	for _, it := range items {
 		out = append(out, applyColorRules(ds.String(it, c.Cfg.Item), c.Cfg.ColorRules, th))
 	}
-	if markable(c.Cfg) {
-		// SetItems nils the key slice, which would leave the gutter
-		// drawn and every mark press inert.
-		c.List.SetKeyedItems(keyedItems(out))
-		return
-	}
 	c.List.SetItems(out)
+}
+
+// listItems renders a list's items keyed on their display string, with
+// each item's source data attached.
+func listItems(c *Component, data any, th theme.Theme) []list.KeyedItem {
+	items := ds.Iter(data)
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		out = append(out, applyColorRules(ds.String(it, c.Cfg.Item), c.Cfg.ColorRules, th))
+	}
+	return keyedListItems(out, items)
 }
 
 func applyTable(c *Component, data any, th theme.Theme) {
 	items := ds.Iter(data)
-	if markable(c.Cfg) {
+	if markable(c.Cfg) || c.Cfg.Activity != nil {
 		rows, byKey := KeyedTableRows(c, items, th)
 		c.RowsByKey = byKey
 		c.Table.SetKeyedRows(rows)
 		return
 	}
 	c.Table.SetRows(TableRows(c, items, th))
+}
+
+// HasActivity reports whether c shows row activity, and so applies its
+// fetches through BeginRead / ApplyRead rather than ApplyData.
+func HasActivity(c *Component) bool {
+	return c != nil && c.Cfg != nil && c.Cfg.Activity != nil &&
+		(c.Kind == KTable || c.Kind == KList || c.Kind == KTree)
+}
+
+// BeginRead stamps a fetch for an activity component when it's issued, so
+// the reply can be told apart from one a newer fetch overtook, and from a
+// read that raced a write. See ApplyRead.
+func BeginRead(c *Component) activity.Read {
+	switch c.Kind {
+	case KTable:
+		return c.Table.BeginRead()
+	case KList:
+		return c.List.BeginRead()
+	case KTree:
+		return c.Tree.BeginRead()
+	}
+	return activity.Read{}
+}
+
+// ApplyRead applies a fetch an activity component stamped with BeginRead:
+// the rows, keyed and carrying their data so every row's status is
+// re-evaluated, or the error, which marks reads failing and stops the
+// spinners that were waiting on a read. False means it was dropped:
+// overtaken by a newer read, or failed.
+func ApplyRead(c *Component, rd activity.Read, data any, err error, th theme.Theme) bool {
+	switch c.Kind {
+	case KTable:
+		var rows []table.KeyedRow
+		if err == nil {
+			var byKey map[string]Selection
+			rows, byKey = KeyedTableRows(c, ds.Iter(data), th)
+			c.RowsByKey = byKey
+		}
+		return c.Table.ApplyRead(rd, rows, err)
+	case KList:
+		var items []list.KeyedItem
+		if err == nil {
+			items = listItems(c, data, th)
+		}
+		return c.List.ApplyRead(rd, items, err)
+	case KTree:
+		var root tree.Node
+		if err == nil {
+			root = treeRoot(c, data, th)
+		}
+		return c.Tree.ApplyRead(rd, root, err)
+	}
+	return false
 }
 
 // TableRows projects items through a table component's columns —
@@ -352,6 +419,11 @@ func TableRows(c *Component, items []any, th theme.Theme) []table.Row {
 // The root's label matches sourceTreeRootLabel(cfg) — the same string
 // buildTree seeded so tuilib's expand state carries across refreshes.
 func applyTree(c *Component, data any, th theme.Theme) {
+	c.Tree.SetRoot(treeRoot(c, data, th))
+}
+
+// treeRoot builds the tree applyTree installs; see applyTree for the modes.
+func treeRoot(c *Component, data any, th theme.Theme) tree.Node {
 	rules := c.Cfg.ColorRules
 	label := func(it any) string {
 		return applyColorRules(ds.FirstString(it, c.Cfg.Label), rules, th)
@@ -373,23 +445,21 @@ func applyTree(c *Component, data any, th theme.Theme) {
 					root.children = append(root.children, child)
 				}
 			}
-			c.Tree.SetRoot(root)
+			return root
 		default:
 			single := walkTreeNode(data, c.Cfg.Label, c.Cfg.Children, label)
 			if single == nil {
 				single = root
 			}
-			c.Tree.SetRoot(single)
+			return single
 		}
-		return
 	}
 	items := ds.Iter(data)
 	if len(c.Cfg.GroupBy) == 0 {
 		for _, it := range items {
-			root.children = append(root.children, &yamlNode{label: label(it)})
+			root.children = append(root.children, &yamlNode{label: label(it), data: it})
 		}
-		c.Tree.SetRoot(root)
-		return
+		return root
 	}
 	// Bucket by GroupBy value. Preserve first-appearance order via a
 	// parallel slice; the map is just for lookup during the walk.
@@ -406,12 +476,12 @@ func applyTree(c *Component, data any, th theme.Theme) {
 			buckets[key] = b
 			order = append(order, key)
 		}
-		b.node.children = append(b.node.children, &yamlNode{label: label(it)})
+		b.node.children = append(b.node.children, &yamlNode{label: label(it), data: it})
 	}
 	for _, k := range order {
 		root.children = append(root.children, buckets[k].node)
 	}
-	c.Tree.SetRoot(root)
+	return root
 }
 
 // walkTreeNode recurses through a source-supplied nested structure,
@@ -424,7 +494,7 @@ func walkTreeNode(v any, labelPath, childrenPath cfg.Path, label func(any) strin
 	if v == nil {
 		return nil
 	}
-	node := &yamlNode{label: label(v)}
+	node := &yamlNode{label: label(v), data: v}
 	var kids any
 	for _, p := range childrenPath {
 		if got := ds.Get(v, p); got != nil {
