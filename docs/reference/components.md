@@ -75,6 +75,7 @@ Rows and columns, with sorting, filtering and horizontal scroll.
 | `columns` | list | — | required | Column definitions. See [columns](#columns). |
 | `rows` | list of list | — | static | Each row is a list of cells. A cell is a string, `{value, color}` for a colored cell, or `{label, url}` for a hyperlink. |
 | `initial_sort` | map | — | — | Sort to start with: `column` (a column title, case-insensitive prefix, or a 1-based number) and `desc` (bool). Only `sortable` columns match; anything else is ignored. |
+| `sort_debounce` | duration | tuilib's (400ms) | windowed source | How long sort input must go quiet before the source is asked for the new order, so stepping through columns with `[` / `]` sends one request. `0` sends every change. |
 | `max_rows` | int | `100` | streaming source, no `row_key` | Ring-buffer size: each arriving event is prepended as a row and the oldest drop past this size. `-1` is unbounded. |
 | `row_key` | path | — | streaming source | Keyed-upsert mode: an event whose key matches a row updates it in place; a new key appends. Without it, a streaming table is a ring buffer. Distinct from `mark_key`. |
 
@@ -86,12 +87,16 @@ How a table fills depends on its source:
   row, per `max_rows` / `row_key`.
 - **Windowed** (the source declares `window:`): the table holds only the
   rows on screen and the server answers the filter and sort. It switches
-  to remote filtering and sorting automatically. See
-  [sources.md](sources.md#window).
+  to remote filtering and sorting automatically. Committing a filter or
+  sort keeps the current rows on screen, dimmed, until the answer lands;
+  a failed query keeps the rows and the typed filter, and `r` retries.
+  Each query's outcome is logged to the output console under the
+  source's name. See [sources.md](sources.md#window).
 
 **Validation:** `columns` is required. When source-bound, every column
 needs `value:`. On a windowed table, a `sortable` column needs
-`window.sort_param:`.
+`window.sort_param:`. `sort_debounce` is only accepted on a windowed
+table, since a local sort is instant.
 
 ### Columns
 

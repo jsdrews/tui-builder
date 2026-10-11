@@ -62,8 +62,7 @@ func (m *Model) own(cmd tea.Cmd) tea.Cmd {
 			case fetchMsg, tickMsg, streamMsg, postApplyMsg,
 				actionPickedMsg, actionResultMsg,
 				taggedCursorMsg, cursorFetchMsg,
-				windowRequestMsg, windowFetchedMsg, windowViewportMsg,
-				windowQueryMsg, windowTickMsg:
+				windowViewportMsg, windowQueryMsg, windowTickMsg:
 				return scopedMsg{owner: id, msg: msg}
 			}
 			return msg

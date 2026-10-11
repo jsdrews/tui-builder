@@ -1,7 +1,9 @@
 package screen
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,10 +16,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jsdrews/tuilib/pkg/app"
+	"github.com/jsdrews/tuilib/pkg/remote"
 	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
+	ds "github.com/jsdrews/tui-builder/internal/datasource"
 )
 
 // windowStub is an offset-paged search endpoint that records every
@@ -28,6 +32,8 @@ type windowStub struct {
 	mu    sync.Mutex
 	seen  []url.Values
 	total int
+	// fail, when set, makes the stub answer 500 to requests it matches.
+	fail func(url.Values) bool
 }
 
 func newWindowStub(total int) *windowStub {
@@ -36,7 +42,12 @@ func newWindowStub(total int) *windowStub {
 		q := r.URL.Query()
 		s.mu.Lock()
 		s.seen = append(s.seen, q)
+		fail := s.fail
 		s.mu.Unlock()
+		if fail != nil && fail(q) {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
 
 		// The stub answers the filter the same way the real server
 		// would: a scoped author= narrows the set, so the total the
@@ -431,15 +442,14 @@ func TestWindowFetchErrorSurfaces(t *testing.T) {
 	h := newWindowHarness(t, srv, 20)
 	h.drain(h.model.Init())
 
-	// This used to assert an alert modal. The action work replaced that
-	// path with the output console, so the first failure now goes out as
-	// app.ErrorDetail: the summary lands in the statusbar and the body
-	// stays readable behind the console's unread badge. Assert on what
-	// the user sees rather than on which modal field is non-nil.
-	// Match a substring that survives the statusbar's truncation: at
-	// this width the slot renders "books: window fetch fail".
-	if got := h.view(); !strings.Contains(got, "window fetch") {
-		t.Error("nothing surfaced after the first window fetch failed — an empty table gives the user no clue why")
+	// The table marks the committed query failed, and tuilib's query
+	// history reports it, named by source, in the statusbar and the
+	// console. There's no tui-builder error path of its own any more.
+	if !h.table().Failed() {
+		t.Error("table doesn't mark the query failed — the user can't tell the empty table from an empty result")
+	}
+	if got := h.view(); !strings.Contains(got, "books:") || !strings.Contains(got, "failed") {
+		t.Errorf("no source-named failure surfaced after the first window fetch failed; view:\n%s", got)
 	}
 }
 
@@ -561,5 +571,167 @@ func TestExecWindowBareFilterReachesSearchToken(t *testing.T) {
 	}
 	if _, _, total := h.table().Window(); total != 3 {
 		t.Errorf("total = %d after search, want 3", total)
+	}
+}
+
+// Committing a filter keeps the rows already on screen, dimmed, until
+// the new query's answer lands: nothing blanks, and the cursor isn't
+// walked through an empty table.
+func TestWindowCommitKeepsOldRowsUntilAnswered(t *testing.T) {
+	srv := newWindowStub(300)
+	defer srv.Close()
+	h := newWindowHarness(t, srv, 20)
+	h.drain(h.model.Init())
+
+	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	for _, r := range "author:tolkien" {
+		h.model, _ = h.model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	var pending tea.Cmd
+	h.model, pending = h.model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if !h.table().Stale() {
+		t.Error("table isn't stale between committing a filter and its answer")
+	}
+	if got := h.view(); !strings.Contains(got, "Book-0000") {
+		t.Errorf("the previous rows left the screen before the new answer landed; view:\n%s", got)
+	}
+
+	h.drain(pending)
+	if h.table().Stale() {
+		t.Error("table still stale after the answer landed")
+	}
+	if got := h.view(); !strings.Contains(got, "By-tolkien-0000") {
+		t.Errorf("the answer never replaced the stale rows; view:\n%s", got)
+	}
+}
+
+// A failed query keeps what the user typed and the rows they were looking
+// at, and r retries it.
+func TestWindowFailedFilterKeepsInputAndRetries(t *testing.T) {
+	srv := newWindowStub(300)
+	defer srv.Close()
+	srv.mu.Lock()
+	srv.fail = func(q url.Values) bool { return q.Get("author") != "" }
+	srv.mu.Unlock()
+	h := newWindowHarness(t, srv, 20)
+	h.drain(h.model.Init())
+
+	h.typeFilter("author:tolkien")
+	if !h.table().Failed() {
+		t.Fatal("table doesn't mark the failed query")
+	}
+	if got := h.table().Value(); got != "author:tolkien" {
+		t.Errorf("filter input = %q after a failure, want what was typed", got)
+	}
+	if got := h.view(); !strings.Contains(got, "Book-0000") {
+		t.Errorf("a failed query blanked the table; view:\n%s", got)
+	}
+
+	srv.mu.Lock()
+	srv.fail = nil
+	srv.mu.Unlock()
+	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if h.table().Failed() {
+		t.Error("still failed after a successful retry")
+	}
+	if got := h.view(); !strings.Contains(got, "By-tolkien-0000") {
+		t.Errorf("r didn't retry the committed query; view:\n%s", got)
+	}
+}
+
+// The remote table cancels a fetch's context when a newer request
+// supersedes it; the fetch has to hand that context to the request for
+// the cancellation to stop anything.
+func TestWindowPagePassesItsContextToTheRequest(t *testing.T) {
+	srv := newWindowStub(300)
+	defer srv.Close()
+	h := newWindowHarness(t, srv, 20)
+	ws, ok := h.root.sources["books"].src.(ds.WindowedSource)
+	if !ok {
+		t.Fatal("books isn't a windowed source")
+	}
+	c := h.root.tree.Components["books"]
+	page := windowPage(ws, c, nil, theme.Nord())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	before := len(srv.requests())
+	if _, _, err := page(ctx, remote.Window{Offset: 0, Limit: 20}); !errors.Is(err, context.Canceled) {
+		t.Errorf("fetch with a cancelled context returned %v, want context.Canceled", err)
+	}
+	if after := len(srv.requests()); after != before {
+		t.Errorf("a cancelled fetch still reached the server (%d → %d requests)", before, after)
+	}
+}
+
+// Two windowed tables on one screen. A table's viewport and query
+// messages don't say which table sent them, and remote.Table acts on any
+// it's handed, so the screen has to address them: filtering one table
+// must not send the other a new query.
+func TestTwoWindowedTablesKeepTheirOwnQueries(t *testing.T) {
+	left, right := newWindowStub(300), newWindowStub(300)
+	defer left.Close()
+	defer right.Close()
+	src := func(s *windowStub) *cfg.Source {
+		return cfg.NewEntry(&cfg.Source{
+			Type: "http", URL: s.URL + "/search", Root: "docs",
+			Window: &cfg.WindowConfig{
+				PageSize: 20, OffsetParam: "offset", LimitParam: "limit",
+				TotalPath: "numFound", SearchParam: "q",
+				Filters: map[string]string{"Author": "author"},
+			},
+		})
+	}
+	comp := func(source string) *cfg.Component {
+		return &cfg.Component{
+			Type: "table", Title: source, Source: source, Filterable: true,
+			Columns: []cfg.Column{
+				{Title: "Title", Width: 30, Value: cfg.Path{"title"}},
+				{Title: "Author", Width: 10, Value: cfg.Path{"author"}},
+			},
+		}
+	}
+	c := cfg.Config{
+		Data: cfg.DataBlock{Sources: map[string]*cfg.Source{"left": src(left), "right": src(right)}},
+		TUI: cfg.TUIBlock{
+			Components: map[string]*cfg.Component{"left": comp("left"), "right": comp("right")},
+			Screen: cfg.Screen{Layout: cfg.Node{HStack: []cfg.Item{
+				{Node: cfg.Node{Component: "left"}},
+				{Node: cfg.Node{Component: "right"}},
+			}}},
+		},
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m tea.Model = app.New(app.Options{Root: root, Themes: []theme.Theme{theme.Nord()}, SkipConfig: true})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	h := &windowHarness{t: t, model: m, root: root}
+	h.drain(h.model.Init())
+
+	before := len(right.requests())
+	h.typeFilter("author:tolkien") // the left table has focus
+
+	for _, q := range right.requests()[before:] {
+		if q.Get("author") != "" {
+			t.Fatalf("the right table's source got the left table's filter: %v", q)
+		}
+	}
+	if got := root.tree.Components["right"].Table.Committed().Raw; got != "" {
+		t.Errorf("right table's committed query = %q, want none", got)
+	}
+	var leftSaw bool
+	for _, q := range left.requests() {
+		if q.Get("author") == "tolkien" {
+			leftSaw = true
+		}
+	}
+	if !leftSaw {
+		t.Error("the left table's source never got its own filter")
 	}
 }
