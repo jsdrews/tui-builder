@@ -209,6 +209,20 @@ task example NAME=layout
     --8<-- "examples/layout.yaml"
     ```
 
+### tabs
+
+A tabbed screen: `tabs:` in place of `layout:`, each tab with its own layout and actions; hidden tabs keep polling.
+
+```sh
+task example NAME=tabs
+```
+
+??? example "tabs.yaml"
+
+    ```yaml
+    --8<-- "examples/tabs.yaml"
+    ```
+
 ### themes
 
 Every built-in theme.

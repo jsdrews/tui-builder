@@ -312,13 +312,16 @@ func walkTemplates(c *Config, fn func(*string)) {
 // them once each rather than once per binding that references them.
 func visitScreen(s *Screen, fn func(*string)) {
 	fn(&s.Title)
-	for i := range s.Actions {
-		fn(&s.Actions[i].Confirm.Message)
-		fn(&s.Actions[i].Notice)
-		for k, v := range s.Actions[i].Bind {
-			str := v
-			fn(&str)
-			s.Actions[i].Bind[k] = str
+	for _, list := range s.Bindings("") {
+		actions := *list
+		for i := range actions {
+			fn(&actions[i].Confirm.Message)
+			fn(&actions[i].Notice)
+			for k, v := range actions[i].Bind {
+				str := v
+				fn(&str)
+				actions[i].Bind[k] = str
+			}
 		}
 	}
 }

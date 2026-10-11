@@ -1730,7 +1730,7 @@ func (m *Model) pushAction(b cfg.ActionBinding, def *cfg.Action, sel build.Selec
 	for k, v := range b.Bind {
 		params[k] = build.Substitute(v, sel)
 	}
-	child, err := NewMulti(def.Push, m.multi, sel, params, m.th)
+	child, err := BuildMulti(def.Push, m.multi, sel, params, m.th)
 	if err != nil {
 		return app.Error(fmt.Sprintf("%s: %v", def.Push, err)), true
 	}

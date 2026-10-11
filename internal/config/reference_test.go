@@ -29,6 +29,7 @@ var referencePages = map[string][]string{
 	"DataBlock":      {"app.md"},
 	"TUIBlock":       {"app.md"},
 	"Screen":         {"app.md"},
+	"Tab":            {"app.md"},
 	"Node":           {"app.md"},
 	"Item":           {"app.md"},
 	"ZStack":         {"app.md"},
