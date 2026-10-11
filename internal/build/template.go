@@ -24,6 +24,10 @@ type Selection struct {
 	// Columns are the parallel column titles for Cells. Used to resolve
 	// ${selection.COLNAME} to the right cell.
 	Columns []string
+	// Key is the row's identity in its component (a table's mark_key, a
+	// list's item, a tree's node path), when it has one: what a claim
+	// targets.
+	Key string
 }
 
 // SubstituteAll runs ${selection.*}/${env.*}/${inputs.*} substitution

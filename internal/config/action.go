@@ -1,5 +1,7 @@
 package config
 
+import "gopkg.in/yaml.v3"
+
 // This file owns the `actions:` schema — the write side of the config.
 //
 // Actions are deliberately NOT entries in `data.sources:`, even though
@@ -142,6 +144,61 @@ type Action struct {
 	//
 	//	error_message: ${body.message}
 	ErrorMessage string `yaml:"error_message,omitempty"`
+
+	// Claim makes the rows this action targets spin from the moment it
+	// starts, on a component that shows `activity:`, instead of waiting
+	// for the next poll to notice. See Claim.
+	Claim *Claim `yaml:"claim,omitempty"`
+}
+
+// Claim is an action's `claim:`. Written as just a label it means the
+// row spins until the action returns:
+//
+//	claim: Restarting
+//
+// The map form says who knows when the work ends:
+//
+//	claim: {label: Running, until: status, settle: 2}
+//
+// `until: done` (the default) ends the claim when the action returns: a
+// command that blocks until the work is over. `until: status` is for an
+// action that only acknowledges (an HTTP 202): the claim hands over to
+// the polled status, and gives up after `settle` reads report no change.
+type Claim struct {
+	// Label is shown beside the spinner until the data takes over. Use
+	// the server's own word for the work ("Running"), so the row reads
+	// the same from the keypress to the poll that confirms it.
+	Label string `yaml:"label,omitempty"`
+	// Until is "done" (default) or "status".
+	Until string `yaml:"until,omitempty"`
+	// Settle is how many reads may repeat the status from before the
+	// action before an `until: status` claim gives up. Default 1.
+	Settle int `yaml:"settle,omitempty"`
+}
+
+// UnmarshalYAML accepts the bare-label shorthand as well as the map.
+func (c *Claim) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		*c = Claim{Label: node.Value}
+		return nil
+	}
+	type plain Claim
+	return node.Decode((*plain)(c))
+}
+
+// IsObserved reports whether the claim hands over to the polled status
+// (`until: status`) rather than ending when the action returns.
+func (c *Claim) IsObserved() bool { return c != nil && c.Until == "status" }
+
+// SettleReads is Settle with its default applied.
+func (c *Claim) SettleReads() int {
+	if c == nil || !c.IsObserved() {
+		return 0
+	}
+	if c.Settle > 0 {
+		return c.Settle
+	}
+	return 1
 }
 
 // Kind returns the action's type with the default applied. Callers

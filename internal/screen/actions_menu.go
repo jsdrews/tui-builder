@@ -166,6 +166,13 @@ func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Comp
 		a.Do = func() tea.Cmd { return m.own(m.fanOut(b, def, a, sels)) }
 		return a
 	}
+	// The shell launches this run tagged RunKey(a, the Set's target), so
+	// that's the tag its claim is registered under.
+	if def.Claim != nil {
+		target, _ := m.selectionTarget(cur)
+		m.registerClaim(taction.RunKey(a, target), b.From, claimKeys(sels), def, b.Action, "")
+		a.Receipt = resolved.Receipt()
+	}
 
 	// Interactive means "hand over the terminal", which a writer can't
 	// do. Everything else streams into the console.
@@ -285,6 +292,10 @@ func (m *Model) fanOut(b cfg.ActionBinding, def *cfg.Action, a taction.Action, s
 			continue
 		}
 		target := sel.String
+		// One claim per row: a row whose run fails stops on its own.
+		if sel.Key != "" {
+			m.registerClaim(taction.RunKey(a, target), b.From, []string{sel.Key}, def, b.Action, resolved.Receipt())
+		}
 		cmds = append(cmds, runner.GoWith(runner.GoOptions{
 			Label:  a.Label,
 			Detail: a.Label + " · " + target,

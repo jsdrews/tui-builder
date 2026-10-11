@@ -7,6 +7,11 @@
 # Terminating with their phase beside the spinner. The server is the
 # truth: a row starts and stops spinning when a read says so.
 #
+# Press enter on a pod to restart it: the action claims the row, so it
+# spins "Restarting" at once rather than waiting for the next poll, and
+# stops when the (pretend) restart returns. Mark several with x and run
+# it from the menu (a) to restart them all, one claim per row.
+#
 # Make the script fail (set FAIL=1 in your shell before starting) to see
 # the outage marker: the title says "· reads failing", the rows keep what
 # the last good read said, and the error is reported once.
@@ -44,6 +49,7 @@ tui:
       title: Pods
       source: pods
       mark_key: metadata.uid
+      markable: true
       activity:
         status: status.phase
         busy: [Pending, Terminating]
@@ -59,3 +65,16 @@ tui:
     title: Pods
     layout:
       component: pods
+    actions:
+      - key: enter
+        action: restart
+        from: pods
+        bind: {name: "${selection.Name}"}
+actions:
+  restart:
+    description: Pretend to restart a pod (takes 3s)
+    multi: true
+    run: [sh, -c, "sleep 3; echo restarted ${inputs.name}"]
+    inputs:
+      name: {required: true}
+    claim: Restarting

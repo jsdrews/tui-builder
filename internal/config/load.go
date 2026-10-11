@@ -163,6 +163,7 @@ func (c *Config) Validate() error {
 		if err := validateActionBindings(c.TUI.Screen.Actions, refs, c.TUI.Components, c.Actions, "tui.screen", c.App.OutputConsoleKey(), c.App.ThemeCycleKey(), c.App.ActionMenuKey()); err != nil {
 			return err
 		}
+		deriveClaimSettle(c.TUI.Screen.Actions, c.TUI.Components, c.Actions)
 		if err := validateOnCursor(refs, c.TUI.Components, "tui.screen"); err != nil {
 			return err
 		}
@@ -192,6 +193,7 @@ func (c *Config) Validate() error {
 		if err := validateActionBindings(s.Actions, refs, c.TUI.Components, c.Actions, fmt.Sprintf("tui.screens.%s", name), c.App.OutputConsoleKey(), c.App.ThemeCycleKey(), c.App.ActionMenuKey()); err != nil {
 			return err
 		}
+		deriveClaimSettle(s.Actions, c.TUI.Components, c.Actions)
 		if err := validateOnCursor(refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name)); err != nil {
 			return err
 		}
@@ -549,6 +551,20 @@ func (c *Component) validateEventlog(path string) error {
 		return fmt.Errorf("%s: max_items must be >= 0 (0 = tuilib's default)", path)
 	}
 	return nil
+}
+
+// deriveClaimSettle sets each component's ClaimSettle to the largest
+// settle among the claiming actions bound from it.
+func deriveClaimSettle(bindings []ActionBinding, components map[string]*Component, actions map[string]*Action) {
+	for _, b := range bindings {
+		a, comp := actions[b.Action], components[b.From]
+		if a == nil || comp == nil || a.Claim == nil {
+			continue
+		}
+		if n := a.Claim.SettleReads(); n > comp.ClaimSettle {
+			comp.ClaimSettle = n
+		}
+	}
 }
 
 // validateActivity checks an `activity:` block on its own; the checks
