@@ -163,7 +163,7 @@ func (c *Config) Validate() error {
 	}
 
 	// Mode check: exactly one of screen / screens.
-	hasSingle := c.TUI.Screen.Layout.set() > 0
+	hasSingle := c.TUI.Screen.HasContent()
 	hasMulti := len(c.TUI.Screens) > 0
 	switch {
 	case hasSingle && hasMulti:
@@ -173,22 +173,7 @@ func (c *Config) Validate() error {
 	}
 
 	if hasSingle {
-		refs := map[string]int{}
-		if err := c.TUI.Screen.Layout.validate("tui.screen.layout", c.TUI.Components, refs); err != nil {
-			return err
-		}
-		for name, n := range refs {
-			if n > 1 {
-				return fmt.Errorf("tui.components.%s: referenced %d times in tui.screen.layout — each component may be placed only once per screen", name, n)
-			}
-		}
-		if err := validateActionBindings(c.TUI.Screen.Actions, refs, c.TUI.Components, c.Actions, "tui.screen", &c.App); err != nil {
-			return err
-		}
-		if err := validateOnCursor(refs, c.TUI.Components, "tui.screen"); err != nil {
-			return err
-		}
-		return nil
+		return c.validateScreen("tui.screen", &c.TUI.Screen)
 	}
 
 	// Multi-screen.
@@ -202,23 +187,90 @@ func (c *Config) Validate() error {
 		if s == nil {
 			return fmt.Errorf("tui.screens.%s: empty definition", name)
 		}
-		refs := map[string]int{}
-		if err := s.Layout.validate("tui.screens."+name+".layout", c.TUI.Components, refs); err != nil {
-			return err
-		}
-		for cname, n := range refs {
-			if n > 1 {
-				return fmt.Errorf("tui.screens.%s: components.%s referenced %d times — each component may be placed only once per screen", name, cname, n)
-			}
-		}
-		if err := validateActionBindings(s.Actions, refs, c.TUI.Components, c.Actions, fmt.Sprintf("tui.screens.%s", name), &c.App); err != nil {
-			return err
-		}
-		if err := validateOnCursor(refs, c.TUI.Components, fmt.Sprintf("tui.screens.%s", name)); err != nil {
+		if err := c.validateScreen("tui.screens."+name, s); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// validateScreen checks one screen: its layout and bindings, or, for a
+// tabbed screen, the strip settings and each tab as a screen of its own.
+func (c *Config) validateScreen(path string, s *Screen) error {
+	if len(s.Tabs) == 0 {
+		for field, set := range map[string]bool{
+			"strip_pos": s.StripPos != "", "initial": s.Initial != "",
+			"prev_key": s.PrevKey != "", "next_key": s.NextKey != "", "number_keys": s.NumberKeys != nil,
+		} {
+			if set {
+				return fmt.Errorf("%s: `%s:` only applies to a screen with `tabs:`", path, field)
+			}
+		}
+		return c.validatePane(path, &s.Layout, s.Actions)
+	}
+	if s.Layout.set() > 0 {
+		return fmt.Errorf("%s: set `layout:` or `tabs:`, not both — each tab has its own layout", path)
+	}
+	if len(s.Actions) > 0 {
+		return fmt.Errorf("%s: a tabbed screen has no `actions:` of its own — declare them on each tab (the top-level actions: registry and YAML anchors cover repetition)", path)
+	}
+	switch s.StripPos {
+	case "", "top", "bottom":
+	default:
+		return fmt.Errorf("%s.strip_pos: %q (want top|bottom)", path, s.StripPos)
+	}
+	shell := c.App.shellKeys()
+	for field, k := range map[string]string{"prev_key": s.PrevKey, "next_key": s.NextKey} {
+		if k == "" || k == "-" {
+			continue
+		}
+		if why, bad := reservedKeys[k]; bad {
+			return fmt.Errorf("%s.%s: key %q is reserved — it %s", path, field, k, why)
+		}
+		for _, sk := range shell {
+			if k == sk.key {
+				return fmt.Errorf("%s.%s: key %q %s — %s", path, field, k, sk.does, sk.fix)
+			}
+		}
+	}
+	labels := map[string]int{}
+	for i, t := range s.Tabs {
+		tp := fmt.Sprintf("%s.tabs[%d]", path, i)
+		if t.Label == "" {
+			return fmt.Errorf("%s: `label:` is required", tp)
+		}
+		if prev, dup := labels[t.Label]; dup {
+			return fmt.Errorf("%s: label %q is already used by tabs[%d]", tp, t.Label, prev)
+		}
+		labels[t.Label] = i
+		// Each tab builds its own components, so the same component may
+		// appear in two tabs; within a tab the usual rules apply.
+		if err := c.validatePane(tp, &t.Layout, t.Actions); err != nil {
+			return err
+		}
+	}
+	if _, ok := labels[s.Initial]; s.Initial != "" && !ok {
+		return fmt.Errorf("%s.initial: %q is not a tab label", path, s.Initial)
+	}
+	return nil
+}
+
+// validatePane checks a layout and the bindings that act on it: a whole
+// screen, or one tab.
+func (c *Config) validatePane(path string, layout *Node, actions []ActionBinding) error {
+	refs := map[string]int{}
+	if err := layout.validate(path+".layout", c.TUI.Components, refs); err != nil {
+		return err
+	}
+	for name, n := range refs {
+		if n > 1 {
+			return fmt.Errorf("%s: components.%s placed %d times — each component may be placed only once per screen", path, name, n)
+		}
+	}
+	if err := validateActionBindings(actions, refs, c.TUI.Components, c.Actions, path, &c.App); err != nil {
+		return err
+	}
+	return validateOnCursor(refs, c.TUI.Components, path)
 }
 
 // validateOnCursor checks every layout-participating component's

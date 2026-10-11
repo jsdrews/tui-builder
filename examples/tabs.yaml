@@ -1,0 +1,91 @@
+# tabs.yaml — a tabbed screen.
+#
+# `tabs:` replaces `layout:`. Each tab is a small screen of its own —
+# a label, a layout, actions — shown one at a time under a strip:
+#
+#   shift+left / shift+right   previous / next tab
+#   1–9                        jump straight to a tab
+#   click                      a tab in the strip
+#
+# Keys go to the active tab: tab / shift+tab move focus inside it, and
+# its own bindings fire. A hidden tab first fetches when you open it,
+# then keeps polling while hidden — the Events tab's clock keeps ticking
+# while you're on Pods. The breadcrumb stays "Cluster": switching tabs
+# isn't moving between screens.
+app:
+  title: Tabs
+  theme: nord
+
+actions:
+  describe:
+    description: Echo the focused pod
+    inputs:
+      name: {required: true}
+    run: [echo, "pod ${inputs.name}"]
+
+data:
+  sources:
+    pods:
+      type: static
+      data:
+        - {name: web-7f9c, status: Running, node: node-a}
+        - {name: api-5d2b, status: CrashLoopBackOff, node: node-b}
+        - {name: db-0, status: Running, node: node-c}
+    services:
+      type: static
+      data:
+        - {name: web, type: LoadBalancer, port: 443}
+        - {name: api, type: ClusterIP, port: 8080}
+    events:
+      type: exec
+      refresh: 2s
+      format: text
+      command: [sh, -c, "date '+%H:%M:%S  heartbeat from the Events tab'"]
+
+tui:
+  components:
+    pods_table:
+      type: table
+      title: Pods
+      source: pods
+      columns:
+        - {title: Name, value: name, flex: 1}
+        - title: Status
+          value: status
+          color_rules:
+            - {when: Running, color: green}
+            - {when: "~Crash", color: red}
+        - {title: Node, value: node}
+    pod_detail:
+      type: inspector
+      title: First pod
+      source: pods
+      auto: true
+    services_table:
+      type: table
+      title: Services
+      source: services
+      columns:
+        - {title: Name, value: name, flex: 1}
+        - {title: Type, value: type}
+        - {title: Port, value: port, align: right}
+    events_log:
+      type: logview
+      title: Events
+      source: events
+
+  screen:
+    title: Cluster
+    initial: Pods
+    tabs:
+      - label: Pods
+        layout:
+          hstack:
+            - {flex: 2, component: pods_table}
+            - {flex: 1, component: pod_detail}
+        actions:
+          - {key: enter, action: describe, from: pods_table, bind: {name: "${selection}"}}
+      - label: Services
+        layout: {component: services_table}
+      - label: Events
+        layout: {component: events_log}

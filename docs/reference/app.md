@@ -241,10 +241,12 @@ app:
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
 | `title` | template | — | — | Shown in the breadcrumb. On a pushed screen it can use `${selection…}` from the row that opened it. |
-| `layout` | node | — | required | The root of the screen's layout tree. |
-| `actions` | list of binding | — | — | Action bindings: which actions this screen offers, on which keys, fed by which component's selection. See [actions.md](actions.md#bindings). |
+| `layout` | node | — | one of `layout` / `tabs` | The root of the screen's layout tree. |
+| `actions` | list of binding | — | not with `tabs` | Action bindings: which actions this screen offers, on which keys, fed by which component's selection. See [actions.md](actions.md#bindings). |
+| `tabs` | list | — | one of `layout` / `tabs` | Makes this a tabbed screen. See [tabs](#tabs). |
 
-**Validation:** each component may be placed at most once per screen.
+**Validation:** each component may be placed at most once per screen (per
+tab, on a tabbed screen).
 
 A pushed screen's sources can take values from the row that opened it,
 either by `${selection…}` tokens in their URL, argv or body, or through
@@ -264,6 +266,58 @@ tui:
       title: "${selection}'s repos"
       layout: {component: repos_table}
 ```
+
+### Tabs
+
+A screen can hold tabs instead of one layout. Each tab is a small screen
+of its own, with a label, a layout and actions, shown one at a time under
+a strip.
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `label` | string | — | required | The tab's name in the strip. Unique within the screen. |
+| `layout` | node | — | required | The tab's layout tree. |
+| `actions` | list of binding | — | — | The tab's own bindings; `from:` names a component in this tab. |
+
+The strip is set on the screen, beside `tabs:`:
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `strip_pos` | string | `top` | `tabs` | `top` or `bottom`. |
+| `initial` | string | the first tab | `tabs` | The label of the tab the screen opens on. |
+| `prev_key` | string | `shift+left` | `tabs` | Switches to the previous tab. `-` turns it off. |
+| `next_key` | string | `shift+right` | `tabs` | Switches to the next tab. `-` turns it off. |
+| `number_keys` | bool | `true` | `tabs` | `1`–`9` jump straight to a tab. |
+
+Keys and clicks go to the active tab; `tab` / `shift+tab` move focus
+within it. A tab first fetches when it's first opened, then keeps
+polling while hidden, and switching back doesn't refetch. Each tab keeps
+its own sources, so a source bound in two tabs is fetched twice, as on
+two pushed screens; put a `cache` operator in front to share one fetch.
+The breadcrumb shows the screen's `title:`, since switching tabs isn't
+moving between screens. A push from inside a tab keeps the tabs
+underneath it.
+
+```yaml
+tui:
+  screen:
+    title: Cluster
+    initial: Services
+    tabs:
+      - label: Pods
+        layout: {component: pods_table}
+        actions:
+          - {key: enter, action: describe_pod, from: pods_table, bind: {name: "${selection}"}}
+      - label: Services
+        layout: {component: services_table}
+```
+
+**Validation:** `tabs:` and `layout:` are exclusive, and a tabbed screen
+has no `actions:` of its own. Each tab needs a unique `label` and a
+layout. `initial` must be a label, `strip_pos` is `top` or `bottom`, and
+a switch key can't be one the shell or the screen already owns. The
+strip fields are errors without `tabs:`. The same component may appear in
+two tabs; each builds its own copy.
 
 ## Layout nodes
 

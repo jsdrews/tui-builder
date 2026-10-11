@@ -67,27 +67,31 @@ var menuKeys = map[string]string{
 //
 // Called from Load before Validate, so validation sees the hoisted shape.
 func hoistInlineActions(c *Config) error {
-	screens := map[string]*Screen{}
-	if c.TUI.Screen.Layout.set() > 0 {
-		screens["tui.screen"] = &c.TUI.Screen
+	lists := map[string]*[]ActionBinding{}
+	if c.TUI.Screen.HasContent() {
+		for p, l := range c.TUI.Screen.Bindings("tui.screen") {
+			lists[p] = l
+		}
 	}
 	for name, s := range c.TUI.Screens {
 		if s != nil {
-			screens["tui.screens."+name] = s
+			for p, l := range s.Bindings("tui.screens." + name) {
+				lists[p] = l
+			}
 		}
 	}
 	// Deterministic order so a config with two colliding inline names
 	// reports the same one every run.
-	paths := make([]string, 0, len(screens))
-	for p := range screens {
+	paths := make([]string, 0, len(lists))
+	for p := range lists {
 		paths = append(paths, p)
 	}
 	sort.Strings(paths)
 
 	for _, path := range paths {
-		s := screens[path]
-		for i := range s.Actions {
-			b := &s.Actions[i]
+		actions := *lists[path]
+		for i := range actions {
+			b := &actions[i]
 			if !b.IsInline() {
 				continue
 			}

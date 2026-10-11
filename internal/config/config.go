@@ -561,11 +561,54 @@ type Screen struct {
 	// Title shows in the breadcrumb. May contain ${selection} tokens
 	// when this screen is reachable via a push action.
 	Title string `yaml:"title,omitempty"`
-	// Layout is the root of the layout tree. Required.
-	Layout Node `yaml:"layout"`
+	// Layout is the root of the layout tree. Exactly one of Layout and
+	// Tabs.
+	Layout Node `yaml:"layout,omitempty"`
 	// Actions bind keys to entries in the top-level `actions:`
-	// registry, or declare one inline. See ActionBinding.
+	// registry, or declare one inline. See ActionBinding. A tabbed
+	// screen has none of its own; each tab declares its actions.
 	Actions []ActionBinding `yaml:"actions,omitempty"`
+
+	// Tabs makes this a tabbed screen: each tab is a small screen of its
+	// own (label, layout, actions), shown one at a time under a strip.
+	// Hidden tabs keep polling; keys go to the active one. The fields
+	// below configure the strip and only apply with Tabs.
+	Tabs []Tab `yaml:"tabs,omitempty"`
+	// StripPos puts the tab strip at the "top" (default) or "bottom".
+	StripPos string `yaml:"strip_pos,omitempty"`
+	// Initial is the label of the tab the screen opens on. Defaults to
+	// the first.
+	Initial string `yaml:"initial,omitempty"`
+	// PrevKey / NextKey switch tabs. Default shift+left / shift+right;
+	// "-" turns one off.
+	PrevKey string `yaml:"prev_key,omitempty"`
+	NextKey string `yaml:"next_key,omitempty"`
+	// NumberKeys: false turns off 1–9 jumping straight to a tab.
+	NumberKeys *bool `yaml:"number_keys,omitempty"`
+}
+
+// Tab is one tab of a tabbed screen.
+type Tab struct {
+	// Label names the tab in the strip. Unique within the screen.
+	Label string `yaml:"label"`
+	// Layout is the tab's layout tree, as a screen's would be.
+	Layout Node `yaml:"layout"`
+	// Actions are the tab's own bindings; `from:` names a component in
+	// this tab.
+	Actions []ActionBinding `yaml:"actions,omitempty"`
+}
+
+// HasContent reports whether s declares a layout or tabs.
+func (s *Screen) HasContent() bool { return s.Layout.set() > 0 || len(s.Tabs) > 0 }
+
+// Bindings returns every action-binding list s declares, with its config
+// path: the screen's own, then each tab's.
+func (s *Screen) Bindings(path string) map[string]*[]ActionBinding {
+	out := map[string]*[]ActionBinding{path: &s.Actions}
+	for i := range s.Tabs {
+		out[fmt.Sprintf("%s.tabs[%d]", path, i)] = &s.Tabs[i].Actions
+	}
+	return out
 }
 
 // ActionMenuKey returns the action-menu key with the default applied,

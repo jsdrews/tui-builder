@@ -87,9 +87,9 @@ func run() error {
 			Sources:    c.Data.Sources,
 			Actions:    c.Actions,
 		}
-		root, err = tqscreen.NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, initial)
+		root, err = tqscreen.BuildMulti(c.TUI.Initial, multi, build.Selection{}, nil, initial)
 	} else {
-		root, err = tqscreen.New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, initial)
+		root, err = tqscreen.Build(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, initial)
 	}
 	if err != nil {
 		return err
