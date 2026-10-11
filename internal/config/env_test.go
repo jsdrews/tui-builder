@@ -238,7 +238,7 @@ func TestCollectEnvRefsWalksAllTemplatedFields(t *testing.T) {
 			Screen: Screen{
 				Title: "${env.SCREEN_TITLE}",
 				Actions: []ActionBinding{
-					{Key: "x", Action: "a", Confirm: "${env.CONFIRM_MSG}", Notice: "${env.NOTICE_MSG}"},
+					{Key: "x", Action: "a", Confirm: Confirm{Message: "${env.CONFIRM_MSG}"}, Notice: "${env.NOTICE_MSG}"},
 				},
 			},
 			Components: map[string]*Component{

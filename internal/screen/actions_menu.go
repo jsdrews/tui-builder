@@ -42,6 +42,7 @@ func (m *Model) Actions() taction.Set {
 	}
 	cur := m.current()
 	target, count := m.selectionTarget(cur)
+	targets := selectionKeys(cur)
 
 	out := make([]taction.Action, 0, len(m.actions))
 	for _, b := range m.actions {
@@ -51,7 +52,7 @@ func (m *Model) Actions() taction.Set {
 		}
 		out = append(out, m.menuAction(b, def, cur, focused))
 	}
-	return taction.Set{Target: target, Count: count, Actions: out}
+	return taction.Set{Target: target, Count: count, Targets: targets, Actions: out}
 }
 
 // selectionTarget names what the verbs will act on, and how many.
@@ -60,6 +61,28 @@ func (m *Model) Actions() taction.Set {
 // the way tuilib's Selection does), falling back to the focused row for
 // components that carry no keys — an unmarkable list still has a
 // selection, it just isn't a set.
+// selectionKeys are the row keys the verbs will act on: the marked rows,
+// else the focused one. They let the shell hold "exclusive" per row, so
+// restarting web while api restarts is fine and restarting web twice
+// isn't. nil when the rows have no keys.
+func selectionKeys(c *build.Component) []string {
+	if c == nil {
+		return nil
+	}
+	var keys []string
+	for _, s := range build.MarkedSelections(c) {
+		if s.Key != "" {
+			keys = append(keys, s.Key)
+		}
+	}
+	if len(keys) == 0 {
+		if s := selectionFrom(c); s.Key != "" {
+			keys = []string{s.Key}
+		}
+	}
+	return keys
+}
+
 func (m *Model) selectionTarget(c *build.Component) (string, int) {
 	if c == nil {
 		return "", 0
@@ -88,6 +111,10 @@ func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Comp
 	a := taction.Action{
 		Label: menuLabel(b, def),
 		Desc:  def.Description,
+		// The registry name, so two screens that label one action
+		// differently still share its "exclusive" check, and two
+		// actions that share a label don't.
+		ID: b.Action,
 	}
 	// Any key but enter is a shortcut inside the menu: tuilib draws it in
 	// the right-hand column and runs it while the menu is open. enter
@@ -146,11 +173,11 @@ func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Comp
 		return a
 	}
 	vals := resolved.Values()
-	if b.Confirm != "" {
+	if b.Confirm.Message != "" {
 		// Substituted against the RESOLVED values, so an input carrying
 		// a default previews what will actually run rather than an
 		// empty string.
-		msg := build.SubstituteAll([]string{b.Confirm}, sel, vals)[0]
+		msg := build.SubstituteAll([]string{b.Confirm.Message}, sel, vals)[0]
 		// Under a fan-out the author's template resolved against ONE
 		// row, so on its own it would say "Delete web?" while deleting
 		// three. Say the arity rather than rewriting their sentence:

@@ -288,7 +288,10 @@ type ActionBinding struct {
 	// This is the one blocking interrupt left in the action flow, and
 	// it's deliberately a pre-action gate rather than a result report:
 	// the moment to stop someone is before the delete, not after.
-	Confirm string `yaml:"confirm,omitempty"`
+	//
+	// A string is the message; the map form also picks the button the
+	// modal starts on. See Confirm.
+	Confirm Confirm `yaml:"confirm,omitempty"`
 	// Notice is printed once after the TUI suspends and before an
 	// interactive subprocess starts. Only meaningful with Interactive.
 	Notice string `yaml:"notice,omitempty"`

@@ -39,7 +39,7 @@ func orderConfig() *cfg.Config {
 					Action:  "order",
 					Label:   "order",
 					From:    "fruits",
-					Confirm: "Order ${inputs.amount} ${selection}(s) as ${inputs.priority} priority?",
+					Confirm: cfg.Confirm{Message: "Order ${inputs.amount} ${selection}(s) as ${inputs.priority} priority?"},
 					Bind:    map[string]string{"fruit": "${selection}"},
 				}},
 			},

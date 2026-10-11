@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"os/exec"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -1372,10 +1371,10 @@ func (m *Model) actionAfterInputs(b cfg.ActionBinding, def *cfg.Action, sel buil
 	if def.Multi && len(sels) > 1 {
 		a := m.menuAction(b, def, m.current(), b.From)
 		fan := func() tea.Cmd { return m.fanOut(b, def, a, sels, inputs) }
-		if b.Confirm != "" {
-			msg := build.SubstituteAll([]string{b.Confirm}, sel, inputs)[0]
+		if b.Confirm.Message != "" {
+			msg := build.SubstituteAll([]string{b.Confirm.Message}, sel, inputs)[0]
 			msg = fmt.Sprintf("%s\n\nRuns %d times, once per marked row.", msg, len(sels))
-			modal := m.newConfirmModal(labelOr(b.Label, b.Action), msg)
+			modal := m.newConfirmModal(labelOr(b.Label, b.Action), msg, b.Confirm.Default == "yes")
 			m.confirmModal = &modal
 			m.pendingFan = fan
 			return nil
@@ -1398,9 +1397,9 @@ func (m *Model) actionAfterInputs(b cfg.ActionBinding, def *cfg.Action, sel buil
 				Label: label, Detail: label + " · " + sel.String, Tag: tag, Run: runFunc(resolved),
 			})
 		}
-		if b.Confirm != "" {
-			msg := build.SubstituteAll([]string{b.Confirm}, sel, resolved.Values())[0]
-			modal := m.newConfirmModal(label, msg)
+		if b.Confirm.Message != "" {
+			msg := build.SubstituteAll([]string{b.Confirm.Message}, sel, resolved.Values())[0]
+			modal := m.newConfirmModal(label, msg, b.Confirm.Default == "yes")
 			m.confirmModal = &modal
 			m.pendingFan = launch
 			return nil
@@ -1414,9 +1413,9 @@ func (m *Model) actionAfterInputs(b cfg.ActionBinding, def *cfg.Action, sel buil
 	vals := resolved.Values()
 	notice := build.SubstituteAll([]string{b.Notice}, sel, vals)[0]
 
-	if b.Confirm != "" {
-		msg := build.SubstituteAll([]string{b.Confirm}, sel, vals)[0]
-		modal := m.newConfirmModal(labelOr(b.Label, b.Action), msg)
+	if b.Confirm.Message != "" {
+		msg := build.SubstituteAll([]string{b.Confirm.Message}, sel, vals)[0]
+		modal := m.newConfirmModal(labelOr(b.Label, b.Action), msg, b.Confirm.Default == "yes")
 		m.confirmModal = &modal
 		m.pendingResolved = resolved
 		m.pendingNotice = notice
@@ -1609,100 +1608,11 @@ func (m *Model) newInputForm(def *cfg.Action, names []string) form.Model {
 	fields := make([]form.Field, len(names))
 	for i, name := range names {
 		p := def.Inputs[name]
-		switch {
-		case len(p.Options) > 0:
-			fields[i] = form.Select(form.SelectOptions{
-				Key:     name,
-				Label:   labelOr(p.Label, name),
-				Options: append([]string(nil), p.Options...),
-				Initial: indexOf(p.Options, p.Default),
-			})
-		case p.Type == "bool":
-			fields[i] = form.Confirm(form.ConfirmOptions{
-				Key:     name,
-				Label:   labelOr(p.Label, name),
-				Initial: p.Default == "true",
-			})
-		case p.Mask:
-			// Display-only, like the boot form: the value substitutes
-			// into the argv as the real string. Required/Validate are
-			// deliberately not wired here — a masked field showing a
-			// validation reason next to bullets is worse than the load
-			// -time check the binding already gets.
-			fields[i] = form.Password(form.PasswordOptions{
-				Key:         name,
-				Label:       labelOr(p.Label, name),
-				Placeholder: p.Placeholder,
-				Initial:     p.Default,
-				MaskChar:    build.MaskChar(),
-			})
-		default:
-			// Required and Validate are the form's own enforcement:
-			// submit refuses, the label gains a "*", and the offending
-			// field's border tints with the reason written on it. Without
-			// wiring these, `required: true` would be checked at load
-			// (the binding must bind it or make it promptable) and then
-			// silently pass an empty string into the argv at runtime.
-			fields[i] = form.Text(form.TextOptions{
-				Key:         name,
-				Label:       labelOr(p.Label, name),
-				Placeholder: p.Placeholder,
-				Initial:     p.Default,
-				Required:    p.Required,
-				Validate:    ValidatorFor(p.Type),
-			})
-		}
+		fields[i] = build.FormField(name, labelOr(p.Label, name), *p, p.Default)
 	}
 	opts := build.FormOptions(m.th).With(fields)
 	opts.SubmitText = "Run"
 	return form.New(opts)
-}
-
-// ValidatorFor turns an input's declared data type into the form's
-// per-field validator. Returns nil for types with nothing to check —
-// the form treats a nil Validate as "always acceptable".
-//
-// An empty value is left to Required: this runs after it, so a blank
-// optional field stays blank rather than failing a format check it was
-// never obliged to satisfy.
-func ValidatorFor(typ string) func(any) error {
-	switch typ {
-	case "int":
-		return func(v any) error {
-			s, _ := v.(string)
-			if s == "" {
-				return nil
-			}
-			if _, err := strconv.Atoi(s); err != nil {
-				return fmt.Errorf("must be a whole number")
-			}
-			return nil
-		}
-	case "duration":
-		return func(v any) error {
-			s, _ := v.(string)
-			if s == "" {
-				return nil
-			}
-			if _, err := time.ParseDuration(s); err != nil {
-				return fmt.Errorf("must be a duration, e.g. 30s or 5m")
-			}
-			return nil
-		}
-	}
-	return nil
-}
-
-// indexOf finds want in opts, or 0. Used to turn a select input's
-// Default (an option string) into the starting index the widget wants,
-// so authors express the default the same way for every input type.
-func indexOf(opts []string, want string) int {
-	for i, o := range opts {
-		if o == want {
-			return i
-		}
-	}
-	return 0
 }
 
 func labelOr(s, fallback string) string {
@@ -1750,8 +1660,11 @@ const (
 // (m.confirmW / m.confirmH) are recorded for Layout() — the confirm
 // component neither wraps nor self-measures, so without this a long
 // message clips to a single hardcoded-width line.
-func (m *Model) newConfirmModal(label, message string) confirm.Model {
+func (m *Model) newConfirmModal(label, message string, startOnYes bool) confirm.Model {
 	opts := m.th.Confirm()
+	// Cancel starts highlighted unless the binding says `default: yes` —
+	// the safe side for a destructive action.
+	opts.Initial = startOnYes
 	if label == "" {
 		label = "Confirm"
 	}

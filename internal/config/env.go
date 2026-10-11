@@ -313,7 +313,7 @@ func walkTemplates(c *Config, fn func(*string)) {
 func visitScreen(s *Screen, fn func(*string)) {
 	fn(&s.Title)
 	for i := range s.Actions {
-		fn(&s.Actions[i].Confirm)
+		fn(&s.Actions[i].Confirm.Message)
 		fn(&s.Actions[i].Notice)
 		for k, v := range s.Actions[i].Bind {
 			str := v

@@ -54,6 +54,7 @@ var referencePages = map[string][]string{
 	"Action":         {"actions.md"},
 	"ActionBinding":  {"actions.md"},
 	"Claim":          {"actions.md"},
+	"Confirm":        {"actions.md"},
 }
 
 // Fields documented as sub-keys of their parent's row rather than with a

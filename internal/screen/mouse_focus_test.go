@@ -152,7 +152,7 @@ func TestEnterFiresActionBoundToEnter(t *testing.T) {
 		Action:  "order",
 		Label:   "order",
 		From:    "names",
-		Confirm: "Order ${selection}?",
+		Confirm: cfg.Confirm{Message: "Order ${selection}?"},
 	}}
 	c.Actions = map[string]*cfg.Action{
 		"order": {Run: []string{"echo", "hello"}},

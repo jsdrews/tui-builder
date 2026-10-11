@@ -179,16 +179,18 @@ A prompt is a `key` plus the same field vocabulary an action input uses
 | `type` | string | `string` | — | The data type: `string`, `int`, `bool` or `duration`. It also picks the widget: `bool` is a yes/no toggle, anything else a text input, unless `options:` makes it a select. |
 | `label` | string | the key | — | The field's caption. |
 | `default` | string | — | not with `required` | The starting value. For `bool`, `"true"` / `"false"`; with `options:`, one of the options. |
-| `required` | bool | `false` | not with `default` | The form won't submit while the field is empty. |
+| `required` | bool | `false` | not with `default` | The form won't submit while the field is empty. On a select, nothing starts highlighted, so the answer is picked on purpose. |
 | `description` | string | — | — | One-line summary, shown by `wrangl --describe`. |
 | `placeholder` | string | — | text inputs | Hint shown inside an empty text input. |
 | `options` | list of string | — | not with `mask` | Turns the field into a select over these values. |
 | `mask` | bool | `false` | not with `options` | Shows typed characters as bullets. Display only: the value is still the real string everywhere else. |
 | `order` | int | `0` | — | Sort position in the form. Ties break alphabetically. |
+| `validate` | expr | — | — | An expression over `value`, true when the answer is acceptable; the form won't submit until it is. See [action inputs](actions.md#inputs). |
+| `invalid` | string | `not accepted` | `validate` | The message shown when `validate` is false. |
 
 **Validation:** `key` is required; `type` must be one of the four data
 types; `required` and `default` are mutually exclusive; `mask` and
-`options` conflict.
+`options` conflict; `validate` must compile, and `invalid` needs it.
 
 ```yaml
 app:
