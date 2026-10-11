@@ -221,3 +221,28 @@ func TestDoRoundTrip(t *testing.T) {
 		t.Errorf("result = %+v", res)
 	}
 }
+
+// A claiming action's default summary says what the reply means.
+func TestClaimDefaultsTheSuccessMessage(t *testing.T) {
+	for until, want := range map[string]string{"": "Restarting completed", "status": "Restarting requested"} {
+		def := &cfg.Action{Run: []string{"true"}, Claim: &cfg.Claim{Label: "Restarting", Until: until}}
+		r, err := Resolve(def, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := r.Finish(0, "").Summary; got != want {
+			t.Errorf("until %q: summary = %q, want %q", until, got, want)
+		}
+		if got := r.Receipt(); got != want {
+			t.Errorf("until %q: receipt = %q, want %q", until, got, want)
+		}
+	}
+	def := &cfg.Action{Run: []string{"true"}, Message: "done: ${code}", Claim: &cfg.Claim{Label: "Restarting"}}
+	r, _ := Resolve(def, nil)
+	if got := r.Finish(0, "").Summary; got != "done: 0" {
+		t.Errorf("message: should win over the claim default, got %q", got)
+	}
+	if r.Receipt() != "" {
+		t.Error("with a message: template the receipt is left to the shell")
+	}
+}

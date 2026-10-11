@@ -57,6 +57,7 @@ reason. `enter` (or a double click) fires its binding directly.
 | `error_message` | template | last stderr line (exec), status code (http) | exec, http | Summary on failure; same tokens. For JSON APIs, `${body.message}` (or wherever the API puts its reason) beats a bare status code. |
 | `multi` | bool | `false` | exec, http | Runs over every marked row: one run per row, each tracked, cancellable and logged on its own. With `false`, the action is shown disabled while several rows are marked, rather than picking one. |
 | `exclusive` | bool | `true` on http, `false` otherwise | — | Refuses a second run against a target it's already running on; the menu shows why until the first finishes. Other targets are unaffected. |
+| `claim` | string or map | — | exec, http; not push or interactive | Makes the rows this action targets spin from the moment it starts, on a component with `activity:`. See [claims](#claims). |
 
 **Validation:**
 
@@ -76,6 +77,52 @@ actions:
     success: code < 400 or code == 409
     error_message: ${body.message}
 ```
+
+## Claims
+
+Without a claim, a row on an [`activity:`](components.md#activity)
+component starts spinning only when the next poll reports it busy. A
+claim covers that gap: the targeted rows spin as soon as the action
+starts (after any confirm), labelled with the claim, until the data can
+take over.
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `label` | string | — | required | Shown beside the spinner. Use the server's own word for the work (`Running`), so the row reads the same from the keypress to the poll that confirms it. `claim: Restarting` is shorthand for `{label: Restarting}`. |
+| `until` | string | `done` | — | Who knows when the work ends. `done`: the action does; the claim ends when it returns (a command that blocks until it's finished). `status`: the server does; the action only acknowledges (an HTTP 202), and the claim hands over to the polled status. |
+| `settle` | int | `1` | `until: status` | How many reads may repeat the status from before the action before the claim gives up, for a server that reports new work late. Each claim has its own, so a slow verb's allowance doesn't hold up a fast one on the same component. |
+
+- **Targets** are the binding's selection: the marked rows, or the cursor
+  row, of its `from:` component, which must have `activity:`.
+- **Fan-out** (`multi: true`) makes one claim per row, so a row whose run
+  fails stops on its own.
+- **A failed run** (non-zero exit, HTTP error) withdraws the claim at once;
+  the error is reported as usual.
+- **Finished between polls.** When an `until: status` claim ends without
+  any read seeing the row busy, the console says so (`sync web: no change
+  observed`, or `finished between polls` when the status moved), so the
+  action doesn't look ignored.
+- **Success message.** Without `message:`, a claiming action reports
+  "<label> requested" for `until: status` (the work has only started)
+  and "<label> completed" for `until: done`.
+
+```yaml
+actions:
+  restart:
+    run: [kubectl, rollout, restart, "deploy/${inputs.name}", --wait]
+    inputs: {name: {required: true}}
+    claim: Restarting                 # until: done
+  sync:
+    type: http
+    url: ${env.ARGOCD_URL}/api/v1/applications/${inputs.app}/sync
+    inputs: {app: {required: true}}
+    claim: {label: Running, until: status, settle: 2}
+```
+
+**Validation:** `label` is required; `until` is `done` or `status`;
+`settle` only with `until: status`. A claiming action can't be a push,
+and a binding that fires one needs `from:` naming a component with
+`activity:`, and can't be `interactive`.
 
 ## Inputs
 

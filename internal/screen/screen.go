@@ -190,7 +190,11 @@ type Model struct {
 	formModal *form.Model
 	// inspectModal shows an eventlog item's raw data when enter has no
 	// action bound to it. esc closes it.
-	inspectModal   *inspector.Model
+	inspectModal *inspector.Model
+	// claims maps a run tag to the claim its run opens; claimOps finds an
+	// open claim by operation, for activity.UnobservedMsg. See claims.go.
+	claims         map[string]*claimRun
+	claimOps       map[uint64]*claimRun
 	pendingBinding cfg.ActionBinding
 	pendingInputs  action.Inputs
 	pendingSel     build.Selection
@@ -598,7 +602,19 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		// the subprocess owned the terminal and printed straight to it —
 		// so the exit status is the whole report.
 		return m, m.actionOutcome(x.Err)
+	case runner.CaptureStarted:
+		if cmd := m.openClaim(x.Tag); cmd != nil {
+			return m, cmd
+		}
+	case activity.UnobservedMsg:
+		return m, m.unobserved(x)
 	case runner.Captured:
+		// A claimed run: the rows' claim learns the outcome. The run's
+		// summary already streamed into the console and the shell posts
+		// the receipt, so there's nothing more to report.
+		if cmd, ok := m.closeClaim(x.Tag, x.Err); ok {
+			return m, cmd
+		}
 		if !m.ownsRun(x.Cmd) {
 			return m, nil
 		}
@@ -1284,6 +1300,26 @@ func (m *Model) actionAfterInputs(b cfg.ActionBinding, def *cfg.Action, sel buil
 	if err != nil {
 		return app.Error(fmt.Sprintf("%s: %v", b.Action, err))
 	}
+	// A claiming action goes out as a tagged run, so its start and end
+	// can open and close the rows' claim. Confirm first, like any other.
+	if def.Claim != nil {
+		tag := newClaimTag(b.Action)
+		m.registerClaim(tag, b.From, claimKeys(sels), def, b.Action, resolved.Receipt())
+		label := labelOr(b.Label, b.Action)
+		launch := func() tea.Cmd {
+			return runner.GoWith(runner.GoOptions{
+				Label: label, Detail: label + " · " + sel.String, Tag: tag, Run: runFunc(resolved),
+			})
+		}
+		if b.Confirm != "" {
+			msg := build.SubstituteAll([]string{b.Confirm}, sel, resolved.Values())[0]
+			modal := m.newConfirmModal(label, msg)
+			m.confirmModal = &modal
+			m.pendingFan = launch
+			return nil
+		}
+		return launch()
+	}
 	// Preview text substitutes the RESOLVED values, not the raw bind map:
 	// defaults are applied inside Resolve, so an input with a default
 	// would otherwise render empty in the confirm while the argv got the
@@ -1714,7 +1750,7 @@ func selectionFrom(c *build.Component) build.Selection {
 	switch c.Kind {
 	case build.KList:
 		s, _ := c.List.Selected()
-		return build.Selection{String: xansi.Strip(s)}
+		return build.Selection{String: xansi.Strip(s), Key: build.CursorKey(c)}
 	case build.KTable:
 		row, _ := c.Table.Selected()
 		cells := make([]string, len(row))
@@ -1729,7 +1765,7 @@ func selectionFrom(c *build.Component) build.Selection {
 		if len(cells) > 0 {
 			first = cells[0]
 		}
-		return build.Selection{String: first, Cells: cells, Columns: titles}
+		return build.Selection{String: first, Cells: cells, Columns: titles, Key: build.CursorKey(c)}
 	case build.KEventlog:
 		it, ok := c.Eventlog.Selected()
 		if !ok || it.Hole {

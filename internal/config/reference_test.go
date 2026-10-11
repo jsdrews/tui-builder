@@ -51,6 +51,7 @@ var referencePages = map[string][]string{
 	"JoinLookup":     {"pipelines.md"},
 	"Action":         {"actions.md"},
 	"ActionBinding":  {"actions.md"},
+	"Claim":          {"actions.md"},
 }
 
 // Fields documented as sub-keys of their parent's row rather than with a
