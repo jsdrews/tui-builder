@@ -87,15 +87,13 @@ func (t *Tree) RenderNode() layout.Node {
 		case n.VStack != nil:
 			items := make([]layout.Item, len(n.VStack))
 			for i, it := range n.VStack {
-				items[i] = sizing(it.Flex, it.Fixed, visit(&n.VStack[i].Node))
-				_ = it
+				items[i] = sizing(it.Flex, t.fixedFor(it), visit(&n.VStack[i].Node))
 			}
 			return layout.VStack(items...)
 		case n.HStack != nil:
 			items := make([]layout.Item, len(n.HStack))
 			for i, it := range n.HStack {
 				items[i] = sizing(it.Flex, it.Fixed, visit(&n.HStack[i].Node))
-				_ = it
 			}
 			return layout.HStack(items...)
 		case n.ZStack != nil:
@@ -106,6 +104,18 @@ func (t *Tree) RenderNode() layout.Node {
 		return layout.RenderFunc(func(geom.Rect) string { return "" })
 	}
 	return visit(t.Root)
+}
+
+// fixedFor is a vstack item's fixed height: its own, or an input's or
+// toggle's when it holds one.
+func (t *Tree) fixedFor(it cfg.Item) int {
+	if it.Fixed > 0 {
+		return it.Fixed
+	}
+	if c := t.Components[it.Component]; c != nil && (c.Kind == KInput || c.Kind == KToggle) {
+		return cfg.InputHeight
+	}
+	return 0
 }
 
 // sizing picks layout.Fixed or layout.Flex based on the item's hint. When
@@ -138,6 +148,10 @@ func componentNode(c *Component) layout.Node {
 		return layout.Sized(c.Textview)
 	case KEventlog:
 		return layout.Sized(c.Eventlog)
+	case KInput:
+		return layout.Sized(c.Input)
+	case KToggle:
+		return layout.Sized(c.Toggle)
 	}
 	return layout.RenderFunc(func(geom.Rect) string { return "" })
 }

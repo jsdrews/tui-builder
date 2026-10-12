@@ -43,6 +43,7 @@ var referencePages = map[string][]string{
 	"InspectorField": {"components.md"},
 	"Colors":         {"components.md"},
 	"OnCursor":       {"components.md"},
+	"OnInput":        {"components.md"},
 	"Activity":       {"components.md"},
 	"Source":         {"sources.md", "pipelines.md"},
 	"Parameter":      {"sources.md", "actions.md", "app.md"},

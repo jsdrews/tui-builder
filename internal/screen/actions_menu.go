@@ -108,6 +108,7 @@ func (m *Model) selectionTarget(c *build.Component) (string, int) {
 // the terminal rather than a writer, and an action with inputs nobody
 // bound, which has to ask before it can run at all.
 func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Component, focused string) taction.Action {
+	b = m.bindInputs(b)
 	a := taction.Action{
 		Label: menuLabel(b, def),
 		Desc:  def.Description,
@@ -167,7 +168,7 @@ func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Comp
 		return a
 	}
 
-	resolved, err := action.Resolve(def, inputs)
+	resolved, err := action.Resolve(m.inputDef(def), inputs)
 	if err != nil {
 		a.Disabled = err.Error()
 		return a
@@ -321,7 +322,7 @@ func (m *Model) fanOut(b cfg.ActionBinding, def *cfg.Action, a taction.Action, s
 				}
 			}
 		}
-		resolved, err := action.Resolve(def, inputs)
+		resolved, err := action.Resolve(m.inputDef(def), inputs)
 		if err != nil {
 			cmds = append(cmds, app.Error(fmt.Sprintf("%s: %v", b.Action, err)))
 			continue

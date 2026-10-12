@@ -38,10 +38,11 @@ These apply to every kind unless the column says otherwise.
 | `mark_key` | path | — | source-bound markable table; span table; table with `activity` | The stable identity marks and activity are held by, read from the source item (not the rendered cells), e.g. `metadata.uid`. Required on a markable source-bound table, on every span table and on a table with `activity`. |
 | `activity` | map | — | table, list, tree on a fetched or polled source | Shows a spinner on rows the data says are being worked on. See [`activity`](#activity). |
 | `on_cursor` | map | — | source-bound target | Refetches this component's source as another component's cursor moves. See [`on_cursor`](#on_cursor). |
+| `on_input` | map | — | source-bound target | Refetches this component's source when an input or toggle on the screen commits. See [`on_input`](#on_input). |
 
 **Validation:**
 
-- `type` is one of the seven kinds; `source:` names a defined entry.
+- `type` is one of the nine kinds; `source:` names a defined entry.
 - `loading_label`, `line_numbers`, `gutter` and `new_for` are errors on a
   kind their row doesn't list.
 - `markable` only on list, table, tree. On a table bound to a source,
@@ -347,6 +348,55 @@ events:
     - {when: "~^fatal|FAILED", color: red}
 ```
 
+## `input`
+
+A one-line text field. It doesn't display a source; other components
+read its committed value as `${input.NAME}` (NAME is the component's
+name) in `on_input` / `on_cursor` binds and in actions.
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `initial` | template | — | — | The value before anything is committed. It's bound for the first fetch. |
+| `placeholder` | template | — | — | Shown while the field is empty. |
+| `char_limit` | int | `0` (none) | — | The longest value accepted. |
+| `mask` | bool | `false` | — | Shows typed characters as bullets (`app.glyphs.mask`). |
+
+Tab onto the field to edit it; while it's being edited every key is
+typing, so `q` and `esc` don't reach the app. **enter** commits the value,
+and every component that reads it refetches. **esc** puts back the
+committed value and leaves the field; enter starts editing again. Tabbing
+away puts back anything typed but not committed.
+
+## `toggle`
+
+A yes/no switch, read as `${input.NAME}`: `true` or `false`. Every flip
+(`←`/`→`, space or a click) commits, and the components that read it
+refetch.
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `initial` | string | `false` | — | `true` or `false`. |
+| `yes_label` | string | `yes` | — | The "true" side's label. |
+| `no_label` | string | `no` | — | The "false" side's label. |
+
+An input or toggle is three rows tall: in a `vstack` it takes `fixed: 3`
+on its own, and any other height is an error. In an `hstack`, `flex` /
+`fixed` set its width as usual.
+
+```yaml
+search:       {type: input,  title: Search, placeholder: name…, initial: "${env.Q}"}
+show_deleted: {type: toggle, title: Deleted?, yes_label: shown, no_label: hidden}
+pods_table:
+  type: table
+  source: pods            # declares parameters: q, deleted
+  on_input:
+    bind: {q: "${input.search}", deleted: "${input.show_deleted}"}
+```
+
+**Validation:** neither takes `source:`; `initial` on a toggle is `true` or
+`false`; `char_limit` can't be negative; their fields are errors on other
+kinds.
+
 ## `activity`
 
 Shows a spinner on the rows that are being worked on, according to the
@@ -461,3 +511,21 @@ repo_detail:
       owner: ${cursor.Owner}
       name:  ${cursor.Repo}
 ```
+
+`${input.NAME}` works in `on_cursor.bind` too, so one source can follow a
+cursor and an input at once.
+
+## `on_input`
+
+Refetches this component's source when an [input or toggle](#input) on
+the same screen commits, binding their values into the source's
+`parameters:`. Use it on a component with no cursor driver; it's fetched
+with the inputs' `initial` values when the screen opens.
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `bind` | map of template | — | required | Maps source parameters to templates over `${input.NAME}`, plus `${env.*}`. |
+
+**Validation:** the component has a `source:` that declares each bound
+parameter; `${input.NAME}` names an input or toggle on this screen; a
+parameter can't be bound by both `on_input` and `on_cursor`.

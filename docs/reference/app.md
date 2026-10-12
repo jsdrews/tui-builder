@@ -338,7 +338,7 @@ An item is a node plus a sizing hint.
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
 | `flex` | int | `1` | set one of `flex` / `fixed` | Share of the space left after fixed items. Used when neither is set. |
-| `fixed` | int | — | set one of `flex` / `fixed` | Exact size in rows (vstack) or columns (hstack). |
+| `fixed` | int | — | set one of `flex` / `fixed` | Exact size in rows (vstack) or columns (hstack). An input or toggle in a vstack is always `3` rows. |
 
 **Validation:** setting both `flex` and `fixed` on one item is an error.
 

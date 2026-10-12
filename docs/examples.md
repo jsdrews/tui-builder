@@ -179,6 +179,20 @@ task example NAME=marking
     --8<-- "examples/marking.yaml"
     ```
 
+### inputs
+
+An `input` and a `toggle` driving a table's source through `on_input:` and `${input.NAME}`.
+
+```sh
+task example NAME=inputs
+```
+
+??? example "inputs.yaml"
+
+    ```yaml
+    --8<-- "examples/inputs.yaml"
+    ```
+
 ### metrics
 
 Inline badges, ratios, progress bars and sparklines with `metric:` on table columns and inspector fields.
