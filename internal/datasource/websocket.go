@@ -68,6 +68,19 @@ func (s *websocketSource) Fetch(_ context.Context) (any, error) {
 // connection is being made and that the subscribe handshake completed,
 // so a slow / silent server is distinguishable from a hang.
 func (s *websocketSource) Subscribe(ctx context.Context) (<-chan Event, error) {
+	return s.SubscribeSince(ctx, "")
+}
+
+// SubscribeSince implements ResumableSource: the stream, with
+// ${resume.since} in the URL, headers and initial messages set to since.
+func (s *websocketSource) SubscribeSince(ctx context.Context, since string) (<-chan Event, error) {
+	c := *s
+	c.url, c.headers = resumeOne(s.url, since), resumeMap(s.headers, since)
+	c.initialMessages = resumeAll(s.initialMessages, since)
+	return c.subscribe(ctx)
+}
+
+func (s *websocketSource) subscribe(ctx context.Context) (<-chan Event, error) {
 	ch := make(chan Event, 64)
 	go func() {
 		defer close(ch)

@@ -404,6 +404,18 @@ func toInt(v any) (int, bool) {
 // We deliberately don't apply s.timeout here — follow streams are
 // inherently long-running; only ctx cancellation should stop them.
 func (s *httpSource) Subscribe(ctx context.Context) (<-chan Event, error) {
+	return s.SubscribeSince(ctx, "")
+}
+
+// SubscribeSince implements ResumableSource: the stream, with
+// ${resume.since} in the URL, headers and body set to since.
+func (s *httpSource) SubscribeSince(ctx context.Context, since string) (<-chan Event, error) {
+	c := *s
+	c.url, c.body, c.headers = resumeOne(s.url, since), resumeOne(s.body, since), resumeMap(s.headers, since)
+	return c.subscribe(ctx)
+}
+
+func (s *httpSource) subscribe(ctx context.Context) (<-chan Event, error) {
 	if !s.follow {
 		return nil, ErrNotStreaming
 	}

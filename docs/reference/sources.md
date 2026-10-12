@@ -31,6 +31,7 @@ params": it can only run once a caller binds them (a push binding,
 | `timeout` | duration | `10s` | http, exec, websocket | Per-fetch limit. On websocket it bounds only the initial connect; ignored with `follow: true`. |
 | `cache` | map | — | sources with `parameters:` | Memoises fetches per parameter combination. See [`cache`](#cache). |
 | `pipe` | list | — | — | Transform stages applied to this source's output. See [pipelines.md](pipelines.md#pipe). |
+| `resume` | map | — | streams: websocket, or exec / http with `follow: true` | Reconnects exactly: tracks each line's timestamp, resumes from the last one and skips repeats. See [`resume`](#resume). |
 
 **Validation:** `format` is `json` or `text`; `refresh`, `timeout` and
 `cache.ttl` parse as durations.
@@ -473,6 +474,49 @@ books:
     search_param: q          # "hobbit"         → ?q=hobbit
     filters: {Author: author} # "author:tolkien" → ?author=tolkien
 ```
+
+## `resume`
+
+A stream that drops, or a follow that stops with its container, can be
+reconnected with `r`. On its own that starts over from the live tail, so
+lines are missed or shown twice. With `resume:`, tui-builder reads each
+line's timestamp, and a reconnect asks the source for the lines since the
+last one shown, through `${resume.since}` in the request, and skips the
+ones it already has. A stream with `resume:` also reconnects by itself
+when it ends: after a second, then backing off to 30s while it keeps
+ending with nothing new.
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `timestamp` | regex | — | required | A regular expression whose first capture group is each line's timestamp, in RFC 3339 (fractional seconds allowed). Lines it doesn't match are shown but not tracked. |
+| `granularity` | duration | `1s` | — | The resolution the source's "since" parameter honours. The Kubernetes API truncates to a second; lines within the resumed second are matched up by count. |
+
+`${resume.since}` is the time to ask from, RFC 3339 in UTC, and is empty
+on the first connect. It can appear in `command:`, `env:`, `url:`,
+`headers:`, `body:` and `initial_messages:`. Each reconnect marks the log
+`— reconnected after 12s —`: lines sent while the stream was down are
+fetched, but nothing can say whether the source kept them all.
+
+```yaml
+pod_logs:
+  type: exec
+  follow: true
+  parameters: {pod: {required: true}}
+  command:
+    - sh
+    - -c
+    - 'since="${resume.since}"; kubectl logs -f --timestamps ${since:+--since-time=$since} "${params.pod}"'
+  resume:
+    timestamp: '^(\S+) '
+```
+
+tui-builder fills in `${resume.since}` before the shell runs; the shell's
+`${since:+…}` then leaves `--since-time` off the first connect, when it's
+empty.
+
+**Validation:** `resume` only on a stream; `timestamp` compiles and has a
+capture group; `granularity` is a positive duration; a source that reads
+`${resume.since}` must declare `resume:`.
 
 ## `cache`
 

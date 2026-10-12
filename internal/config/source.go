@@ -87,6 +87,12 @@ type Source struct {
 	// ── websocket ──
 	InitialMessages []string `yaml:"initial_messages,omitempty"`
 
+	// Resume makes a stream reconnect exactly: each line's timestamp is
+	// tracked, a reconnect asks for lines since the last one
+	// (${resume.since}), and lines already shown are skipped. With it,
+	// a stream that ends reconnects by itself. See ResumeSpec.
+	Resume *ResumeSpec `yaml:"resume,omitempty"`
+
 	// ── static ──
 	Data any `yaml:"data,omitempty"`
 
@@ -203,6 +209,9 @@ func (s *Source) IsOperator() bool {
 // error messages.
 func (s *Source) Validate(path string) error {
 	if err := validateParametersMap(s.Parameters, path); err != nil {
+		return err
+	}
+	if err := s.validateResume(path); err != nil {
 		return err
 	}
 	// Pipe stages are themselves Sources. Each must be a single-
