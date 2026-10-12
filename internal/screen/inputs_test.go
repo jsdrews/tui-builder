@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -12,24 +13,35 @@ import (
 )
 
 // settle is runToQuiescence for a screen with a text input in it: a
-// focused input keeps a cursor blinking, one tick per message, so the
-// blink messages are dropped rather than pumped forever.
+// focused input keeps a cursor blinking, and a loading pane a spinner
+// spinning, one tick per message, so those are dropped rather than
+// pumped forever.
 func settle(t *testing.T, m *Model, msgs ...tea.Msg) {
 	t.Helper()
+	// Timers (spinners, blinks) block until the budget runs out; what
+	// these tests wait for — exec sources, fetches — answers in
+	// milliseconds.
+	defer func(prev time.Duration) { cmdTimeout = prev }(cmdTimeout)
+	cmdTimeout = 300 * time.Millisecond
 	inbox := append([]tea.Msg{tea.WindowSizeMsg{Width: 100, Height: 40}}, msgs...)
 	for i := 0; i < 200 && len(inbox) > 0; i++ {
 		msg := inbox[0]
 		inbox = inbox[1:]
-		if strings.HasPrefix(fmt.Sprintf("%T", msg), "cursor.") {
+		if isTimerMsg(msg) {
 			continue
 		}
 		_, cmd := m.Update(msg)
 		for _, next := range drainCmd(cmd) {
-			if !strings.HasPrefix(fmt.Sprintf("%T", next), "cursor.") {
+			if !isTimerMsg(next) {
 				inbox = append(inbox, next)
 			}
 		}
 	}
+}
+
+func isTimerMsg(msg tea.Msg) bool {
+	name := fmt.Sprintf("%T", msg)
+	return strings.HasPrefix(name, "cursor.") || strings.HasPrefix(name, "spinner.")
 }
 
 func inputsExample(t *testing.T) *Model {

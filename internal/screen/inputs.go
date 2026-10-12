@@ -52,7 +52,7 @@ func (m *Model) commitInput(name string) tea.Cmd {
 		return nil
 	}
 	m.inputs[name] = v
-	var cmds []tea.Cmd
+	cmds := m.reanchor(name)
 	for _, b := range m.cursorBindings {
 		if readsInput(b.bind, name) {
 			cmds = append(cmds, m.startCursorFetch(b))

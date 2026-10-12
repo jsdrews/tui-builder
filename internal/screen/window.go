@@ -32,6 +32,7 @@ package screen
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -79,6 +80,7 @@ type remoteView interface {
 	Init() tea.Cmd
 	Update(tea.Msg) tea.Cmd
 	Refresh() tea.Cmd
+	SetAnchor(tsource.Anchor) tea.Cmd
 }
 
 // windowViewportMsg and windowQueryMsg carry a table's viewport and
@@ -135,21 +137,27 @@ func (m *Model) initWindows() {
 				continue
 			}
 			shape := remote.Anchored[eventlog.Item]{
-				Edge:     eventlogEdge(as, c, m.windowFilters(c.Cfg.Source), m.th),
-				Name:     c.Cfg.Source,
-				PageSize: def.PageSize,
-				Anchor:   anchorOf(def),
+				Edge:          eventlogEdge(as, c, m.windowFilters(c.Cfg.Source), m.th),
+				Find:          anchoredFind(entry.src, def, c, m.windowFilters(c.Cfg.Source)),
+				Name:          c.Cfg.Source,
+				PageSize:      def.PageSize,
+				Anchor:        m.anchorOf(def),
+				ViewportDelay: viewportDelay(def),
+				Context:       m.ctx,
 			}
 			w.growing, w.while, shape.Follow = growthOf(def)
 			build.NewRemoteEventlog(c, m.th, shape)
 		} else if c.Kind == build.KEventlog {
 			shape := remote.Seekable[eventlog.Item]{
 				Page: eventlogPage(ws, c, m.windowFilters(c.Cfg.Source), m.th),
+				Find: seekableFind(entry.src, def, m.windowFilters(c.Cfg.Source)),
 				// Prefixes this source's lines in the shell's query history.
-				Name: c.Cfg.Source,
+				Name:    c.Cfg.Source,
+				Context: m.ctx,
 			}
 			if def != nil {
 				shape.PageSize, shape.Prefetch = def.PageSize, def.Prefetch
+				shape.ViewportDelay = viewportDelay(def)
 				w.growing, w.while, shape.Follow = growthOf(def)
 			}
 			build.NewRemoteEventlog(c, m.th, shape)
@@ -161,19 +169,25 @@ func (m *Model) initWindows() {
 				continue
 			}
 			build.NewRemoteTable(c, m.th, remote.Anchored[table.KeyedRow]{
-				Edge:     tableEdge(as, c, m.windowFilters(c.Cfg.Source), m.th),
-				Name:     c.Cfg.Source,
-				PageSize: def.PageSize,
-				Anchor:   anchorOf(def),
+				Edge:          tableEdge(as, c, m.windowFilters(c.Cfg.Source), m.th),
+				Find:          anchoredFind(entry.src, def, c, m.windowFilters(c.Cfg.Source)),
+				Name:          c.Cfg.Source,
+				PageSize:      def.PageSize,
+				Anchor:        m.anchorOf(def),
+				ViewportDelay: viewportDelay(def),
+				Context:       m.ctx,
 			})
 			c.AtNewest = def.Anchor != "oldest"
 		} else {
 			shape := remote.Seekable[table.KeyedRow]{
-				Page: windowPage(ws, c, m.windowFilters(c.Cfg.Source), m.th),
-				Name: c.Cfg.Source,
+				Page:    windowPage(ws, c, m.windowFilters(c.Cfg.Source), m.th),
+				Find:    seekableFind(entry.src, def, m.windowFilters(c.Cfg.Source)),
+				Name:    c.Cfg.Source,
+				Context: m.ctx,
 			}
 			if def != nil {
 				shape.PageSize, shape.Prefetch = def.PageSize, def.Prefetch
+				shape.ViewportDelay = viewportDelay(def)
 			}
 			build.NewRemoteTable(c, m.th, shape)
 		}
@@ -216,11 +230,107 @@ func eventlogPage(src ds.WindowedSource, c *build.Component, mapped map[string]s
 }
 
 // anchorOf is a window's `anchor:` as a tuilib anchor.
-func anchorOf(def *cfg.WindowConfig) tsource.Anchor {
-	if def.Anchor == "oldest" {
+func (m *Model) anchorOf(def *cfg.WindowConfig) tsource.Anchor {
+	switch {
+	case def.Anchor == "oldest":
 		return tsource.Oldest()
+	case cfg.IsAnchorTemplate(def.Anchor):
+		// A jump: the template resolves to a cursor (a time, an id).
+		// Empty means nothing to jump to yet, so the newest.
+		text := strings.TrimSpace(build.SubstituteCursor(build.SubstituteInputValues(def.Anchor, m.inputs), build.Selection{}))
+		if text == "" {
+			return tsource.Newest()
+		}
+		// Cursors travel JSON-encoded, as the source returned them: a
+		// typed time is a JSON string, a number or an ES sort array stays
+		// as it is.
+		cursor := text
+		if !json.Valid([]byte(text)) {
+			b, _ := json.Marshal(text)
+			cursor = string(b)
+		}
+		return tsource.At(build.AnchoredKey(cursor, ""))
 	}
 	return tsource.Newest()
+}
+
+// reanchor jumps every window whose `anchor:` template reads input to
+// where it now resolves.
+func (m *Model) reanchor(input string) []tea.Cmd {
+	var cmds []tea.Cmd
+	for name, w := range m.windows {
+		def := m.windowDefs[w.source]
+		if def == nil || !cfg.IsAnchorTemplate(def.Anchor) {
+			continue
+		}
+		reads := false
+		for _, ref := range cfg.InputRefs(def.Anchor) {
+			reads = reads || ref == input
+		}
+		if !reads {
+			continue
+		}
+		if rt := m.remoteFor(name); rt != nil {
+			cmds = append(cmds, tagCursorFocused(rt.SetAnchor(m.anchorOf(def)), name))
+		}
+	}
+	return cmds
+}
+
+// viewportDelay is `window.viewport_delay`: 0 for tuilib's default,
+// negative ("-") to ask at once.
+func viewportDelay(def *cfg.WindowConfig) time.Duration {
+	switch def.ViewportDelay {
+	case "":
+		return 0
+	case "-":
+		return -1
+	}
+	d, _ := time.ParseDuration(def.ViewportDelay) // validated at load
+	return d
+}
+
+// seekableFind is a paged view's search past what's loaded: the source's
+// `find:` request, answered with the match's position. nil (search what's
+// loaded) when the source declares no find.
+func seekableFind(src ds.Source, def *cfg.WindowConfig, mapped map[string]string) func(context.Context, remote.Find) (int, bool, error) {
+	fs, ok := src.(ds.FindingSource)
+	if !ok || def == nil || def.Find == nil {
+		return nil
+	}
+	return func(ctx context.Context, f remote.Find) (int, bool, error) {
+		res, err := fs.FindItem(ctx, findQuery(f, mapped))
+		return res.Position, res.Found, err
+	}
+}
+
+// anchoredFind is an Anchored view's search: the match's cursor, keyed
+// the way the view keys its items, so it re-anchors on that item.
+func anchoredFind(src ds.Source, def *cfg.WindowConfig, c *build.Component, mapped map[string]string) func(context.Context, remote.Find) (string, bool, error) {
+	fs, ok := src.(ds.FindingSource)
+	if !ok || def == nil || def.Find == nil {
+		return nil
+	}
+	return func(ctx context.Context, f remote.Find) (string, bool, error) {
+		res, err := fs.FindItem(ctx, findQuery(f, mapped))
+		if err != nil || !res.Found {
+			return "", false, err
+		}
+		key := ds.FirstString(res.Item, c.Cfg.MarkKey)
+		if c.Kind == build.KEventlog {
+			key = ds.FirstString(res.Item, c.Cfg.Key)
+		}
+		return build.AnchoredKey(res.Cursor, key), true, nil
+	}
+}
+
+func findQuery(f remote.Find, mapped map[string]string) ds.FindQuery {
+	cursor, _ := build.SplitAnchoredKey(f.Cursor)
+	wq := translateWindowQuery(remote.Window{Filter: f.Filter}, mapped)
+	return ds.FindQuery{
+		Term: f.Term, Newer: f.Newer, From: f.From, Cursor: cursor,
+		Search: wq.Search, Filters: wq.Filters,
+	}
 }
 
 // growthOf reads a window's `growing:` into what the screen and tuilib
