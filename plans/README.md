@@ -26,5 +26,6 @@ section in the plan gets trimmed or deleted.
   activity, claims, eventlog, Anchored sources and span tables.
 - [`tuilib-0.35.md`](tuilib-0.35.md) — giving every tuilib v0.35
   package and option a verdict: tabs, metrics, input/toggle, stream
-  resume, app and component options, and the docs fixes. Locked; eleven
-  PRs. It replaces the old `tabs.md` draft.
+  resume, app and component options, and the docs fixes. **All landed**
+  (#62–#72); kept as the record of how, with what changed during the
+  build and the follow-ups it left. It replaced the old `tabs.md` draft.
