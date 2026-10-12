@@ -8,6 +8,13 @@ made on the map
 and each workstream links the ticket that holds its detail. Eleven PRs,
 in the order at the bottom.
 
+**All of it has now landed**, in
+[#62](https://github.com/jsdrews/tui-builder/pull/62) through
+[#72](https://github.com/jsdrews/tui-builder/pull/72). What follows is
+the record of what was decided, what
+[changed while building it](#what-changed-while-building-it), and the
+[follow-ups](#open-follow-ups) it left.
+
 The facts behind it are two research notes, kept on their branches:
 
 - [Inventory: tuilib v0.35 surface vs what tui-builder exposes](https://github.com/jsdrews/tui-builder/issues/48)
@@ -55,6 +62,8 @@ covered by Workstreams 3–5 and 9.
 
 ## Workstream 1 — this plan and the docs fixes
 
+Landed in [#62](https://github.com/jsdrews/tui-builder/pull/62).
+
 This PR. Merging it locks the plan.
 
 - `plans/tuilib-0.35.md` (this file). `plans/tabs.md` is deleted: it
@@ -96,6 +105,8 @@ This PR. Merging it locks the plan.
 
 ## Workstream 2 — correctness fixes
 
+Landed in [#63](https://github.com/jsdrews/tui-builder/pull/63).
+
 Each of these is a design bug: the docs describe the right behaviour.
 
 - **`flex` and `fixed` both set** on a layout item is a validation error
@@ -123,6 +134,8 @@ on `SetTheme`; a `key: d` binding runs from the open menu and `key: j` is
 rejected; a required prompt can't be submitted empty.
 
 ## Workstream 3 — app-level options
+
+Landed in [#64](https://github.com/jsdrews/tui-builder/pull/64).
 
 Decided in
 [App shell options: what app: exposes](https://github.com/jsdrews/tui-builder/issues/55),
@@ -175,6 +188,8 @@ reaches a table's keymap and rejects a clash.
 
 ## Workstream 4 — component options
 
+Landed in [#65](https://github.com/jsdrews/tui-builder/pull/65).
+
 Decided in
 [List, table and tree option gaps](https://github.com/jsdrews/tui-builder/issues/56)
 and
@@ -211,6 +226,8 @@ windowed table; the stream-ended and reconnected markers.
 
 ## Workstream 5 — forms, confirm and menu internals
 
+Landed in [#66](https://github.com/jsdrews/tui-builder/pull/66).
+
 Decided in
 [Form, confirm and action menu option gaps](https://github.com/jsdrews/tui-builder/issues/59).
 
@@ -245,6 +262,8 @@ confirm default; two rows of one exclusive action run independently.
 
 ## Workstream 6 — metrics
 
+Landed in [#67](https://github.com/jsdrews/tui-builder/pull/67).
+
 Decided in
 [Inline metrics in cells, rows and inspector values](https://github.com/jsdrews/tui-builder/issues/51).
 
@@ -274,6 +293,8 @@ columns:
 raw value; each validation error.
 
 ## Workstream 7 — tabs
+
+Landed in [#68](https://github.com/jsdrews/tui-builder/pull/68).
 
 Decided in
 [Tabs container schema](https://github.com/jsdrews/tui-builder/issues/50).
@@ -325,6 +346,8 @@ polling; theme swap keeps the active tab; each validation rule.
 
 ## Workstream 8 — input and toggle
 
+Landed in [#69](https://github.com/jsdrews/tui-builder/pull/69).
+
 Decided in
 [Standalone input and toggle components](https://github.com/jsdrews/tui-builder/issues/52).
 
@@ -363,6 +386,8 @@ committed value; State/Restore across a theme swap.
 
 ## Workstream 9 — remote extras
 
+Landed in [#70](https://github.com/jsdrews/tui-builder/pull/70).
+
 Decided in
 [Remote data extras: Find, re-anchor, follow](https://github.com/jsdrews/tui-builder/issues/58).
 Needs Workstream 8 (templated anchors read `${input.*}`).
@@ -396,6 +421,8 @@ requests.
 
 ## Workstream 10 — stream resume
 
+Landed in [#71](https://github.com/jsdrews/tui-builder/pull/71).
+
 Decided in
 [Verdicts for plumbing packages](https://github.com/jsdrews/tui-builder/issues/60).
 
@@ -421,6 +448,8 @@ pod_logs:
 already seen; automatic reconnect on stream end; each validation error.
 
 ## Workstream 11 — `poll` refactor
+
+Landed in [#72](https://github.com/jsdrews/tui-builder/pull/72).
 
 Decided in
 [Verdicts for plumbing packages](https://github.com/jsdrews/tui-builder/issues/60).
@@ -450,6 +479,89 @@ the field rows, registered enum values, expression built-ins and wrangl
 flags) and the guide page for its area. A new component or YAML block
 also gets an example under `examples/`: tabs, metrics, input/toggle,
 resume and find.
+
+## What changed while building it
+
+Where the build departed from the decisions above, or found something
+they didn't foresee:
+
+- **Workstream 2.** Recolouring after a theme swap covers fetched,
+  streamed and static content. Windowed tables and eventlogs restyle
+  through tuilib's remote binding, so rows already loaded keep their
+  colours until the next page.
+- **Workstream 3.** `app.keys.filter` on a tree moves its `/` search: on
+  a tree `/` is search, and filter mode (`\`) isn't used. The example
+  launcher applies an example's keymap, form spacing and mask, but not
+  its shell settings, because the launcher owns the shell.
+- **Workstream 4.** Adding the stream markers found two older bugs. `r`
+  never re-subscribed an ended stream, though the code said it did, and
+  it refetched live ones, which wiped a streamed log (and a streamed
+  table's rows). `r` now reconnects ended streams and leaves live ones
+  alone. A stream's empty placeholder snapshot no longer becomes a blank
+  first line.
+- **Workstream 5.**
+  - `confirm: {default: yes}` reaches tui-builder's own confirm dialogs
+    (`enter`, after the input form, over marked rows). A single-row
+    action picked from the menu is confirmed by the shell's dialog, which
+    has no starting-button option and always starts on Cancel.
+  - `DispatchEachWith` isn't used. Fanned-out claims already open one
+    claim per row as each row's run starts; `DispatchEachWith` opens them
+    all at once and issues the requests itself, which doesn't fit runs
+    the runner starts.
+  - Action inputs and boot prompts now share one field builder, so
+    masked action inputs enforce `required:` like every other field.
+- **Workstream 6.** A table with a metric column keys its rows (by
+  `mark_key`, else by position) so a selection can read the raw value.
+  Windowed tables don't carry their items that way, so a metric column's
+  selection there is the drawn text.
+- **Workstream 7.** Screens are built through `screen.Build` /
+  `BuildMulti`, which return a tabbed host or a `Model`. A hidden tab now
+  counts as covered: without that, two tabs would both claim a finished
+  background run. Tab labels aren't templated.
+- **Workstream 8.**
+  - The three-row rule applies in a `vstack` only; in an `hstack`,
+    `flex` / `fixed` set an input's width.
+  - Editing: enter commits, esc reverts and leaves the field, enter on a
+    left field edits again, and tabbing away reverts uncommitted text.
+  - A screen whose first component is an input opens with it focused
+    for typing.
+- **Workstream 9.**
+  - The search term is `${window.term}`; `${window.search}` already
+    meant the view's filter.
+  - Anchor templates take `${input.*}` and `${env.*}`, not
+    `${params.*}`.
+  - tuilib's first request for a jump wants the anchor item included;
+    most APIs exclude it, so a jump settles one row off as that item
+    arrives with the newer side.
+  - A screen can't see itself popped, so the screen under it cancels the
+    screens it pushed when it's back on top. That covers stream
+    subscriptions as well as window requests, which also ended the
+    documented stream leak on pop.
+- **Workstream 10.** Automatic reconnects back off from 1s to 30s while
+  a stream keeps ending with nothing new, and the marker says how long
+  the stream was down. A shell recipe copies `${resume.since}` into a
+  shell variable before testing it, since a shell can't expand a name
+  with a dot.
+- **Workstream 11.** Replacing the ticker fixed a bug: every completed
+  fetch scheduled the next tick, so each manual `r` started another tick
+  chain. Polls now run every `refresh:` from when the screen opens, skip
+  a tick while the last fetch is still out, and carry their source's name
+  so two pollers never take each other's ticks.
+
+## Open follow-ups
+
+- **Confirm default on menu picks** needs an `Initial` option on
+  tuilib's `action.Action` (Workstream 5).
+- **Exact jumps** need an inclusive first request: an `at:` patch in
+  tui-builder, or tuilib asking for the anchor item separately
+  (Workstream 9).
+- **Windowed tables**: carry each row's item so metric selections read
+  the value, and recolour loaded rows on a theme swap (Workstreams 2
+  and 6).
+- **`${params.*}` in anchor templates**, and `find:` on exec windows
+  (Workstream 9).
+- **`wrangl`** leaves an unset optional parameter as a literal
+  `${params.NAME}`. That predates this plan.
 
 ## Never expose
 
