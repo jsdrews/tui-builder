@@ -19,6 +19,7 @@ Field tables in the other pages give each field's type as `template`,
 |---|---|---|
 | `${env.NAME}` | The environment variable `NAME`; empty when unset | Everywhere a template is accepted |
 | `${params.NAME}` | A bound source parameter | A source's `url`, `method`, `body`, `headers`, `path`, `command`, `env`, `initial_messages` |
+| `${resume.since}` | Where a [resumable stream](sources.md#resume) reconnects from: RFC 3339 UTC, empty on the first connect | A `resume:` stream's `url`, `body`, `headers`, `command`, `env`, `initial_messages` |
 | `${selection}` | The focused row of a binding's `from:` component: a list's item, a table's first cell, a tree node's label, an eventlog item's key (`${selection.PATH}` reads that item's fields) | Binding `bind:` and `confirm:`; a pushed screen's title, component content and source fields |
 | `${selection.N}` | A table row's Nth cell, 1-based | As above |
 | `${selection.Title}` | The cell in the column titled `Title` (case-insensitive, exact) | As above |

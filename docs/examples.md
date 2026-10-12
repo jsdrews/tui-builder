@@ -295,6 +295,20 @@ task example NAME=demo
 
 ## Data sources
 
+### resume
+
+A stream that drops every few seconds and reconnects with `resume:`, picking up where it left off with nothing missed or repeated.
+
+```sh
+task example NAME=resume
+```
+
+??? example "resume.yaml"
+
+    ```yaml
+    --8<-- "examples/resume.yaml"
+    ```
+
 ### http_countries
 
 A table over public JSON (the mledoze/countries dataset), polled with `refresh: 5m`, with per-column dot-paths.

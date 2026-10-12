@@ -1,0 +1,71 @@
+# resume.yaml — a stream that reconnects exactly.
+#
+# A log stream drops: the connection resets, the container restarts.
+# Reconnecting from the live tail loses what was sent meanwhile, and
+# asking for "lines since T" repeats the lines already shown at T (the
+# Kubernetes API, for one, only honours whole seconds).
+#
+# `resume:` fixes both. Each line's timestamp is read with the regex's
+# first capture group; a reconnect asks for the lines since the last one
+# shown (${resume.since}) and skips the ones it already has. A stream
+# with `resume:` also reconnects by itself when it ends.
+#
+# This script plays a log on a synthetic clock, two lines a second. Each
+# run prints four seconds from ${resume.since} (from 00:00 on the first
+# connect), then exits as if the connection dropped. Watch the
+# "— reconnected —" markers: the lines carry on with nothing missed and
+# nothing repeated, although every run re-sends the last second it was
+# asked for. After a minute of log it stops, and the reconnects back off.
+#
+# The same shape for a pod:
+#
+#   command:
+#     - sh
+#     - -c
+#     - 'since="${resume.since}"; kubectl logs -f --timestamps ${since:+--since-time=$since} "${params.pod}"'
+#   resume:
+#     timestamp: '^(\S+) '
+app:
+  title: Resume
+  theme: nord
+
+data:
+  sources:
+    log:
+      type: exec
+      follow: true
+      command:
+        - sh
+        - -c
+        - |
+          since="${resume.since}"
+          # The second the resume asks from: the SS of ...T00:MM:SSZ.
+          start=0
+          if [ -n "$since" ]; then
+            start=$(printf '%s' "$since" | sed -E 's/.*T00:([0-9]{2}):([0-9]{2})Z/\1 \2/' | awk '{print $1*60+$2}')
+          fi
+          end=$((start + 3))
+          [ "$end" -gt 59 ] && end=59
+          s=$start
+          while [ "$s" -le "$end" ]; do
+            for part in a b; do
+              printf '2026-01-01T00:%02d:%02dZ request %s.%s served\n' $((s / 60)) $((s % 60)) "$s" "$part"
+            done
+            s=$((s + 1))
+            sleep 0.5
+          done
+      resume:
+        timestamp: '^(\S+) '
+
+tui:
+  components:
+    log:
+      type: logview
+      title: Log
+      source: log
+      line_numbers: true
+
+  screen:
+    title: Resume
+    layout:
+      component: log

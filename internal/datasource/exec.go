@@ -243,6 +243,18 @@ func (s *execSource) FetchEdge(ctx context.Context, q EdgeQuery) (EdgePage, erro
 // when ctx is cancelled. Non-follow sources return an error so the
 // screen can fall back to the polling path.
 func (s *execSource) Subscribe(ctx context.Context) (<-chan Event, error) {
+	return s.SubscribeSince(ctx, "")
+}
+
+// SubscribeSince implements ResumableSource: the stream, with
+// ${resume.since} in the argv and env set to since.
+func (s *execSource) SubscribeSince(ctx context.Context, since string) (<-chan Event, error) {
+	c := *s
+	c.argv, c.env = resumeAll(s.argv, since), resumeAll(s.env, since)
+	return c.subscribe(ctx)
+}
+
+func (s *execSource) subscribe(ctx context.Context) (<-chan Event, error) {
 	if !s.follow {
 		return nil, ErrNotStreaming
 	}

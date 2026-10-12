@@ -76,6 +76,10 @@ type sourceEntry struct {
 	// streaming is set once a source has subscribed, and stays set after
 	// its stream ends, so `r` knows to reconnect it rather than refetch.
 	streaming bool
+	// resume tracks a `resume:` stream's line timestamps, so a reconnect
+	// asks for what it missed and skips what it already has. nil for
+	// streams without one.
+	resume *resumeState
 	// failing is whether the newest fetch failed outright, for the
 	// "· reads failing" title on a polled source's components.
 	failing bool
@@ -322,7 +326,7 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, entries map[str
 			return nil, fmt.Errorf("component %q: source %q not defined", name, boundName)
 		}
 		if _, ok := m.sources[boundName]; !ok {
-			m.sources[boundName] = &sourceEntry{src: bound}
+			m.sources[boundName] = &sourceEntry{src: bound, resume: newResumeState(entries[boundName])}
 		}
 		m.sourceUsers[boundName] = append(m.sourceUsers[boundName], name)
 		if def, ok := entries[boundName]; ok && def != nil && def.Window != nil {
@@ -467,8 +471,20 @@ func (m *Model) onEnter() tea.Cmd {
 // subscribe opens a streaming source's channel and returns the pump that
 // drains it.
 func subscribe(parent context.Context, name string, entry *sourceEntry, streamer ds.StreamingSource) (tea.Cmd, error) {
+	return subscribeSince(parent, name, entry, streamer, "")
+}
+
+// subscribeSince is subscribe for a reconnect: a resumable source is
+// asked for what it sent since since.
+func subscribeSince(parent context.Context, name string, entry *sourceEntry, streamer ds.StreamingSource, since string) (tea.Cmd, error) {
 	ctx, cancel := context.WithCancel(parent)
-	ch, err := streamer.Subscribe(ctx)
+	var ch <-chan ds.Event
+	var err error
+	if rs, ok := streamer.(ds.ResumableSource); ok && since != "" {
+		ch, err = rs.SubscribeSince(ctx, since)
+	} else {
+		ch, err = streamer.Subscribe(ctx)
+	}
 	if err != nil {
 		cancel()
 		return nil, err
@@ -489,19 +505,31 @@ func (m *Model) reconnect() []tea.Cmd {
 		if !entry.streaming || entry.stream != nil {
 			continue
 		}
-		streamer, ok := entry.src.(ds.StreamingSource)
-		if !ok {
-			continue
-		}
-		pump, err := subscribe(m.ctx, name, entry, streamer)
-		if err != nil {
-			cmds = append(cmds, app.Error(fmt.Sprintf("%s: %v", name, err)))
-			continue
-		}
-		m.markStream(name, "— reconnected —")
-		cmds = append(cmds, pump)
+		cmds = append(cmds, m.reconnectOne(name, entry))
 	}
 	return cmds
+}
+
+// reconnectOne re-subscribes one ended stream. A resumable one asks for
+// the lines since the last it showed and says how long it was down.
+func (m *Model) reconnectOne(name string, entry *sourceEntry) tea.Cmd {
+	streamer, ok := entry.src.(ds.StreamingSource)
+	if !ok {
+		return nil
+	}
+	since, marker := "", "— reconnected —"
+	if r := entry.resume; r != nil {
+		since = r.resumeFrom(time.Now())
+		if gap := r.tracker.Reconnected(); gap > 0 {
+			marker = fmt.Sprintf("— reconnected after %s —", gap.Round(time.Second))
+		}
+	}
+	pump, err := subscribeSince(m.ctx, name, entry, streamer, since)
+	if err != nil {
+		return app.Error(fmt.Sprintf("%s: %v", name, err))
+	}
+	m.markStream(name, marker)
+	return pump
 }
 
 // markStream adds an annotation line to every logview bound to source.
@@ -695,6 +723,11 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		return m, m.startFetch(x.source)
 	case streamMsg:
 		return m, m.handleStream(x)
+	case resumeMsg:
+		if entry, ok := m.sources[x.source]; ok && entry.stream == nil {
+			return m, m.reconnectOne(x.source, entry)
+		}
+		return m, nil
 	case taggedCursorMsg:
 		return m, m.handleCursorChange(x)
 	case cursorFetchMsg:
@@ -1861,10 +1894,22 @@ func (m *Model) handleStream(x streamMsg) tea.Cmd {
 		}
 		entry.stream = nil
 		m.markStream(x.source, "— stream ended —")
+		var cmds []tea.Cmd
 		if x.err != nil {
-			return app.Error(fmt.Sprintf("%s: %v", x.source, x.err))
+			cmds = append(cmds, app.Error(fmt.Sprintf("%s: %v", x.source, x.err)))
 		}
-		return nil
+		// A resumable stream reconnects by itself, after a pause that
+		// grows while it keeps ending with nothing new.
+		if r := entry.resume; r != nil {
+			r.tracker.Lost(time.Now())
+			cmds = append(cmds, tea.Tick(r.nextWait(), func(time.Time) tea.Msg { return resumeMsg{source: x.source} }))
+		}
+		return tea.Batch(cmds...)
+	}
+	// A resumed stream repeats the lines from its last second; they're
+	// already shown.
+	if r := entry.resume; r != nil && r.skip(x.line) {
+		return nextStreamMsg(x.source, entry.stream)
 	}
 	// Apply: dispatch per component kind. Logview = append the raw
 	// line. Table = JSON-parse + project to a row via column paths
