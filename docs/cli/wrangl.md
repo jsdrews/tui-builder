@@ -18,7 +18,7 @@ pipeline name), it writes that entry's value.
 | `--list` | Lists every source and pipeline with its kind, lifecycle and upstream. Also the default with no target. |
 | `-a`, `--all` | With `--list`, includes hidden entries (names starting with `_`, such as `pipe:` intermediates). |
 | `--describe` | Prints a target's kind, lifecycle, request template and parameters. `${env.*}` is not substituted, so secrets aren't printed. |
-| `--param name=value` | Binds a parameter on the target. Repeatable. |
+| `--param name=value` | Passes an argument for one of the target's parameters. Repeatable. |
 | `--pretty` | Indents one-shot JSON output. Streams stay one value per line. |
 | `--raw` | Writes text values and text stream frames as plain text, not JSON strings. |
 | `--limit N` | Stops a stream after N events. |
