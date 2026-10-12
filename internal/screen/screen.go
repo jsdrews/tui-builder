@@ -171,6 +171,11 @@ type Model struct {
 	// repeated params.
 	cursorAllSources map[string]*cfg.Source
 
+	// inputs holds each input's and toggle's committed value, by
+	// component name: what ${input.NAME} reads. An input commits on
+	// enter, a toggle on every flip.
+	inputs map[string]string
+
 	// windows lists the windowed tables (each a tuilib remote.Table),
 	// keyed by component name (not source name — two tables could window the same
 	// source at different scroll positions). See window.go.
@@ -434,6 +439,13 @@ func (m *Model) onEnter() tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
+	// A binding with no cursor driver reads only inputs, so nothing will
+	// prime it: fetch it now with the inputs' initial values.
+	for _, b := range m.cursorBindings {
+		if b.driver == "" {
+			cmds = append(cmds, m.startCursorFetch(b))
+		}
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -609,6 +621,9 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		return m, cmd
 	}
 	if k, ok := msg.(tea.KeyMsg); ok {
+		if cmd, handled := m.inputKey(k); handled {
+			return m, cmd
+		}
 		switch k.String() {
 		case "tab":
 			m.cycleFocus(+1)
@@ -787,6 +802,14 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		}
 	}
 	cmds = m.syncFocusAfterPress(msg, cmds)
+	// A click can flip a toggle too; it commits the same as a key.
+	if _, ok := msg.(mouse.Msg); ok {
+		for i, c := range m.tree.All() {
+			if c.Kind == build.KToggle {
+				cmds = append(cmds, m.commitInput(m.tree.Order[i]))
+			}
+		}
+	}
 	return m, tea.Batch(cmds...)
 }
 
@@ -1127,6 +1150,10 @@ func componentHelpSections(c *build.Component) []help.Section {
 		return c.Textview.HelpSections()
 	case build.KEventlog:
 		return c.Eventlog.HelpSections()
+	case build.KInput:
+		return c.Input.HelpSections()
+	case build.KToggle:
+		return c.Toggle.HelpSections()
 	}
 	return nil
 }
@@ -1165,6 +1192,11 @@ func (m *Model) cycleFocus(delta int) {
 	if len(all) == 0 {
 		return
 	}
+	// Only enter commits, so text typed and then tabbed away from is
+	// put back.
+	if c := all[m.focus]; c.Kind == build.KInput {
+		c.Input.SetValue(m.inputs[m.tree.Order[m.focus]])
+	}
 	setFocused(all[m.focus], false)
 	m.focus = (m.focus + delta + len(all)) % len(all)
 	setFocused(all[m.focus], true)
@@ -1196,6 +1228,10 @@ func focusableOf(c *build.Component) focus.Focusable {
 		return c.Textview
 	case build.KEventlog:
 		return c.Eventlog
+	case build.KInput:
+		return c.Input
+	case build.KToggle:
+		return c.Toggle
 	}
 	return nil
 }
@@ -1254,6 +1290,8 @@ func componentCapturing(c *build.Component) bool {
 		return c.Textview.Searching()
 	case build.KEventlog:
 		return c.Eventlog.IsCapturingKeys()
+	case build.KInput:
+		return c.Input.IsCapturingKeys()
 	}
 	return false
 }
@@ -1274,6 +1312,10 @@ func componentHelp(c *build.Component) []key.Binding {
 		return c.Textview.Help()
 	case build.KEventlog:
 		return c.Eventlog.Help()
+	case build.KInput:
+		return c.Input.Help()
+	case build.KToggle:
+		return c.Toggle.Help()
 	}
 	return nil
 }
@@ -1319,6 +1361,7 @@ func (m *Model) activate() (tea.Cmd, bool) {
 // points honest: they cannot drift on binding resolution, input
 // collection, confirm or dispatch, because there is only one copy.
 func (m *Model) startAction(b cfg.ActionBinding) (tea.Cmd, bool) {
+	b = m.bindInputs(b)
 	cur := m.current()
 	focusedName := ""
 	if m.focus >= 0 && m.focus < len(m.tree.Order) {
@@ -1382,7 +1425,7 @@ func (m *Model) actionAfterInputs(b cfg.ActionBinding, def *cfg.Action, sel buil
 		return fan()
 	}
 
-	resolved, err := action.Resolve(def, inputs)
+	resolved, err := action.Resolve(m.inputDef(def), inputs)
 	if err != nil {
 		return app.Error(fmt.Sprintf("%s: %v", b.Action, err))
 	}
@@ -1862,6 +1905,14 @@ func updateComponent(c *build.Component, msg tea.Msg) tea.Cmd {
 		m, cmd := c.Eventlog.Update(msg)
 		*c.Eventlog = m
 		return cmd
+	case build.KInput:
+		m, cmd := c.Input.Update(msg)
+		*c.Input = m
+		return cmd
+	case build.KToggle:
+		m, cmd := c.Toggle.Update(msg)
+		*c.Toggle = m
+		return cmd
 	}
 	return nil
 }
@@ -1870,7 +1921,7 @@ func updateComponent(c *build.Component, msg tea.Msg) tea.Cmd {
 // declaration. Compared against every driver's tagged RowFocusedMsg
 // to decide which dependent source should refetch.
 type cursorBinding struct {
-	driver string            // driver component name (a table)
+	driver string            // driver component name (a table); "" when only inputs feed it
 	target string            // dependent component name
 	source string            // dependent source's registry name
 	bind   map[string]string // param name -> template ("${cursor.Name}", etc.)
@@ -1996,9 +2047,15 @@ func (m *Model) initCursor(components map[string]*cfg.Component, sources map[str
 	m.cursorCaches = map[string]*ds.ParamCache{}
 	m.cursorSourceDefs = map[string]*cfg.Source{}
 	m.cursorAllSources = sources
+	m.inputs = map[string]string{}
+	for _, name := range m.tree.Order {
+		if c := m.tree.Components[name]; c.Kind == build.KInput || c.Kind == build.KToggle {
+			m.inputs[name] = build.InputValue(c)
+		}
+	}
 	for _, name := range m.tree.Order {
 		comp := components[name]
-		if comp == nil || comp.OnCursor == nil {
+		if comp == nil || (comp.OnCursor == nil && comp.OnInput == nil) {
 			continue
 		}
 		srcName := comp.Source
@@ -2019,12 +2076,21 @@ func (m *Model) initCursor(components map[string]*cfg.Component, sources map[str
 		}
 		m.cursorCaches[srcName] = cache
 		m.cursorSourceDefs[srcName] = srcDef
-		m.cursorBindings = append(m.cursorBindings, cursorBinding{
-			driver: comp.OnCursor.Source,
-			target: name,
-			source: srcName,
-			bind:   comp.OnCursor.Bind,
-		})
+		// on_cursor and on_input feed one binding: the source is fetched
+		// with every parameter either fills, whichever of them moved.
+		b := cursorBinding{target: name, source: srcName, bind: map[string]string{}}
+		if comp.OnCursor != nil {
+			b.driver = comp.OnCursor.Source
+			for k, v := range comp.OnCursor.Bind {
+				b.bind[k] = v
+			}
+		}
+		if comp.OnInput != nil {
+			for k, v := range comp.OnInput.Bind {
+				b.bind[k] = v
+			}
+		}
+		m.cursorBindings = append(m.cursorBindings, b)
 	}
 	return nil
 }
@@ -2072,7 +2138,7 @@ func (m *Model) startCursorFetch(b cursorBinding) tea.Cmd {
 	sel := m.cursorState[b.driver]
 	params := make(map[string]string, len(b.bind))
 	for k, tmpl := range b.bind {
-		params[k] = build.SubstituteCursor(tmpl, sel)
+		params[k] = build.SubstituteCursor(build.SubstituteInputValues(tmpl, m.inputs), sel)
 	}
 	cache := m.cursorCaches[b.source]
 	sources := m.cursorAllSources

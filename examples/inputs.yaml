@@ -1,0 +1,85 @@
+# inputs.yaml — an input and a toggle that drive a source.
+#
+# `type: input` is a one-line text field and `type: toggle` a yes/no
+# switch. Neither displays a source: other components read their
+# committed values as ${input.NAME} and refetch when they change.
+#
+#   tab      move onto the Search field and start typing
+#   enter    commit — the table refetches with the new query
+#   esc      put the committed text back and leave the field
+#   ← → / ␣  flip the toggle; every flip commits
+#
+# The table's source is an exec command with two parameters; `on_input`
+# binds them. It runs once at start with the `initial:` values, then on
+# every commit. The same token works in actions: `enter` on a row echoes
+# the current search alongside the pod's name.
+app:
+  title: Inputs
+  theme: nord
+
+actions:
+  note:
+    description: Echo the focused pod and the search that found it
+    inputs:
+      name: {required: true}
+    run: [echo, "${inputs.name} (search: ${input.search})"]
+
+data:
+  sources:
+    pods:
+      type: exec
+      parameters:
+        q: {type: string, default: ""}
+        deleted: {type: bool, default: "false"}
+      # A fixture with a deleted pod; grep -i filters by the query, and
+      # deleted pods are dropped unless the toggle is on.
+      command:
+        - sh
+        - -c
+        - |
+          rows='web Running
+          api CrashLoopBackOff
+          db Running
+          old-batch Deleted'
+          printf '%s\n' "$rows" | sed 's/^ *//' \
+            | { if [ "${params.deleted}" = true ]; then cat; else grep -v Deleted; fi; } \
+            | grep -i -- "${params.q}" \
+            | awk 'BEGIN{printf "["} {printf "%s{\"name\":\"%s\",\"status\":\"%s\"}", (NR>1?",":""), $1, $2} END{print "]"}'
+
+tui:
+  components:
+    search:
+      type: input
+      title: Search
+      placeholder: name…
+    show_deleted:
+      type: toggle
+      title: Deleted pods
+      yes_label: shown
+      no_label: hidden
+    pods_table:
+      type: table
+      title: Pods
+      source: pods
+      on_input:
+        bind: {q: "${input.search}", deleted: "${input.show_deleted}"}
+      columns:
+        - {title: Name, value: name, flex: 1}
+        - title: Status
+          value: status
+          color_rules:
+            - {when: Running, color: green}
+            - {when: "~Crash", color: red}
+            - {when: Deleted, color: gray}
+
+  screen:
+    title: Inputs
+    layout:
+      vstack:
+        - hstack:
+            - {flex: 2, component: search}
+            - {flex: 1, component: show_deleted}
+          fixed: 3
+        - {component: pods_table}
+    actions:
+      - {key: enter, action: note, from: pods_table, bind: {name: "${selection}"}}

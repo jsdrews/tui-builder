@@ -1098,7 +1098,45 @@ type Component struct {
 	// "table on top, detail below" interfaces where scrolling the top
 	// pane refreshes the bottom.
 	OnCursor *OnCursor `yaml:"on_cursor,omitempty"`
+	// OnInput rebinds this component's source parameters from inputs
+	// and toggles on the screen (${input.NAME}), refetching when one
+	// commits. For a component with no cursor driver; ${input.*} also
+	// works inside on_cursor.bind.
+	OnInput *OnInput `yaml:"on_input,omitempty"`
+
+	// input / toggle:
+	//
+	// Initial is the value bound before anything is committed: an
+	// input's text (templated with ${env.*}), or a toggle's "true" /
+	// "false".
+	Initial string `yaml:"initial,omitempty"`
+	// Placeholder is shown in an empty input.
+	Placeholder string `yaml:"placeholder,omitempty"`
+	// CharLimit caps an input's length; 0 is no limit.
+	CharLimit int `yaml:"char_limit,omitempty"`
+	// Mask shows an input's characters as bullets.
+	Mask bool `yaml:"mask,omitempty"`
+	// YesLabel / NoLabel name a toggle's two sides. Default "yes" / "no".
+	YesLabel string `yaml:"yes_label,omitempty"`
+	NoLabel  string `yaml:"no_label,omitempty"`
 }
+
+// OnInput is a component's `on_input:` — source parameters filled from
+// inputs and toggles on the same screen:
+//
+//	on_input:
+//	  bind: {q: "${input.search}", deleted: "${input.show_deleted}"}
+type OnInput struct {
+	Bind map[string]string `yaml:"bind"`
+}
+
+// InputHeight is an input's or toggle's height in rows: a bordered
+// one-line field. A layout item holding one defaults to it.
+const InputHeight = 3
+
+// InputKinds are the component kinds that hold a value other components
+// read as ${input.NAME}.
+var InputKinds = []string{"input", "toggle"}
 
 // Activity is a component's `activity:` block: which field says what a
 // row is doing, and which of its values mean "busy".

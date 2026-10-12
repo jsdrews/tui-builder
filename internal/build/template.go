@@ -178,6 +178,8 @@ func cloneComponent(c *cfg.Component, sel Selection) *cfg.Component {
 	out := *c
 	out.Title = substitute(c.Title, sel)
 	out.LoadingLabel = substitute(c.LoadingLabel, sel)
+	out.Initial = substitute(c.Initial, sel)
+	out.Placeholder = substitute(c.Placeholder, sel)
 	out.FilterPlaceholder = substitute(c.FilterPlaceholder, sel)
 	out.InitialFilter = substitute(c.InitialFilter, sel)
 	out.InitialQuery = substitute(c.InitialQuery, sel)
@@ -289,6 +291,23 @@ func substituteCell(v any, sel Selection) any {
 // The key may be dotted: an eventlog item's nested fields are columns
 // named by their path (${selection.event_data.host}).
 var tokenRe = regexp.MustCompile(`\$\{(selection|cursor|env|inputs)(?:\.([A-Za-z0-9_.]+))?\}`)
+
+// inputRe matches ${input.NAME}, an input's or toggle's committed value.
+// Kept apart from tokenRe because it resolves against live screen state,
+// not a frozen selection or an action's own inputs.
+var inputRe = regexp.MustCompile(`\$\{input\.([A-Za-z0-9_]+)\}`)
+
+// SubstituteInputValues resolves ${input.NAME} against the committed
+// values of a screen's inputs and toggles; an unknown name is "". Every
+// other token passes through for its own resolver.
+func SubstituteInputValues(s string, values map[string]string) string {
+	if !strings.Contains(s, "${input.") {
+		return s
+	}
+	return inputRe.ReplaceAllStringFunc(s, func(match string) string {
+		return values[inputRe.FindStringSubmatch(match)[1]]
+	})
+}
 
 func substitute(s string, sel Selection) string {
 	return substituteAll(s, sel, nil)

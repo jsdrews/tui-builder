@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -161,6 +162,9 @@ func (c *Config) Validate() error {
 	if err := validateGrowing(c.Data.Sources); err != nil {
 		return err
 	}
+	if err := c.validateActionInputRefs(); err != nil {
+		return err
+	}
 
 	// Mode check: exactly one of screen / screens.
 	hasSingle := c.TUI.Screen.HasContent()
@@ -270,7 +274,129 @@ func (c *Config) validatePane(path string, layout *Node, actions []ActionBinding
 	if err := validateActionBindings(actions, refs, c.TUI.Components, c.Actions, path, &c.App); err != nil {
 		return err
 	}
-	return validateOnCursor(refs, c.TUI.Components, path)
+	if err := validateOnCursor(refs, c.TUI.Components, path); err != nil {
+		return err
+	}
+	if err := c.validateOnInput(refs, path); err != nil {
+		return err
+	}
+	return c.validateInputRefs(refs, actions, path)
+}
+
+// inputRefRe matches ${input.NAME}: the committed value of an input or
+// toggle on the same screen.
+var inputRefRe = regexp.MustCompile(`\$\{input\.([A-Za-z0-9_]+)\}`)
+
+// InputRefs lists the input names s references.
+func InputRefs(s string) []string {
+	var out []string
+	for _, m := range inputRefRe.FindAllStringSubmatch(s, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
+// validateActionInputRefs checks ${input.NAME} in action definitions.
+// An action is shared by every screen that binds it, so the most that
+// can be said here is that NAME is an input or toggle somewhere; on a
+// screen without it, the token resolves to "".
+func (c *Config) validateActionInputRefs() error {
+	for name, a := range c.Actions {
+		if a == nil {
+			continue
+		}
+		for _, tmpl := range a.Templates() {
+			for _, ref := range InputRefs(tmpl) {
+				comp := c.TUI.Components[ref]
+				if comp == nil || !slices.Contains(InputKinds, comp.Type) {
+					return fmt.Errorf("actions.%s: ${input.%s} needs an input or toggle component named %q", name, ref, ref)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// validateOnInput checks each placed component's `on_input:`: it needs
+// a source to rebind, binds only declared parameters, and doesn't bind
+// a parameter on_cursor already does.
+func (c *Config) validateOnInput(refs map[string]int, path string) error {
+	for name, comp := range c.TUI.Components {
+		if comp == nil || comp.OnInput == nil || refs[name] == 0 {
+			continue
+		}
+		p := fmt.Sprintf("%s.components.%s.on_input", path, name)
+		if len(comp.OnInput.Bind) == 0 {
+			return fmt.Errorf("%s: `bind:` is required", p)
+		}
+		if comp.Source == "" {
+			return fmt.Errorf("%s: the component has no `source:` — nothing to rebind", p)
+		}
+		src := c.Data.Sources[comp.Source]
+		for param := range comp.OnInput.Bind {
+			if src != nil && src.Parameters != nil {
+				if _, ok := src.Parameters[param]; !ok {
+					return fmt.Errorf("%s.bind.%s: source %q declares no parameter %q", p, param, comp.Source, param)
+				}
+			}
+			if comp.OnCursor != nil {
+				if _, dup := comp.OnCursor.Bind[param]; dup {
+					return fmt.Errorf("%s.bind.%s: on_cursor binds it too — bind each parameter once (${input.*} works inside on_cursor.bind)", p, param)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// validateInputRefs checks every ${input.NAME} a screen's bindings read
+// names an input or toggle placed on that screen.
+func (c *Config) validateInputRefs(refs map[string]int, actions []ActionBinding, path string) error {
+	check := func(where, tmpl string) error {
+		for _, name := range InputRefs(tmpl) {
+			comp := c.TUI.Components[name]
+			if refs[name] == 0 || comp == nil || !slices.Contains(InputKinds, comp.Type) {
+				return fmt.Errorf("%s: ${input.%s} needs an input or toggle named %q on this screen", where, name, name)
+			}
+		}
+		return nil
+	}
+	for name, comp := range c.TUI.Components {
+		if comp == nil || refs[name] == 0 {
+			continue
+		}
+		var binds map[string]string
+		if comp.OnCursor != nil {
+			binds = comp.OnCursor.Bind
+		}
+		for k, v := range binds {
+			if err := check(fmt.Sprintf("%s.components.%s.on_cursor.bind.%s", path, name, k), v); err != nil {
+				return err
+			}
+		}
+		if comp.OnInput != nil {
+			for k, v := range comp.OnInput.Bind {
+				if err := check(fmt.Sprintf("%s.components.%s.on_input.bind.%s", path, name, k), v); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	for i, b := range actions {
+		bp := fmt.Sprintf("%s.actions[%d]", path, i)
+		for k, v := range b.Bind {
+			if err := check(bp+".bind."+k, v); err != nil {
+				return err
+			}
+		}
+		if err := check(bp+".confirm", b.Confirm.Message); err != nil {
+			return err
+		}
+		if err := check(bp+".notice", b.Notice); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // validateOnCursor checks every layout-participating component's
@@ -485,6 +611,7 @@ func (it *Item) validate(path string, components map[string]*Component, refs map
 	if it.Flex > 0 && it.Fixed > 0 {
 		return fmt.Errorf("%s: set one of `flex:` / `fixed:`, not both (fixed would win and flex would be ignored)", path)
 	}
+
 	return it.Node.validate(path, components, refs)
 }
 
@@ -500,7 +627,15 @@ func (n *Node) validate(path string, components map[string]*Component, refs map[
 	switch {
 	case n.VStack != nil:
 		for i, it := range n.VStack {
-			if err := it.validate(fmt.Sprintf("%s.vstack[%d]", path, i), components, refs); err != nil {
+			ip := fmt.Sprintf("%s.vstack[%d]", path, i)
+			// An input or toggle is a bordered one-line field: three
+			// rows, always. (In an hstack, flex and fixed set its width.)
+			if c := components[it.Component]; c != nil && slices.Contains(InputKinds, c.Type) {
+				if it.Flex > 0 || (it.Fixed != 0 && it.Fixed != InputHeight) {
+					return fmt.Errorf("%s: an %s is %d rows tall — leave `flex:` / `fixed:` unset (or `fixed: %d`)", ip, c.Type, InputHeight, InputHeight)
+				}
+			}
+			if err := it.validate(ip, components, refs); err != nil {
 				return err
 			}
 		}
@@ -528,7 +663,7 @@ func (n *Node) validate(path string, components map[string]*Component, refs map[
 
 // ComponentKinds is every `type:` a component may have, in the order the
 // reference documents them. The docs coverage test reads it too.
-var ComponentKinds = []string{"list", "table", "logview", "tree", "inspector", "textview", "eventlog"}
+var ComponentKinds = []string{"list", "table", "logview", "tree", "inspector", "textview", "eventlog", "input", "toggle"}
 
 func (c *Component) validate(path string) error {
 	switch {
@@ -694,6 +829,12 @@ func (c *Component) validateKindOptions(path string) error {
 		set   bool
 		kinds []string
 	}{
+		{"initial", c.Initial != "", InputKinds},
+		{"placeholder", c.Placeholder != "", []string{"input"}},
+		{"char_limit", c.CharLimit != 0, []string{"input"}},
+		{"mask", c.Mask, []string{"input"}},
+		{"yes_label", c.YesLabel != "", []string{"toggle"}},
+		{"no_label", c.NoLabel != "", []string{"toggle"}},
 		{"loading_label", c.LoadingLabel != "", []string{"list", "table", "tree"}},
 		{"line_numbers", c.LineNumbers, []string{"logview"}},
 		{"gutter", c.Gutter != nil, []string{"eventlog"}},
@@ -702,6 +843,17 @@ func (c *Component) validateKindOptions(path string) error {
 	for _, o := range onlyOn {
 		if o.set && !slices.Contains(o.kinds, c.Type) {
 			return fmt.Errorf("%s: `%s:` is only valid on %s", path, o.field, strings.Join(o.kinds, ", "))
+		}
+	}
+	if slices.Contains(InputKinds, c.Type) {
+		if c.Source != "" {
+			return fmt.Errorf("%s: an %s holds a value, it doesn't display a source — other components read it as ${input.NAME}", path, c.Type)
+		}
+		if c.Type == "toggle" && c.Initial != "" && c.Initial != "true" && c.Initial != "false" {
+			return fmt.Errorf("%s.initial: %q (want true|false)", path, c.Initial)
+		}
+		if c.CharLimit < 0 {
+			return fmt.Errorf("%s.char_limit: can't be negative", path)
 		}
 	}
 	if c.NewFor != "" && c.NewFor != "-" {

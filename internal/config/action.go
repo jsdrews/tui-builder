@@ -151,6 +151,17 @@ type Action struct {
 	Claim *Claim `yaml:"claim,omitempty"`
 }
 
+// Templates returns every templated string an action dispatches with:
+// its argv, or its method, URL, header values and body.
+func (a *Action) Templates() []string {
+	out := append([]string(nil), a.Run...)
+	out = append(out, a.Method, a.URL, a.Body)
+	for _, v := range a.Headers {
+		out = append(out, v)
+	}
+	return out
+}
+
 // Claim is an action's `claim:`. Written as just a label it means the
 // row spins until the action returns:
 //

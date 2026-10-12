@@ -14,6 +14,7 @@ import (
 
 	"github.com/jsdrews/tuilib/pkg/ansi"
 	"github.com/jsdrews/tuilib/pkg/eventlog"
+	"github.com/jsdrews/tuilib/pkg/input"
 	"github.com/jsdrews/tuilib/pkg/inspector"
 	"github.com/jsdrews/tuilib/pkg/list"
 	"github.com/jsdrews/tuilib/pkg/logview"
@@ -21,6 +22,7 @@ import (
 	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/textview"
 	"github.com/jsdrews/tuilib/pkg/theme"
+	"github.com/jsdrews/tuilib/pkg/toggle"
 	"github.com/jsdrews/tuilib/pkg/tree"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
@@ -39,6 +41,8 @@ const (
 	KInspector
 	KTextview
 	KEventlog
+	KInput
+	KToggle
 )
 
 // Component is a live, themed component pointer plus the originating config
@@ -55,6 +59,8 @@ type Component struct {
 	Inspector *inspector.Model
 	Textview  *textview.Model
 	Eventlog  *eventlog.Model
+	Input     *input.Model
+	Toggle    *toggle.Model
 
 	// Remote is set on a table bound to a windowed source, which tuilib's
 	// pkg/remote drives; Table then points at its embedded table. Every
@@ -113,6 +119,12 @@ func NewComponent(c *cfg.Component, th theme.Theme) (*Component, error) {
 	case "textview":
 		m := buildTextview(c, th)
 		return &Component{Cfg: c, Kind: KTextview, Textview: &m}, nil
+	case "input":
+		m := buildInput(c, th)
+		return &Component{Cfg: c, Kind: KInput, Input: &m}, nil
+	case "toggle":
+		m := buildToggle(c, th)
+		return &Component{Cfg: c, Kind: KToggle, Toggle: &m}, nil
 	case "eventlog":
 		// A stand-in until the screen binds it to its source with
 		// NewRemoteEventlog; it draws an empty pane meanwhile.
@@ -173,6 +185,14 @@ func (c *Component) Rebuild(th theme.Theme) {
 		st := c.Eventlog.State()
 		*c.Eventlog = eventlog.New(eventlogOptions(c.Cfg, th))
 		c.Eventlog.Restore(st)
+	case KInput:
+		st := c.Input.State()
+		*c.Input = buildInput(c.Cfg, th)
+		c.Input.Restore(st)
+	case KToggle:
+		st := c.Toggle.State()
+		*c.Toggle = buildToggle(c.Cfg, th)
+		c.Toggle.Restore(st)
 	}
 	c.recolor(th)
 }
@@ -820,7 +840,8 @@ func applyPaneColors(active, inactive *lipgloss.TerminalColor, spinner *lipgloss
 	if v := parseColor(cs.BorderInactive, th); v != nil {
 		*inactive = v
 	}
-	if v := parseColor(cs.Spinner, th); v != nil {
+	// Inputs and toggles have no spinner.
+	if v := parseColor(cs.Spinner, th); v != nil && spinner != nil {
 		*spinner = spinner.Foreground(v)
 	}
 }
@@ -1012,6 +1033,48 @@ func parseSI(s string) float64 {
 	}
 	f, _ := strconv.ParseFloat(strings.TrimSpace(s), 64)
 	return f * mult
+}
+
+// ------------------------------------------------------- input / toggle ---
+
+// buildInput is a one-line text field whose committed value other
+// components read as ${input.NAME}.
+func buildInput(c *cfg.Component, th theme.Theme) input.Model {
+	opts := th.Input()
+	opts.Title = c.Title
+	opts.Placeholder = c.Placeholder
+	opts.Initial = c.Initial
+	opts.CharLimit = c.CharLimit
+	if c.Mask {
+		opts.Echo = input.EchoMask
+		opts.MaskChar = MaskChar()
+	}
+	applyPaneColors(&opts.ActiveColor, &opts.InactiveColor, nil, c.Colors, th)
+	return input.New(opts)
+}
+
+// buildToggle is a yes/no switch whose value other components read as
+// ${input.NAME}: "true" or "false".
+func buildToggle(c *cfg.Component, th theme.Theme) toggle.Model {
+	opts := th.Toggle()
+	opts.Title = c.Title
+	opts.Initial = c.Initial == "true"
+	opts.YesLabel = c.YesLabel
+	opts.NoLabel = c.NoLabel
+	applyPaneColors(&opts.ActiveColor, &opts.InactiveColor, nil, c.Colors, th)
+	return toggle.New(opts)
+}
+
+// InputValue is an input's or toggle's current value, as ${input.NAME}
+// reads it.
+func InputValue(c *Component) string {
+	switch c.Kind {
+	case KInput:
+		return c.Input.Value()
+	case KToggle:
+		return strconv.FormatBool(c.Toggle.Value())
+	}
+	return ""
 }
 
 // ------------------------------------------------------------- eventlog ---
