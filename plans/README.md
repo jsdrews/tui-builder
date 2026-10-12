@@ -29,8 +29,10 @@ section in the plan gets trimmed or deleted.
   resume, app and component options, and the docs fixes. **All landed**
   (#62–#72); kept as the record of how, with what changed during the
   build and the follow-ups it left. It replaced the old `tabs.md` draft.
-- [`http-source.md`](http-source.md) — survey of ~25 real HTTP APIs
-  (pagination, auth, rate limits, streaming, formats) and the tiered
-  list of `type: http` features that would cover them. The starting
-  point for [Map: HTTP source spec](https://github.com/jsdrews/tui-builder/issues/7),
-  which rewrites it into a locked spec.
+- [`http-source.md`](http-source.md) — the locked spec for `type: http`:
+  presets, `query:`, `json:`/`form:` bodies, locators, error handling,
+  pagination strategies, `auth:`, `retry:`, conditional GET and a
+  `graphql:` shorthand, each mapping from OpenAPI 3. Decided on
+  [Map: HTTP source spec](https://github.com/jsdrews/tui-builder/issues/7);
+  seven PRs, none landed yet. The API survey behind it is in
+  [`research/http-survey.md`](research/http-survey.md).
