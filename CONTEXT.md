@@ -65,6 +65,14 @@ _Avoid_: cursor-paged, infinite
 The position token of an item in an anchored window: the value the next request walks from.
 _Avoid_: using Cursor for the focused row (see Focused row)
 
+**Locator**:
+Where a response-level value is read from: a dot-path into the body, a header, or an entry in the `Link` header.
+_Avoid_: path (for headers and links), selector
+
+**Patch**:
+A partial request merged into a source's query string or body for one request, by a window edge or a paginate walk.
+_Avoid_: override, overlay
+
 **Token**:
 A `${namespace.key}` placeholder in a templated field, resolved from its namespace (`params`, `env`, `window`, …) at a set moment.
 _Avoid_: variable, placeholder (in prose), template (that's the whole string)
