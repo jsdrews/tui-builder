@@ -59,7 +59,7 @@ func (m *Model) own(cmd tea.Cmd) tea.Cmd {
 					out = append(out, wrap(sub))
 				}
 				return out
-			case fetchMsg, tickMsg, streamMsg, resumeMsg, postApplyMsg,
+			case fetchMsg, pollMsg, streamMsg, resumeMsg, postApplyMsg,
 				actionPickedMsg, actionResultMsg,
 				taggedCursorMsg, cursorFetchMsg,
 				windowViewportMsg, windowQueryMsg, windowTickMsg:

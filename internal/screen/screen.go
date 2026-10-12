@@ -32,6 +32,7 @@ import (
 	"github.com/jsdrews/tuilib/pkg/layout"
 	"github.com/jsdrews/tuilib/pkg/list"
 	"github.com/jsdrews/tuilib/pkg/mouse"
+	"github.com/jsdrews/tuilib/pkg/poll"
 	"github.com/jsdrews/tuilib/pkg/runner"
 	tscreen "github.com/jsdrews/tuilib/pkg/screen"
 	"github.com/jsdrews/tuilib/pkg/table"
@@ -76,6 +77,13 @@ type sourceEntry struct {
 	// streaming is set once a source has subscribed, and stays set after
 	// its stream ends, so `r` knows to reconnect it rather than refetch.
 	streaming bool
+	// poll ticks a `refresh:` source's refetches. nil for sources that
+	// aren't polled this way: one-shot, streaming, windowed (their remote
+	// binding polls) and cursor-driven ones.
+	poll *poll.Model
+	// inflight is set while a fetch is out, so a tick that lands during a
+	// slow fetch doesn't stack a second one behind it.
+	inflight bool
 	// resume tracks a `resume:` stream's line timestamps, so a reconnect
 	// asks for what it missed and skips what it already has. nil for
 	// streams without one.
@@ -101,10 +109,6 @@ type fetchMsg struct {
 	// the fetch was issued, by component name.
 	reads map[string]activity.Read
 }
-
-// tickMsg signals "time to refetch source X." Emitted by the per-source
-// tea.Tick scheduled after each successful fetch when refresh > 0.
-type tickMsg struct{ source string }
 
 // streamMsg delivers one event from a streaming source. Lines append
 // to the bound logview; an Err ends the stream and surfaces in the
@@ -458,6 +462,7 @@ func (m *Model) onEnter() tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
+	cmds = append(cmds, m.startPolls()...)
 	// A binding with no cursor driver reads only inputs, so nothing will
 	// prime it: fetch it now with the inputs' initial values.
 	for _, b := range m.cursorBindings {
@@ -719,8 +724,8 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 	switch x := msg.(type) {
 	case fetchMsg:
 		return m, m.handleFetch(x)
-	case tickMsg:
-		return m, m.startFetch(x.source)
+	case pollMsg:
+		return m, m.handlePoll(x)
 	case streamMsg:
 		return m, m.handleStream(x)
 	case resumeMsg:
@@ -952,6 +957,7 @@ func (m *Model) startFetch(name string) tea.Cmd {
 			reads[compName] = build.BeginRead(c)
 		}
 	}
+	entry.inflight = true
 	cmds = append(cmds, func() tea.Msg {
 		data, err := entry.src.Fetch(context.Background())
 		return fetchMsg{source: name, data: data, err: err, reads: reads}
@@ -967,6 +973,10 @@ func (m *Model) handleFetch(msg fetchMsg) tea.Cmd {
 	entry, ok := m.sources[msg.source]
 	if !ok {
 		return nil
+	}
+	entry.inflight = false
+	if entry.poll != nil && msg.err == nil {
+		entry.poll.MarkRefreshed()
 	}
 	var cmds []tea.Cmd
 	// Sources may legitimately return (data, err) at the same time —
@@ -1042,12 +1052,6 @@ func (m *Model) handleFetch(msg fetchMsg) tea.Cmd {
 			// than a fresh error on the statusbar every poll.
 			cmds = append(cmds, app.Error(fmt.Sprintf("%s: %v", msg.source, msg.err)))
 		}
-	}
-	if d := entry.src.Refresh(); d > 0 {
-		name := msg.source
-		cmds = append(cmds, tea.Tick(d, func(time.Time) tea.Msg {
-			return tickMsg{source: name}
-		}))
 	}
 	// After ApplyData: fan a wake msg to every component so any
 	// pending tuilib focus emit (RowFocusedMsg from SetRows,
