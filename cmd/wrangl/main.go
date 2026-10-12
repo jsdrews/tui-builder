@@ -374,8 +374,8 @@ func paramMode(p *cfg.Parameter) string {
 //
 //   - Cadence: streamed / polled / one-shot — how the source emits
 //     values over time (event-driven, clock-driven, or single fetch).
-//   - Binding: self-contained / needs params — whether required
-//     parameters must be bound by a caller before the source can run.
+//   - Readiness: self-contained / needs params — whether required
+//     parameters need arguments from a caller before the source can run.
 //
 // A streaming source can also need params (kube `pod_logs` follow
 // with required namespace/name); a polled source can also need params

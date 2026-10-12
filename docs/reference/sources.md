@@ -16,7 +16,7 @@ no `lifecycle:` setting:
 | one-shot | neither: fetched once (and again on `r`) |
 
 A source that declares a required parameter with no default "needs
-params": it can only run once a caller binds them (a push binding,
+params": it can only run once a caller passes arguments for them (a push binding,
 `on_cursor`, a join, or `wrangl --param`).
 
 ## Fields shared by leaf sources
@@ -174,7 +174,7 @@ pods_all:
 
 Typed inputs on a source, referenced as `${params.NAME}` in its
 templated fields (`url`, `method`, `body`, `headers`, `path`, `command`,
-`env`, `initial_messages`). Callers supply values: a push binding's
+`env`, `initial_messages`). Callers pass arguments: a push binding's
 `bind:`, `on_cursor.bind`, a join lookup's `on:`, or
 `wrangl --param NAME=VALUE`. On an operator, values are available in its
 expressions as `params.NAME` (see

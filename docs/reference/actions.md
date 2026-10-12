@@ -263,7 +263,7 @@ along. It's navigation, so it has no inputs, output or exclusivity.
 On the destination screen, the focused row of the binding's `from:`
 component is available as `${selection…}` in the screen title and in its
 sources' templated fields. The binding's `bind:` fills the destination's
-sources' `parameters:`; a required parameter left unbound is reported
+sources' `parameters:`; a required parameter with no argument is reported
 when the push happens.
 
 ```yaml

@@ -65,8 +65,9 @@ interfaces and nothing else.
 
 ## Lifecycle
 
-Two independent properties, both inferred from the config (there is no
-`lifecycle:` field), and reported by `wrangl --list` and `--describe`:
+Two independent properties, **cadence** and **readiness**, both inferred
+from the config (there is no `lifecycle:` field), and reported by
+`wrangl --list` and `--describe`:
 
 | Cadence | When |
 |---|---|
@@ -74,7 +75,7 @@ Two independent properties, both inferred from the config (there is no
 | `polled` | `refresh:` is set |
 | `one-shot` | neither |
 
-| Binding | When |
+| Readiness | When |
 |---|---|
 | self-contained | no parameters, or every required one has a default |
 | `needs params` | at least one required parameter without a default |
