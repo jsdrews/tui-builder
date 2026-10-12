@@ -15,15 +15,15 @@ the record of what was decided, what
 [changed while building it](#what-changed-while-building-it), and the
 [follow-ups](#open-follow-ups) it left.
 
-The facts behind it are two research notes, kept on their branches:
+The facts behind it are two research notes, in `plans/research/`:
 
 - [Inventory: tuilib v0.35 surface vs what tui-builder exposes](https://github.com/jsdrews/tui-builder/issues/48)
-  ([`research/tuilib-0.35-inventory`](https://github.com/jsdrews/tui-builder/blob/research/tuilib-0.35-inventory/plans/research/tuilib-0.35-inventory.md)).
+  ([`research/tuilib-0.35-inventory.md`](research/tuilib-0.35-inventory.md)).
   12 of 38 packages were never imported, though most run inside the app
   shell or inside components we build. Every wrapped component has
   options we don't expose.
 - [Docs audit: where the zensical site and reference are stale](https://github.com/jsdrews/tui-builder/issues/49)
-  ([`research/docs-audit`](https://github.com/jsdrews/tui-builder/blob/research/docs-audit/plans/research/docs-audit.md)).
+  ([`research/docs-audit.md`](research/docs-audit.md)).
   The site builds clean; the gaps are in values, rules and prose.
 
 ## How verdicts were reached
