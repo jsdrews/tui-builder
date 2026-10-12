@@ -1,6 +1,7 @@
 package screen
 
 import (
+	"context"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -172,3 +173,21 @@ func (h *Tabbed) HelpSections() []help.Section {
 func (h *Tabbed) Actions() taction.Set { return h.current().Actions() }
 
 func (h *Tabbed) current() *Model { return h.bodies[h.tabs.ActiveTab()] }
+
+// cancelAll ends every tab's requests and streams.
+func (h *Tabbed) cancelAll() {
+	for _, b := range h.bodies {
+		b.cancel()
+	}
+}
+
+// cancelOf is how the screen under s stops s's work once s is popped.
+func cancelOf(s tscreen.Screen) context.CancelFunc {
+	switch x := s.(type) {
+	case *Model:
+		return x.cancel
+	case *Tabbed:
+		return x.cancelAll
+	}
+	return nil
+}

@@ -515,10 +515,26 @@ func (s *Source) validateHTTP(path string) error {
 // validate enforces WindowConfig's required params and value ranges.
 // path is the YAML path (e.g. `data.sources.books.window`).
 func (w *WindowConfig) validateShared(path string) error {
-	switch w.Anchor {
-	case "", "newest", "oldest":
+	switch {
+	case w.Anchor == "", w.Anchor == "newest", w.Anchor == "oldest", IsAnchorTemplate(w.Anchor):
 	default:
-		return fmt.Errorf("%s.anchor: unknown anchor %q (want newest|oldest)", path, w.Anchor)
+		return fmt.Errorf("%s.anchor: unknown anchor %q (want newest|oldest, or a template resolving to a cursor)", path, w.Anchor)
+	}
+	if d := w.ViewportDelay; d != "" && d != "-" {
+		if v, err := time.ParseDuration(d); err != nil || v <= 0 {
+			return fmt.Errorf("%s.viewport_delay: %q is not a positive duration (or \"-\" to ask at once)", path, d)
+		}
+	}
+	if f := w.Find; f != nil {
+		if len(f.Params) == 0 && len(f.Body) == 0 {
+			return fmt.Errorf("%s.find: needs `params:` or `body:` — the patch that turns a request into a search", path)
+		}
+		if w.Cursor == "" && f.Position == "" {
+			return fmt.Errorf("%s.find.position: required on a paged source — the path in the matching item to its position in the set", path)
+		}
+		if w.Cursor != "" && f.Position != "" {
+			return fmt.Errorf("%s.find.position: doesn't apply to an Anchored source — the view re-anchors at the match's cursor", path)
+		}
 	}
 	if w.Anchor != "" && w.Cursor == "" {
 		return fmt.Errorf("%s.anchor: only applies with `cursor:` — a paged window starts where the bound component's `start:` says", path)
@@ -628,6 +644,9 @@ func (w *WindowConfig) validateExecWindow(path string, argv []string) error {
 
 	if len(w.Older) > 0 || len(w.Newer) > 0 {
 		return fmt.Errorf("%s: `older:` / `newer:` are http-only — an exec command reads ${window.cursor} and ${window.dir} (older|newer) instead", path)
+	}
+	if w.Find != nil {
+		return fmt.Errorf("%s.find: http-only — an exec window can only search what's loaded", path)
 	}
 	joined := strings.Join(argv, " ")
 	required := []string{"${window.offset}", "${window.limit}"}

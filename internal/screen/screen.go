@@ -66,8 +66,8 @@ type Multi struct {
 // screen; flashing to a spinner and back would just flicker).
 //
 // Streaming sources additionally carry a cancel func that ends the
-// subscription when the screen's lifecycle calls for it (deferred — v1
-// leaks streams on pop, documented in the package doc).
+// subscription. Its context derives from the screen's, so popping the
+// screen ends it too (see Model.pushed).
 type sourceEntry struct {
 	src    ds.Source
 	loaded bool
@@ -170,6 +170,14 @@ type Model struct {
 	// cursorCaches absorbs the redundant construction cost for
 	// repeated params.
 	cursorAllSources map[string]*cfg.Source
+
+	// ctx is the parent of this screen's remote requests and stream
+	// subscriptions; cancel ends them all. A screen can't tell it has
+	// been popped, but the one under it can (its OnEnter runs again), so
+	// that screen cancels the ones it pushed — pushed holds their cancels.
+	ctx    context.Context
+	cancel context.CancelFunc
+	pushed []context.CancelFunc
 
 	// inputs holds each input's and toggle's committed value, by
 	// component name: what ${input.NAME} reads. An input commits on
@@ -284,6 +292,7 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, entries map[str
 		return nil, err
 	}
 	m := &Model{title: s.Title, th: th, tree: tree, focus: -1, multi: multi, id: nextModelID.Add(1)}
+	m.ctx, m.cancel = context.WithCancel(context.Background())
 	if len(tree.All()) > 0 {
 		m.focus = 0
 	}
@@ -388,6 +397,12 @@ func (m *Model) Init() tea.Cmd {
 // handle refreshes.
 func (m *Model) OnEnter(any) tea.Cmd {
 	m.covered = false
+	// Whatever this screen pushed has been popped: stop its requests and
+	// streams rather than let them run on for a screen nobody can see.
+	for _, cancel := range m.pushed {
+		cancel()
+	}
+	m.pushed = nil
 	return m.own(m.onEnter())
 }
 
@@ -421,7 +436,7 @@ func (m *Model) onEnter() tea.Cmd {
 		// fires alongside so the bound logview can render an empty
 		// initial state via the standard apply path.
 		if streamer, ok := entry.src.(ds.StreamingSource); ok {
-			pump, err := subscribe(name, entry, streamer)
+			pump, err := subscribe(m.ctx, name, entry, streamer)
 			if err == nil {
 				cmds = append(cmds, m.startFetch(name), pump)
 				continue
@@ -451,8 +466,8 @@ func (m *Model) onEnter() tea.Cmd {
 
 // subscribe opens a streaming source's channel and returns the pump that
 // drains it.
-func subscribe(name string, entry *sourceEntry, streamer ds.StreamingSource) (tea.Cmd, error) {
-	ctx, cancel := context.WithCancel(context.Background())
+func subscribe(parent context.Context, name string, entry *sourceEntry, streamer ds.StreamingSource) (tea.Cmd, error) {
+	ctx, cancel := context.WithCancel(parent)
 	ch, err := streamer.Subscribe(ctx)
 	if err != nil {
 		cancel()
@@ -478,7 +493,7 @@ func (m *Model) reconnect() []tea.Cmd {
 		if !ok {
 			continue
 		}
-		pump, err := subscribe(name, entry, streamer)
+		pump, err := subscribe(m.ctx, name, entry, streamer)
 		if err != nil {
 			cmds = append(cmds, app.Error(fmt.Sprintf("%s: %v", name, err)))
 			continue
@@ -1778,6 +1793,9 @@ func (m *Model) pushAction(b cfg.ActionBinding, def *cfg.Action, sel build.Selec
 		return app.Error(fmt.Sprintf("%s: %v", def.Push, err)), true
 	}
 	m.covered = true
+	if cancel := cancelOf(child); cancel != nil {
+		m.pushed = append(m.pushed, cancel)
+	}
 	return tscreen.Push(child), true
 }
 

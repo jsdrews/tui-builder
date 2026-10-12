@@ -256,7 +256,9 @@ Supported on `http` (the request goes in the query string) and `exec`
 | `cursor` | string | — | eventlog and span-table sources | Makes the source **Anchored**: walked from an edge instead of paged by offset. The dot-path to each item's cursor, the value the next request walks from (ES `sort`, a timestamp, an id). See [Anchored windows](#anchored-windows). |
 | `older` | map | — | http, with `cursor` | What the request changes to walk towards older items, merged into `body:` or set as query parameters. |
 | `newer` | map | — | http, with `cursor` | The same, walking towards newer items. |
-| `anchor` | string | `newest` | with `cursor` | Where an Anchored view starts: `newest` (and follows), or `oldest` (and walks newer as you scroll down). |
+| `anchor` | string | `newest` | with `cursor` | Where an Anchored view starts: `newest` (and follows), `oldest` (and walks newer as you scroll down), or a template that resolves to a cursor, `${input.jump_to}`, to jump there. See [jumping](#jumping-to-a-cursor). |
+| `find` | map | — | http | Searches past what's loaded: `n` / `N` ask the source where the next match is. See [`find`](#find). |
+| `viewport_delay` | duration | tuilib's | — | How long scrolling must pause before rows are requested. `-` asks at once. |
 | `growing` | `true` or map | — | eventlog only; not with `refresh` | The set is still gaining items at its newest end. A bound eventlog follows the newest item and the source is polled every `follow_every`; when growth stops, one final read picks up the last items. `true` grows for as long as the screen is open. The map form ties it to another source; see [growing](#growing). |
 | `follow_every` | duration | `2s` | needs `growing` | Poll interval while growing. |
 
@@ -335,6 +337,73 @@ don't apply. Where it opens is `anchor:`; the eventlog's `start:` is for
 paged sources and is rejected here. An eventlog or a table can bind one;
 a table over an Anchored source is a span table (see
 [components.md](components.md#table)).
+
+#### Jumping to a cursor
+
+`anchor:` can be a template instead of `newest` / `oldest`. It resolves
+to a cursor (a timestamp, an id), and the view opens there. When it
+reads an [input](components.md#input) (`${input.NAME}`), committing that
+input jumps again. A template that resolves empty means `newest`.
+Templates take `${input.*}` and `${env.*}`.
+
+The value is sent as the cursor: text a JSON parser can't read is sent
+as a JSON string, so a typed `2026-10-11T09:00:00Z` reaches
+`search_after` as a string, and `[1760173200000]` stays an array.
+
+The first request walks older from the cursor, which most APIs answer
+*excluding* the item at the cursor itself. That item arrives with the
+newer side, so the view settles a row from where it jumped. For a
+typed time, which rarely matches an item exactly, that's the item you
+wanted anyway.
+
+```yaml
+jump_to: {type: input, title: Jump to (RFC 3339)}
+
+logs:
+  # …as above…
+  window:
+    cursor: sort
+    anchor: "${input.jump_to}"
+```
+
+### `find`
+
+Without `find:`, `/` searches only the items loaded, and `n` / `N` stop
+at the edge of what's held. With it, they ask the source where the next
+match is. `find:` is a patch over the source's request, like `older:` /
+`newer:`:
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `params` | map | — | one of `params` / `body` | Query parameters set on the search request. |
+| `body` | map | — | one of `params` / `body` | Fields merged into the request's JSON body. |
+| `position` | path | — | required on a paged source; not on an Anchored one | The path in the matching item to its 0-based position in the (filtered) set. |
+
+Its tokens are `${window.term}` (what was searched for), `${window.dir}`
+(`older` / `newer`: before or after the current item),
+`${window.cursor}` (the current item's cursor) and `${window.from}` (its
+position, on a paged source), plus the view's filter as on any window
+request. `${window.limit}` is `1`.
+
+The reply's first item is the match; none means there's no further
+match. An Anchored view re-anchors at the match's cursor; a paged one
+scrolls to its position.
+
+```yaml
+window:
+  cursor: sort
+  older: {…}
+  newer: {…}
+  find:
+    body:
+      query: {query_string: {query: "${window.term}"}}
+      search_after: "${window.cursor}"
+      sort: [{"@timestamp": desc}]
+```
+
+**Validation:** `find` needs `params` or `body`; `position` is required on
+a paged source and an error on an Anchored one; `find` is http-only (an
+exec window searches what's loaded).
 
 ### Growing
 

@@ -8,6 +8,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -76,9 +77,6 @@ type TUIBlock struct {
 	Initial string `yaml:"initial,omitempty"`
 }
 
-
-
-
 // JoinDriver names the iterable whose rows seed the join.
 type JoinDriver struct {
 	// From references a source or pipeline that returns an iterable.
@@ -101,8 +99,6 @@ type JoinLookup struct {
 	//     port:      "1000 + spec.containerPort"
 	On map[string]string `yaml:"on"`
 }
-
-
 
 // PaginateConfig controls multi-page walking on an http source. Only
 // meaningful when the source's `type:` is `http` and Format is JSON
@@ -250,9 +246,19 @@ type WindowConfig struct {
 	// only; an exec command reads ${window.cursor} and ${window.dir}.
 	Older map[string]any `yaml:"older,omitempty"`
 	Newer map[string]any `yaml:"newer,omitempty"`
-	// Anchor is where an Anchored view starts: "newest" (default) or
-	// "oldest". Only with Cursor.
+	// Anchor is where an Anchored view starts: "newest" (default),
+	// "oldest", or a template that resolves to a cursor (a time from
+	// ${params.since}, a value typed into ${input.jump_to}) — the view
+	// jumps there, and again whenever an input it reads commits. A
+	// template that resolves empty means newest. Only with Cursor.
 	Anchor string `yaml:"anchor,omitempty"`
+	// Find answers a search across the whole set rather than only what's
+	// loaded: `n` / `N` past the items held ask the source where the next
+	// match is. http only. See FindConfig.
+	Find *FindConfig `yaml:"find,omitempty"`
+	// ViewportDelay is how long scrolling must pause before rows are
+	// requested, a duration; "-" asks at once. Empty is tuilib's default.
+	ViewportDelay string `yaml:"viewport_delay,omitempty"`
 
 	// Growing says the set is still gaining items at its newest end — a
 	// running job's events. While it's growing, a bound eventlog follows
@@ -300,6 +306,30 @@ func (g *Growing) UnmarshalYAML(node *yaml.Node) error {
 	type plain Growing
 	return node.Decode((*plain)(g))
 }
+
+// FindConfig is `window.find:` — the request that finds the next match
+// for a search term, as a patch over the source's request: query
+// parameters, or fields merged into its JSON body. Its tokens are
+// ${window.term} (what the user searched for), ${window.dir} (older or
+// newer: before or after the current item), ${window.cursor} (the
+// current item's cursor) and ${window.from} (its position, Seekable
+// only), plus the filter tokens a window request takes.
+//
+// The reply's first item is the match; none means no match. On an
+// Anchored source the view re-anchors at its cursor. On a Seekable one,
+// Position says where in the whole (filtered) set it sits.
+type FindConfig struct {
+	Params map[string]any `yaml:"params,omitempty"`
+	Body   map[string]any `yaml:"body,omitempty"`
+	// Position is the dot-path in the matching item to its 0-based
+	// position in the set. Required on a Seekable source; an Anchored
+	// one finds by cursor.
+	Position string `yaml:"position,omitempty"`
+}
+
+// IsAnchorTemplate reports whether an anchor is a template rather than
+// newest / oldest.
+func IsAnchorTemplate(anchor string) bool { return strings.Contains(anchor, "${") }
 
 // DefaultWindowPageSize is the window size used when WindowConfig.PageSize
 // is unset. Matches tuilib's source.DefaultPageSize — big enough that a
@@ -825,7 +855,6 @@ type Prompt struct {
 	Key       string `yaml:"key"`
 	Parameter `yaml:",inline"`
 }
-
 
 // Node is a tagged-union layout node. Exactly one of VStack / HStack /
 // ZStack / Component must be non-empty. Component is the name of a

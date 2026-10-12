@@ -301,6 +301,19 @@ func InputRefs(s string) []string {
 // can be said here is that NAME is an input or toggle somewhere; on a
 // screen without it, the token resolves to "".
 func (c *Config) validateActionInputRefs() error {
+	// A templated window anchor is the same: a source can be bound on
+	// any screen.
+	for name, src := range c.Data.Sources {
+		if src == nil || src.Window == nil {
+			continue
+		}
+		for _, ref := range InputRefs(src.Window.Anchor) {
+			comp := c.TUI.Components[ref]
+			if comp == nil || !slices.Contains(InputKinds, comp.Type) {
+				return fmt.Errorf("data.sources.%s.window.anchor: ${input.%s} needs an input or toggle component named %q", name, ref, ref)
+			}
+		}
+	}
 	for name, a := range c.Actions {
 		if a == nil {
 			continue

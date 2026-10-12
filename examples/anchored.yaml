@@ -11,6 +11,10 @@
 # Two lines share every timestamp: they're kept apart by `key:`, so
 # neither is lost at a page boundary.
 #
+# `anchor:` reads the "Jump to second" field under the log: tab down,
+# type a second (0–499) and press enter, and the log re-opens there.
+# Left empty, it opens at the newest.
+#
 # The same shape over Elasticsearch, with the cursor in the POST body:
 #
 #   logs:
@@ -55,8 +59,13 @@ data:
       window:
         page_size: 50
         cursor: ts
+        anchor: "${input.jump_to}"
 tui:
   components:
+    jump_to:
+      type: input
+      title: Jump to second
+      placeholder: 0–499, then enter
     log:
       type: eventlog
       title: App log
@@ -72,4 +81,6 @@ tui:
   screen:
     title: App log
     layout:
-      component: log
+      vstack:
+        - {component: log}
+        - {component: jump_to}
