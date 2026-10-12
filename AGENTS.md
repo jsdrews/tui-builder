@@ -11,7 +11,7 @@ doc assumes you know what the project does. For the full schema
 reference, see [`docs/reference/`](docs/reference/README.md). Use the
 words in [`CONTEXT.md`](CONTEXT.md), the project's glossary, in code,
 docs and plans: several everyday words have one fixed meaning here
-(binding, cursor, input, control, parameter, argument).
+(binding, cursor, input, parameter, argument).
 
 ## The mental model
 
