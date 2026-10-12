@@ -72,12 +72,12 @@ _Avoid_: variable, placeholder (in prose), template (that's the whole string)
 ### Presentation layer
 
 **Component**:
-One pane on a screen. It displays a source named by its `source:`, or holds a value of its own (a control).
+One pane on a screen. It displays a source named by its `source:`, or holds a value of its own (an input field).
 _Avoid_: widget, view
 
-**Control**:
-A component that holds a value rather than displaying a source: an input field or a toggle. Other components read its committed value.
-_Avoid_: input (that's an action's), widget, field
+**Input field**:
+A component that holds a value rather than displaying a source: a text input (`type: input`) or a toggle (`type: toggle`). Other components read its committed value as `${input.NAME}`.
+_Avoid_: control, widget
 
 **Focused row**:
 The row, item or node under a component's cursor highlight. The `${cursor.*}` token and `on_cursor:` read a driver's focused row; those names predate this glossary.
@@ -89,7 +89,7 @@ _Avoid_: verb (except in the action menu), command
 
 **Input**:
 A typed slot an action declares under `inputs:`, filled by its binding or a form.
-_Avoid_: parameter (that's a source's), control (that's a component)
+_Avoid_: parameter (that's a source's). Not to be confused with an input field, which is a component.
 
 **Binding**:
 A screen's entry tying an action to a key and to a component's focused or marked rows, and filling the action's inputs from them.
