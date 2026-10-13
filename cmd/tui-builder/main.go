@@ -29,6 +29,7 @@ import (
 	"github.com/jsdrews/tui-builder/internal/build"
 	cfg "github.com/jsdrews/tui-builder/internal/config"
 	tqscreen "github.com/jsdrews/tui-builder/internal/screen"
+	"github.com/jsdrews/tui-builder/internal/version"
 )
 
 func main() {
@@ -41,6 +42,10 @@ func main() {
 func run() error {
 	if len(os.Args) < 2 {
 		return fmt.Errorf("usage: tui-builder <config.yaml>")
+	}
+	if os.Args[1] == "--version" || os.Args[1] == "-v" {
+		fmt.Println("tui-builder version", version.String())
+		return nil
 	}
 
 	c, err := cfg.Load(os.Args[1])

@@ -25,6 +25,7 @@ pipeline name), it writes that entry's value.
 | `--for D` | Stops a stream after duration D, e.g. `10s`. |
 | `--list-actions` | Lists the config's actions with their kinds and inputs. |
 | `--describe-action` | Shows one action's inputs and a dry run of the command or request it would send. Bind inputs with `--param`. |
+| `-v`, `--version` | Prints the version and exits. |
 
 There is no flag to run an action: confirm dialogs, exclusivity and input
 forms only exist in the TUI, and a headless run would skip them all.

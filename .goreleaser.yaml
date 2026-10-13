@@ -1,0 +1,50 @@
+# Release config. Pushing a v* tag runs .github/workflows/release.yml,
+# which builds these archives and attaches them to the GitHub release.
+# Try it locally with `goreleaser release --snapshot --clean`.
+version: 2
+
+project_name: tui-builder
+
+builds:
+  - id: tui-builder
+    main: ./cmd/tui-builder
+    binary: tui-builder
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - {goos: windows, goarch: arm64}
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/jsdrews/tui-builder/internal/version.Version={{.Tag}}
+  - id: wrangl
+    main: ./cmd/wrangl
+    binary: wrangl
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - {goos: windows, goarch: arm64}
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/jsdrews/tui-builder/internal/version.Version={{.Tag}}
+
+# One archive per platform holding both binaries:
+# tui-builder_<version>_<os>_<arch>.tar.gz (.zip on Windows).
+archives:
+  - ids: [tui-builder, wrangl]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  prerelease: auto
+
+changelog:
+  use: github-native

@@ -65,6 +65,16 @@ See [`docs/reference/sources.md`](docs/reference/sources.md) and
 
 ## Quickstart
 
+Install prebuilt binaries (Linux and macOS; no Go needed):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/jsdrews/tui-builder/main/scripts/install.sh | sh
+```
+
+Release archives, `go install` and other options are in the
+[quick start](https://jsdrews.github.io/tui-builder/quickstart/). To
+work from a clone with the examples:
+
 ```sh
 git clone git@github.com:jsdrews/tui-builder.git
 cd tui-builder

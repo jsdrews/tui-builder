@@ -26,3 +26,6 @@
 /.venv-docs/
 
 .claude
+
+# goreleaser output
+/dist/
