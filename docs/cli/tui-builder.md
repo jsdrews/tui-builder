@@ -6,7 +6,8 @@ Renders a config as an interactive terminal UI.
 tui-builder <config.yaml>
 ```
 
-It takes one argument, the config file, and no flags.
+It takes one argument, the config file. The only flag is `--version`
+(or `-v`), which prints the version and exits.
 
 ## What happens at startup
 

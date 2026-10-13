@@ -2,14 +2,53 @@
 
 ## Install
 
-tui-builder needs Go 1.25 or later.
+### Install script (Linux and macOS)
+
+Downloads the latest release, checks its checksum, and puts
+`tui-builder` and `wrangl` in `~/.local/bin`. No root needed and no
+Go toolchain: the binaries are static, so they run on any Linux
+(CentOS 7, Rocky, Alpine, …) on amd64 or arm64.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/jsdrews/tui-builder/main/scripts/install.sh | sh
+```
+
+Pin a version or choose another directory with environment variables:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/jsdrews/tui-builder/main/scripts/install.sh \
+  | VERSION=v0.5.0 INSTALL_DIR=/usr/local/bin sh
+```
+
+### Download a release
+
+Every [release](https://github.com/jsdrews/tui-builder/releases) has an
+archive per platform (`linux` / `darwin` × `amd64` / `arm64`, plus
+`windows_amd64.zip`) holding both binaries, and a `checksums.txt`.
+
+```sh
+VERSION=0.5.0  # without the leading v
+curl -fsSLO https://github.com/jsdrews/tui-builder/releases/download/v$VERSION/tui-builder_${VERSION}_linux_amd64.tar.gz
+tar -xzf tui-builder_${VERSION}_linux_amd64.tar.gz tui-builder wrangl
+sudo install -m 755 tui-builder wrangl /usr/local/bin/
+```
+
+On macOS, a browser download is quarantined by Gatekeeper; clear it
+with `xattr -d com.apple.quarantine tui-builder wrangl`. The install
+script doesn't need this.
+
+### With Go
+
+Needs Go 1.25 or later.
 
 ```sh
 go install github.com/jsdrews/tui-builder/cmd/tui-builder@latest
 go install github.com/jsdrews/tui-builder/cmd/wrangl@latest
 ```
 
-Or build from a clone, which also gives you the examples:
+### From a clone
+
+This also gives you the examples:
 
 ```sh
 git clone https://github.com/jsdrews/tui-builder.git
@@ -17,6 +56,8 @@ cd tui-builder
 task build        # → bin/tui-builder, bin/wrangl, bin/example-launcher
 task examples     # browse and run every example
 ```
+
+Check what you have with `tui-builder --version` or `wrangl --version`.
 
 ## A first config
 

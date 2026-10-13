@@ -46,6 +46,7 @@ import (
 	cfg "github.com/jsdrews/tui-builder/internal/config"
 	"github.com/jsdrews/tui-builder/internal/output"
 	"github.com/jsdrews/tui-builder/internal/pipeline"
+	"github.com/jsdrews/tui-builder/internal/version"
 )
 
 func main() {
@@ -103,6 +104,7 @@ wrangl never compiles, links, or drags in any terminal-UI code.`,
   # Bind parameters on a parameterized source (repeatable)
   wrangl examples/params_demo.yaml posts_by_user --param user_id=1
   wrangl examples/params_demo.yaml posts_by_user --param user_id=3 --param limit=10`,
+		Version:       version.String(),
 		Args:          cobra.MaximumNArgs(2),
 		SilenceUsage:  true,
 		SilenceErrors: false,
