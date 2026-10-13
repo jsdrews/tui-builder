@@ -31,10 +31,67 @@ params": it can only run once a caller passes arguments for them (a push binding
 | `timeout` | duration | `10s` | http, exec, websocket | Per-fetch limit. On websocket it bounds only the initial connect; ignored with `follow: true`. |
 | `cache` | map | — | sources with `parameters:` | Memoises fetches per parameter combination. See [`cache`](#cache). |
 | `pipe` | list | — | — | Transform stages applied to this source's output. See [pipelines.md](pipelines.md#pipe). |
+| `extends` | string | — | any leaf kind | The [preset](#presets) this source inherits fields from. |
+| `unset` | list | — | with `extends` | Inherited fields to drop, by name: `unset: [paginate, refresh]`. |
 | `resume` | map | — | streams: websocket, or exec / http with `follow: true` | Reconnects exactly: tracks each line's timestamp, resumes from the last one and skips repeats. See [`resume`](#resume). |
 
 **Validation:** `format` is `json` or `text`; `refresh`, `timeout` and
-`cache.ttl` parse as durations.
+`cache.ttl` parse as durations. Every `${params.NAME}` in a templated
+field names a declared parameter.
+
+## Presets
+
+A preset is a named, partial leaf under `data.presets:`. A source names
+one with `extends:` and inherits its fields, so ten sources against one
+API don't each repeat its base URL, headers and timeout. A preset
+produces nothing: a component can't bind to it and `wrangl` can't run
+it.
+
+```yaml
+data:
+  presets:
+    github:
+      type: http
+      url: https://api.github.com
+      headers: {Accept: application/vnd.github+json}
+      timeout: 15s
+  sources:
+    issues:
+      extends: github
+      url: /repos/${params.repo}/issues     # → https://api.github.com/repos/…
+      parameters:
+        repo: {type: string, required: true}
+```
+
+How a source's fields combine with its preset's:
+
+| Field kind | Fields | Rule |
+|---|---|---|
+| Single values | `method`, `timeout`, `format`, `root`, `refresh`, `body`, `follow`, … | The source's replaces the preset's. |
+| String maps | `headers`, `env` | Merged key by key. The source wins on a shared key, and `""` drops an inherited key. |
+| Lists | `command`, `initial_messages` | The source's replaces the whole list. |
+| Blocks | `paginate`, `window`, `resume`, `cache` | The source's replaces the whole block; they never merge. |
+| `url` | | An absolute url (with a scheme, or starting with a token like `${env.BASE}`) replaces the preset's. Any other is appended to the preset's path with one `/` between: `/v1` + `/users` is `/v1/users`. Query strings in both merge, the source's winning on a shared key. |
+| `parameters` | | The union of both. A source that redeclares a name replaces the preset's whole declaration, and `${params.NAME}` anywhere, the preset's url included, is filled by the source's caller. |
+| `type` | | Inherited. If both set it, they must match. |
+
+`unset: [field, …]` drops inherited fields. Setting a field to `null`,
+`false` or `0` reads the same as leaving it out, so it can't override a
+preset's value: unset it instead. A preset may itself `extends:` one other preset,
+so org-wide settings can sit under per-API ones.
+
+**Validation:** a preset is any leaf field except `pipe:`, and its keys
+are checked strictly: an unknown one is an error that suggests the
+nearest field (`unknown field "timout" (did you mean timeout?)`). Its
+`type`, if set, is a leaf kind. `extends:` names a preset that exists,
+and chains have no cycles. A preset and a source can't share a name.
+Everything else is checked on the merged source, so a preset can leave
+out what a source must have.
+
+`wrangl --list` shows presets in their own section, and `wrangl
+--describe` on a source shows its preset chain and marks each inherited
+field `(from <preset>)`. `wrangl --describe <preset>` shows the preset
+and the sources that extend it.
 
 ## `http`
 

@@ -47,6 +47,36 @@ and again on `r`.
 `root:` picks the list out of the response. `format: text` keeps the
 response as a string, for logs.
 
+### Sharing settings with a preset
+
+Sources against one API repeat its base URL, headers and timeout. Put
+those in a **preset** under `data.presets:`, and have each source
+`extends:` it:
+
+```yaml
+data:
+  presets:
+    github:
+      type: http
+      url: https://api.github.com
+      headers: {Accept: application/vnd.github+json}
+  sources:
+    repo:
+      extends: github
+      url: /repos/${params.name}           # appended to the preset's url
+      parameters:
+        name: {type: string, default: jsdrews/tui-builder}
+    my_repos:
+      extends: github
+      url: /users/jsdrews/repos
+      refresh: 10m
+```
+
+A source's own fields win; `headers:` merge key by key, and `unset:
+[field]` drops one it would inherit. A preset produces nothing itself,
+so components bind to the sources. The merge rules are in
+[Reference → Presets](../reference/sources.md#presets).
+
 ## Pipelines
 
 Operators take `from:` (or several inputs) and produce a new entry:

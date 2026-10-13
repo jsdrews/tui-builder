@@ -59,6 +59,11 @@ type DataBlock struct {
 	// / union / compose / join / cache). Each kind reads only the
 	// fields it cares about; the others are silently ignored.
 	Sources map[string]*Source `yaml:"sources,omitempty"`
+	// Presets are named, partial leaves that sources `extends:` to
+	// share settings. A preset produces nothing: Load folds each one
+	// into the sources that extend it (see preset.go), and leaves each
+	// entry here resolved against the presets it extends in turn.
+	Presets map[string]*Source `yaml:"presets,omitempty"`
 }
 
 // TUIBlock holds the presentation-layer definitions: components and

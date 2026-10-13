@@ -8,6 +8,9 @@
 # /users/${selection}/repos, the level-3 source fetches
 # /repos/${selection.Repo}.
 #
+# Both sources share GitHub's base URL, Accept header, timeout and poll
+# interval through the `github` preset; each adds only its own path.
+#
 # Polling is set to 5m so re-pushing the same screen reuses cached data
 # initially (each new push is a fresh fetch anyway). Press `r` to refresh
 # the current screen on demand.
@@ -16,21 +19,21 @@ app:
   theme: nord
 
 data:
+  presets:
+    github:
+      type: http
+      url: https://api.github.com
+      refresh: 5m
+      timeout: 15s
+      headers:
+        Accept: application/vnd.github+json
   sources:
     repos:
-      type: http
-      url: https://api.github.com/users/${selection}/repos?sort=updated&per_page=50
-      refresh: 5m
-      timeout: 15s
-      headers:
-        Accept: application/vnd.github+json
+      extends: github
+      url: /users/${selection}/repos?sort=updated&per_page=50
     repo_detail:
-      type: http
-      url: https://api.github.com/repos/${selection.Repo}
-      refresh: 5m
-      timeout: 15s
-      headers:
-        Accept: application/vnd.github+json
+      extends: github
+      url: /repos/${selection.Repo}
 
 tui:
   components:

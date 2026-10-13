@@ -8,7 +8,8 @@
 # Auth pattern: ${env.GITHUB_TOKEN} in the Authorization header — resolved at
 # fetch time via os.Getenv. Tokens never live in YAML. If GITHUB_TOKEN is
 # unset, the header reads "Bearer " and GitHub returns 401 — surfaced in the
-# statusbar.
+# statusbar. The header lives once, in the `github` preset, with the rest
+# of what every GitHub request shares.
 #
 # Why authenticated:
 #   - Rate limit jumps from 60/hr to 5000/hr.
@@ -23,10 +24,10 @@ app:
       description: "Classic PAT or fine-grained token with repo:read scope. https://github.com/settings/tokens"
 
 data:
-  sources:
-    starred:
+  presets:
+    github:
       type: http
-      url: https://api.github.com/user/starred?per_page=50&sort=updated
+      url: https://api.github.com
       refresh: 10m
       timeout: 15s
       headers:
@@ -34,15 +35,14 @@ data:
         X-GitHub-Api-Version: "2022-11-28"
         Authorization: "Bearer ${env.GITHUB_TOKEN}"
 
+  sources:
+    starred:
+      extends: github
+      url: /user/starred?per_page=50&sort=updated
+
     repo_detail:
-      type: http
-      url: https://api.github.com/repos/${selection.Repo}
-      refresh: 10m
-      timeout: 15s
-      headers:
-        Accept: application/vnd.github+json
-        X-GitHub-Api-Version: "2022-11-28"
-        Authorization: "Bearer ${env.GITHUB_TOKEN}"
+      extends: github
+      url: /repos/${selection.Repo}
 
 tui:
   components:

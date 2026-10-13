@@ -41,6 +41,7 @@ actions:
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
 | `sources` | map of source | — | — | Every data entry, keyed by name. Each entry's `type:` picks a leaf kind ([sources.md](sources.md)) or an operator ([pipelines.md](pipelines.md)). Components and `wrangl` address entries by these names. |
+| `presets` | map of preset | — | — | Named, partial leaf sources that sources `extends:` to share settings. A preset produces nothing and can't be bound or run. See [presets](sources.md#presets). |
 
 ## `app`
 

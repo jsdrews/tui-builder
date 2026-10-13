@@ -35,6 +35,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -197,6 +198,9 @@ func runDump(args []string, listOnly, pretty, raw, all bool, limit int, maxDurat
 	pipelineParams := map[string]map[string]string{}
 	if !listOnly && len(args) >= 2 {
 		target := args[1]
+		if _, ok := c.Data.Presets[target]; ok {
+			return fmt.Errorf("%s is a preset; run a source that extends it", target)
+		}
 		// If the target is an OPERATOR entry that declares its own
 		// `parameters:`, bind there (its expressions see params.X).
 		// Otherwise walk through to the underlying leaf and bind the
@@ -254,33 +258,63 @@ func runDescribe(configPath, target string) error {
 	// shape of a request, so `${env.AWX_HOST}/api/v2/jobs/` is the useful
 	// answer, and resolving it would print whatever secret an env var
 	// holds into the terminal.
+	if p, ok := c.Data.Presets[target]; ok {
+		describeLeaf(os.Stdout, target, p, extendedBy(c, target))
+		return nil
+	}
 	s, ok := c.Data.Sources[target]
 	if !ok {
 		return fmt.Errorf("no entry named %q (run `wrangl --list %s` to see what's defined)", target, configPath)
 	}
 	if s.IsLeaf() {
-		describeLeaf(os.Stdout, target, s)
+		describeLeaf(os.Stdout, target, s, nil)
 	} else {
 		describeOperator(os.Stdout, target, s, c)
 	}
 	return nil
 }
 
-func describeLeaf(w *os.File, name string, s *cfg.Source) {
+// describeLeaf prints a leaf source, or a preset when extendedBy is
+// non-nil (the sources extending it). A field inherited from a preset
+// gets a "(from <preset>)" suffix.
+func describeLeaf(w *os.File, name string, s *cfg.Source, extendedBy []string) {
+	preset := extendedBy != nil
+	from := func(field string) string {
+		if o := s.Inherited[field]; o != "" && o != name {
+			return " (from " + o + ")"
+		}
+		return ""
+	}
 	fmt.Fprintf(w, "%s\n", name)
-	fmt.Fprintf(w, "  Kind:       source / %s\n", s.Type)
-	fmt.Fprintf(w, "  Lifecycle:  %s\n", inferLifecycle(s))
+	if preset {
+		fmt.Fprintf(w, "  Kind:       preset / %s%s\n", s.Type, from("type"))
+	} else {
+		fmt.Fprintf(w, "  Kind:       source / %s%s\n", s.Type, from("type"))
+	}
+	if len(s.ExtendsChain) > 0 {
+		fmt.Fprintf(w, "  Extends:    %s\n", strings.Join(s.ExtendsChain, " → "))
+	}
+	if !preset {
+		fmt.Fprintf(w, "  Lifecycle:  %s\n", inferLifecycle(s))
+	}
 	if s.Refresh != "" {
-		fmt.Fprintf(w, "  Refresh:    %s\n", s.Refresh)
+		fmt.Fprintf(w, "  Refresh:    %s%s\n", s.Refresh, from("refresh"))
 	}
 	if s.URL != "" {
-		fmt.Fprintf(w, "  URL:        %s\n", s.URL)
+		fmt.Fprintf(w, "  URL:        %s%s\n", s.URL, from("url"))
 	}
 	if s.Path != "" {
-		fmt.Fprintf(w, "  Path:       %s\n", s.Path)
+		fmt.Fprintf(w, "  Path:       %s%s\n", s.Path, from("path"))
 	}
 	if len(s.Command) > 0 {
-		fmt.Fprintf(w, "  Command:    %v\n", s.Command)
+		fmt.Fprintf(w, "  Command:    %v%s\n", s.Command, from("command"))
+	}
+	if preset {
+		by := strings.Join(extendedBy, ", ")
+		if by == "" {
+			by = "(nothing)"
+		}
+		fmt.Fprintf(w, "  Extended by: %s\n", by)
 	}
 	if len(s.Parameters) == 0 {
 		fmt.Fprintln(w, "  Parameters: (none)")
@@ -540,6 +574,7 @@ func printList(w *os.File, c *cfg.Config, reg *pipeline.Registry, showAll bool) 
 	for _, r := range rows {
 		fmt.Fprintf(w, "%-*s   %-*s   %-*s   %s\n", nw, r.name, kw, r.kind, lw, r.lifecycle, r.upstream)
 	}
+	printPresets(w, c)
 	_ = reg // reserved — future --list will use the Registry for richer info (emitted types after Phase 2 operators land).
 }
 
@@ -561,4 +596,39 @@ func lifecycleOfRef(c *cfg.Config, ref string) string {
 		return "unknown"
 	}
 	return lifecycleOfRef(c, ups[0])
+}
+
+// printPresets lists data.presets after the sources, in their own
+// section: a preset produces nothing, so it isn't a row you can run.
+func printPresets(w *os.File, c *cfg.Config) {
+	if len(c.Data.Presets) == 0 {
+		return
+	}
+	names := make([]string, 0, len(c.Data.Presets))
+	for name := range c.Data.Presets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	nw, kw := len("PRESET"), len("KIND")
+	for _, name := range names {
+		nw = max(nw, len(name))
+		kw = max(kw, len("preset / ")+len(c.Data.Presets[name].Type))
+	}
+	fmt.Fprintf(w, "\n%-*s   %-*s   %s\n", nw, "PRESET", kw, "KIND", "EXTENDED BY")
+	for _, name := range names {
+		fmt.Fprintf(w, "%-*s   %-*s   %s\n", nw, name, kw, "preset / "+c.Data.Presets[name].Type, strings.Join(extendedBy(c, name), ", "))
+	}
+}
+
+// extendedBy lists the sources that inherit from preset, directly or
+// through another preset.
+func extendedBy(c *cfg.Config, preset string) []string {
+	out := []string{}
+	for name, s := range c.Data.Sources {
+		if slices.Contains(s.ExtendsChain, preset) {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

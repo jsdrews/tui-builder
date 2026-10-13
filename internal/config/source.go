@@ -41,6 +41,18 @@ type Source struct {
 	// intermediates.
 	Pipe []Source `yaml:"pipe,omitempty"`
 
+	// Extends names a preset under data.presets whose fields this leaf
+	// inherits. Resolved at load (see preset.go), so nothing after
+	// Load needs to know a source had one, beyond --describe.
+	Extends string `yaml:"extends,omitempty"`
+	// Unset lists inherited fields to drop, by YAML name.
+	Unset []string `yaml:"unset,omitempty"`
+	// ExtendsChain is the presets this source inherits from, nearest
+	// first, and Inherited maps each field it took from them to the
+	// preset that set it. Both are filled at load, for --describe.
+	ExtendsChain []string          `yaml:"-"`
+	Inherited    map[string]string `yaml:"-"`
+
 	// ── Leaf-shared fields (http / exec / file / websocket / static / merge) ──
 	// Root is a dot-path into the response selecting the iterable
 	// root for list/table bindings. Empty = response itself.
@@ -367,6 +379,13 @@ func (s *Source) Clone() *Source {
 	if s.Command != nil {
 		out.Command = append([]string(nil), s.Command...)
 	}
+	if s.Unset != nil {
+		out.Unset = append([]string(nil), s.Unset...)
+	}
+	if s.ExtendsChain != nil {
+		out.ExtendsChain = append([]string(nil), s.ExtendsChain...)
+	}
+	out.Inherited = maps.Clone(s.Inherited)
 	if s.Sources != nil {
 		out.Sources = append([]string(nil), s.Sources...)
 	}

@@ -84,7 +84,7 @@ data:
       url: /repos/${params.repo}/issues
       query: {state: open}
       parameters:
-        - {name: repo, type: string, required: true}
+        repo: {type: string, required: true}
 ```
 
 **Merging** (the source over its preset):
@@ -496,7 +496,7 @@ Each PR ships its own rows.
 |---|---|---|
 | Preset: unknown `extends:`, a cycle, a `type:` mismatch, `pipe:` inside it, `unset:` naming an unknown field | `presets.a: extends cycle a → b → a` | 1 |
 | Unknown key in a strictly decoded block | `sources.x.paginate: unknown field "cursor_pram" (did you mean cursor_param?)` | 1 |
-| A token naming an undeclared parameter (after merging) | as today | 1 |
+| A token naming an undeclared parameter (after merging; new, nothing checked this before) | `data.sources.x: ${params.region} names no parameter declared under parameters:` | 1 |
 | Owned query key also in `url:` / `query:` | `sources.issues.query: "page" is set by paginate (page_param)` | 2 |
 | More than one of `json:` / `form:` / `body:` / `graphql:` | `sources.x: json and body are mutually exclusive` | 2, 7 |
 | `header:` / `link:` / `last:` locator on an item-level field | `sources.x.window.cursor: header: locators only work on response-level fields` | 3 |
