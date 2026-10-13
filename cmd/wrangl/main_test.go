@@ -139,6 +139,81 @@ tui:
 	}
 }
 
+const presetConfig = `
+data:
+  presets:
+    org:
+      type: http
+      url: https://api.example.test/v1
+    api:
+      extends: org
+      refresh: 30s
+  sources:
+    issues:
+      extends: api
+      url: /issues
+tui:
+  components:
+    t:
+      type: table
+      source: issues
+      columns:
+        - {title: V, width: 20, value: v}
+  screen:
+    layout:
+      component: t
+`
+
+// A source that extends a preset describes as its merged result, with
+// the chain and where each inherited field came from.
+func TestRunDescribeShowsPresetOrigins(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "presets.yaml")
+	write(t, cfgPath, presetConfig)
+
+	out := captureStdout(t, func() {
+		if err := runDescribe(cfgPath, "issues"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, want := range []string{
+		"Extends:    api → org",
+		"Refresh:    30s (from api)",
+		"URL:        https://api.example.test/v1/issues\n",
+		"source / http (from org)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+
+	out = captureStdout(t, func() {
+		if err := runDescribe(cfgPath, "org"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "preset / http") || !strings.Contains(out, "Extended by: issues") {
+		t.Errorf("preset describe:\n%s", out)
+	}
+}
+
+func TestPresetsListedAndNotRunnable(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "presets.yaml")
+	write(t, cfgPath, presetConfig)
+
+	out := captureStdout(t, func() {
+		if err := runDump([]string{cfgPath}, true, false, false, false, 0, 0, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "PRESET") || !strings.Contains(out, "issues") {
+		t.Errorf("--list:\n%s", out)
+	}
+	err := runDump([]string{cfgPath, "org"}, false, false, false, false, 0, 0, nil)
+	if err == nil || !strings.Contains(err.Error(), "org is a preset; run a source that extends it") {
+		t.Errorf("running a preset: err = %v", err)
+	}
+}
+
 func write(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {

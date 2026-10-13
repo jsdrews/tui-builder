@@ -20,9 +20,24 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	var c Config
-	if err := yaml.Unmarshal(b, &c); err != nil {
+	var root yaml.Node
+	if err := yaml.Unmarshal(b, &root); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	var c Config
+	if len(root.Content) > 0 {
+		if err := root.Decode(&c); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+	}
+	// Presets decode strictly: an unknown key there is an error, not
+	// silently dropped. Then fold them into the sources that extend
+	// them, before anything below looks at a source.
+	if err := checkStrict(&root); err != nil {
+		return nil, fmt.Errorf("validate %s: %w", path, err)
+	}
+	if err := resolvePresets(&c.Data); err != nil {
+		return nil, fmt.Errorf("validate %s: %w", path, err)
 	}
 	// Desugar `pipe:` chains before validation runs.
 	if err := ExpandSourcesPipe(c.Data.Sources); err != nil {
@@ -71,6 +86,9 @@ func (c *Config) Validate() error {
 		if err := s.Validate("data.sources." + name); err != nil {
 			return err
 		}
+		if err := checkParamTokens(s, "data.sources."+name); err != nil {
+			return err
+		}
 	}
 	// 2. Upstream resolution + cycle detection across the source graph.
 	if err := validateSourceUpstreams(c.Data.Sources); err != nil {
@@ -97,7 +115,7 @@ func (c *Config) Validate() error {
 		if ref := comp.Source; ref != "" {
 			entry, ok := c.Data.Sources[ref]
 			if !ok {
-				return fmt.Errorf("tui.components.%s: source %q not defined in data.sources", name, ref)
+				return fmt.Errorf("tui.components.%s: source %q not defined in data.sources%s", name, ref, presetHint(c.Data.Presets, ref))
 			}
 			if err := bindWindowed(name, comp, ref, entry); err != nil {
 				return err
@@ -1299,4 +1317,28 @@ func paramKeys(m map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+var paramToken = regexp.MustCompile(`\$\{params\.([A-Za-z0-9_]+)\}`)
+
+// checkParamTokens reports a ${params.X} in a leaf's templated fields
+// that names no declared parameter — a typo, or a preset's token whose
+// parameter nothing declares. Left alone it would resolve to "".
+func checkParamTokens(s *Source, path string) error {
+	if !s.IsLeaf() {
+		return nil
+	}
+	var missing string
+	s.Clone().SubstituteStrings(func(v string) string {
+		for _, m := range paramToken.FindAllStringSubmatch(v, -1) {
+			if _, ok := s.Parameters[m[1]]; !ok && missing == "" {
+				missing = m[1]
+			}
+		}
+		return v
+	})
+	if missing != "" {
+		return fmt.Errorf("%s: ${params.%s} names no parameter declared under parameters:", path, missing)
+	}
+	return nil
 }
