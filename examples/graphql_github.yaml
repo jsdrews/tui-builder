@@ -1,0 +1,63 @@
+# graphql_github.yaml — your GitHub repositories over the GraphQL API,
+# every page of them.
+#
+# `graphql:` sends {query, variables} as a JSON POST, and treats a 200
+# that carries `errors` as the error it is. Relay pagination needs
+# nothing GraphQL-specific: it's a cursor walk whose cursor goes into the
+# variables through `patch:`, absent on the first page.
+#
+# Every path reads the raw response, `root:` included, so they all start
+# at `data.`.
+#
+# Requires:  export GITHUB_TOKEN=ghp_...   (any token; it reads your repos)
+#
+#   task wrangl -- examples/graphql_github.yaml repos | jq length
+app:
+  title: GitHub (GraphQL)
+  theme: nord
+  env:
+    - name:        GITHUB_TOKEN
+      required:    true
+      description: "Any GitHub token. https://github.com/settings/tokens"
+
+data:
+  sources:
+    repos:
+      type: http
+      url: https://api.github.com/graphql
+      auth: {bearer: "${env.GITHUB_TOKEN}"}
+      graphql:
+        query: |
+          query($after: String) {
+            viewer {
+              repositories(first: 50, after: $after, orderBy: {field: PUSHED_AT, direction: DESC}) {
+                nodes { name description stargazerCount pushedAt primaryLanguage { name } }
+                pageInfo { endCursor hasNextPage }
+              }
+            }
+          }
+      root: data.viewer.repositories.nodes
+      paginate:
+        strategy: cursor
+        cursor_path: data.viewer.repositories.pageInfo.endCursor
+        more_when: data.viewer.repositories.pageInfo.hasNextPage
+        patch: {variables: {after: "${paginate.cursor}"}}
+        max_pages: 10
+      retry: {max: 3}
+
+tui:
+  components:
+    repos:
+      type: table
+      title: My repositories
+      source: repos
+      filterable: true
+      columns:
+        - {title: Repo,        width: 28, sortable: true, value: name}
+        - {title: Language,    width: 12, sortable: true, value: primaryLanguage.name}
+        - {title: Stars,       width: 7,  sortable: true, sort: number, align: right, value: stargazerCount}
+        - {title: Pushed,      width: 22, sortable: true, value: pushedAt}
+        - {title: Description, width: 50, value: description}
+  screen:
+    title: Repositories
+    layout: {component: repos}

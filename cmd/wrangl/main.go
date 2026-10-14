@@ -330,6 +330,23 @@ func describeLeaf(w *os.File, name string, s *cfg.Source, extendedBy []string) {
 			fmt.Fprintf(w, "%s%s: %s%s\n", label, k, v, from("headers"))
 		}
 	}
+	body := ""
+	switch {
+	case s.GraphQL != nil:
+		body = "graphql"
+	case s.JSON != nil:
+		body = "json"
+	case len(s.Form) > 0:
+		body = "form"
+	case s.Body != "":
+		body = "raw"
+	}
+	if body != "" {
+		if s.Method != "" {
+			fmt.Fprintf(w, "  Method:     %s%s\n", s.Method, from("method"))
+		}
+		fmt.Fprintf(w, "  Body:       %s\n", body)
+	}
 	if a := s.Auth; a.Scheme() != "" {
 		var how string
 		switch a.Scheme() {

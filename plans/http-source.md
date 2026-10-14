@@ -419,7 +419,7 @@ literal values.
 ## 8. Retries, rate limits and conditional GET
 
 From [Retry, rate limits and conditional GET](https://github.com/jsdrews/tui-builder/issues/15).
-Ships in PR 6.
+**Landed in [#86](https://github.com/jsdrews/tui-builder/pull/86).**
 
 ```yaml
 retry:
@@ -477,7 +477,8 @@ map.
 ## 9. GraphQL
 
 From [GraphQL shorthand and body-carried cursors](https://github.com/jsdrews/tui-builder/issues/16).
-Ships in PR 7.
+Ships in PR 7. Built as written; `examples/graphql_github.yaml` is the
+worked example, run against GitHub.
 
 `graphql: {query, variables}` builds `json: {query, variables}`,
 defaults to POST and to `error_path: errors.0.message`.

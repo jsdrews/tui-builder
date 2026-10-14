@@ -353,7 +353,7 @@ task example NAME=http_github
 
 ### http_github_auth
 
-Authenticated GitHub with `${env.GITHUB_TOKEN}` in a header. Needs `GITHUB_TOKEN`.
+Authenticated GitHub: `auth:` and `retry:` set once in a `github` preset. Needs `GITHUB_TOKEN`.
 
 ```sh
 task example NAME=http_github_auth
@@ -363,6 +363,21 @@ task example NAME=http_github_auth
 
     ```yaml
     --8<-- "examples/http_github_auth.yaml"
+    ```
+
+### graphql_github
+
+Your GitHub repositories over the GraphQL API: `graphql:` with Relay
+pagination as an ordinary cursor walk. Needs `GITHUB_TOKEN`.
+
+```sh
+task example NAME=graphql_github
+```
+
+??? example "graphql_github.yaml"
+
+    ```yaml
+    --8<-- "examples/graphql_github.yaml"
     ```
 
 ### exec_local

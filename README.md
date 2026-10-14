@@ -200,10 +200,10 @@ Source kinds (leaf — fetch externally):
 
 | Type | When | Notes |
 |---|---|---|
-| `http` | REST APIs, JSON endpoints, kube proxies | `url`, `method`, `headers`, `body`, `format: json\|text` |
+| `http` | REST and GraphQL APIs, JSON endpoints, kube proxies | `url`, `query`, `headers`, a `json` / `form` / `body` / `graphql` body, `auth` (bearer, basic, API key, OAuth 2 client credentials; masked in output), `retry` with rate-limit headers, conditional GET, `empty_on` / `error_path` |
 | `exec` | Anything that prints JSON: `kubectl get -o json`, `gh api`, `terraform output -json`, custom scripts | Per-source `env:` adds to inherited env |
 | `file` | Fixtures, generated dumps, lab notebook output | `refresh: <duration>` re-reads; omit for once |
-| `websocket` | Live event streams: chat, custom buses | Headers pass through on the upgrade request |
+| `websocket` | Live event streams: chat, custom buses | `headers` and `auth` go on the upgrade request |
 | `static` | Inline data, fixtures, lookup tables | `data:` carries the value directly — list, object, scalar |
 | `merge` | Compose N children, union the rows, tag each item by source — cross-cluster / cross-account / cross-anything | `tag_field:` writes child name into each item; `on_error: skip` returns survivors + a partial-error notice |
 
@@ -223,6 +223,26 @@ Operator kinds (transform an upstream entry):
 
 See [`docs/reference/components.md`](docs/reference/components.md) for every field.
 
+Sources against one API share their base URL, headers, auth and retry
+through a **preset** under `data.presets:`, which each source
+`extends:`:
+
+```yaml
+data:
+  presets:
+    github:
+      type: http
+      url: https://api.github.com
+      auth: {bearer: "${env.GITHUB_TOKEN}"}
+      retry: {max: 3}
+  sources:
+    issues:
+      extends: github
+      url: /repos/${params.repo}/issues     # appended to the preset's url
+```
+
+See [`docs/reference/sources.md`](docs/reference/sources.md#presets).
+
 ### Paging a remote API
 
 An `http` or `exec` source over more rows than fit in memory has two
@@ -230,8 +250,8 @@ options, and they trade against each other:
 
 ```yaml
 paginate:                  # walk every page up front, hand back one list
-  strategy: link
-  next_path: next
+  strategy: link           # or cursor, offset, page
+  next_path: "link:next"   # a body path, or the Link header
 
 window:                    # fetch only the rows on screen; the SERVER
   offset_param: offset     # answers the filter and the sort

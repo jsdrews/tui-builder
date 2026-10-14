@@ -95,9 +95,9 @@ and the sources that extend it.
 
 ## `http`
 
-Requests a URL and parses the response. For REST and JSON APIs, GraphQL
-(via a POST body), kube proxies, and streamed endpoints with
-`follow: true`.
+Requests a URL and parses the response. For REST and JSON APIs,
+GraphQL (see [`graphql`](#graphql)), kube proxies, and streamed
+endpoints with `follow: true`.
 
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
@@ -112,6 +112,7 @@ Requests a URL and parses the response. For REST and JSON APIs, GraphQL
 | `json` | any | — | not with `form`, `body` | Request body written as YAML and sent as JSON, with `Content-Type: application/json`. See [requests](#requests). |
 | `form` | map of template or list | — | not with `json`, `body` | Request body sent URL-encoded, with `Content-Type: application/x-www-form-urlencoded`. Values work as in `query`. |
 | `body` | template | — | not with `json`, `form` | Request body, sent as written after substitution. |
+| `graphql` | map | — | not with `json`, `form`, `body` | A GraphQL request: `query` and `variables`. See [GraphQL](#graphql). |
 | `empty_on` | list of int | — | not a 2xx | Statuses answered with the empty result (`null`) instead of an error, e.g. `[404]` for a lookup. See [responses](#responses). |
 | `error_path` | [locator](#locators) | built-in guesses | — | Where an error's message is. On a 2xx, a value there makes the response an error. See [responses](#responses). |
 | `follow` | bool | `false` | not with `paginate`, `window` | Streams: holds the response open and emits one event per line (kube `?follow=true`, SSE, NDJSON feeds). |
@@ -239,6 +240,41 @@ marked `results="false"` (Sentry's last page) counts as missing.
 
 Fields that read inside each item (`window.cursor`, `find.position`, a
 column's `value:`, `mark_key:`) take a dot-path only.
+
+### GraphQL
+
+`graphql:` sends `{query, variables}` as a JSON `POST`. A GraphQL API
+reports errors on a `200`, so the source sets `error_path:
+errors.0.message` unless you set your own: a response with errors is an
+error, and whatever `root:` finds alongside them is still shown.
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `query` | string | — | required | The GraphQL document, sent exactly as written. It's never templated: pass values through `variables`. |
+| `variables` | map | — | — | Templated like `json:`: `"${params.first}"` is a number for an `int` parameter, and a value that resolves empty is left out. |
+
+Every path reads the raw response, so they start at `data.`; there's no
+shortcut for `root:`. Relay pagination is an ordinary cursor walk, with
+the cursor going into the variables:
+
+```yaml
+repos:
+  type: http
+  url: https://api.github.com/graphql
+  auth: {bearer: "${env.GITHUB_TOKEN}"}
+  graphql:
+    query: |
+      query($after: String) { viewer { repositories(first: 50, after: $after) {
+        nodes { name } pageInfo { endCursor hasNextPage } } } }
+  root: data.viewer.repositories.nodes
+  paginate:
+    strategy: cursor
+    cursor_path: data.viewer.repositories.pageInfo.endCursor
+    more_when: data.viewer.repositories.pageInfo.hasNextPage
+    patch: {variables: {after: "${paginate.cursor}"}}
+```
+
+Window `older:` / `newer:` patches merge into the request the same way.
 
 ### `auth`
 
