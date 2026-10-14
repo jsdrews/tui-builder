@@ -49,7 +49,7 @@ func (v QueryValue) empty() bool {
 // HasBody reports whether a request carries a body: `body:`, `json:`
 // or `form:`.
 func (s *Source) HasBody() bool {
-	return s.Body != "" || s.JSON != nil || len(s.Form) > 0
+	return s.Body != "" || s.JSON != nil || len(s.Form) > 0 || s.GraphQL != nil
 }
 
 var templateToken = regexp.MustCompile(`\$\{[^}]*\}`)
@@ -95,6 +95,11 @@ func (s *Source) rewriteTemplates(fn func(string) string) {
 	}
 	if s.JSON != nil {
 		s.JSON, _ = substituteJSON(s.JSON, fn)
+	}
+	// A GraphQL query is never templated; only its variables are.
+	if s.GraphQL != nil && s.GraphQL.Variables != nil {
+		vars, _ := substituteJSON(s.GraphQL.Variables, fn)
+		s.GraphQL.Variables = vars.(map[string]any)
 	}
 	s.Auth.visit(func(_ string, v *string) { *v = fn(*v) })
 	if s.Paginate != nil && s.Paginate.Patch != nil {
@@ -224,7 +229,7 @@ func substituteURL(u string, fn func(string) string) string {
 // author in url: or query:.
 func (s *Source) validateRequest(path string) error {
 	if s.Type != "http" {
-		for field, set := range map[string]bool{"query": len(s.Query) > 0, "json": s.JSON != nil, "form": len(s.Form) > 0} {
+		for field, set := range map[string]bool{"query": len(s.Query) > 0, "json": s.JSON != nil, "form": len(s.Form) > 0, "graphql": s.GraphQL != nil} {
 			if set {
 				return fmt.Errorf("%s.%s: only applies to type: http", path, field)
 			}
@@ -241,12 +246,20 @@ func (s *Source) validateRequest(path string) error {
 	if s.Body != "" {
 		bodies = append(bodies, "body")
 	}
+	if s.GraphQL != nil {
+		bodies = append(bodies, "graphql")
+	}
 	if len(bodies) > 1 {
 		return fmt.Errorf("%s: %s are mutually exclusive — a request has one body", path, strings.Join(bodies, " and "))
 	}
 	if s.JSON != nil {
 		if _, err := json.Marshal(s.JSON); err != nil {
 			return fmt.Errorf("%s.json: can't be encoded as JSON: %w", path, err)
+		}
+	}
+	if s.GraphQL != nil {
+		if err := s.GraphQL.validate(path + ".graphql"); err != nil {
+			return err
 		}
 	}
 
@@ -361,6 +374,10 @@ func cloneQuery(m map[string]QueryValue) map[string]QueryValue {
 
 // bodyText is the body as text, for checks that look for tokens in it.
 func (s *Source) bodyText() string {
+	if s.GraphQL != nil {
+		b, _ := json.Marshal(s.GraphQL.Body())
+		return string(b)
+	}
 	if s.JSON != nil {
 		b, _ := json.Marshal(s.JSON)
 		return string(b)

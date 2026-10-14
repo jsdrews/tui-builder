@@ -68,6 +68,14 @@ search:
 Tokens written straight into `url:` are escaped by where they sit. The
 details are in [Reference → Requests](../reference/sources.md#requests).
 
+### GraphQL
+
+`graphql: {query, variables}` sends a GraphQL request, and treats the
+`errors` a GraphQL API returns on a `200` as an error. Relay pagination
+is a `paginate:` cursor walk; see
+[Reference → GraphQL](../reference/sources.md#graphql) and
+`examples/graphql_github.yaml`.
+
 ### When a request fails
 
 A failed request shows as `<source>: HTTP 404 Not Found — <message>`,

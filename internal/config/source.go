@@ -80,6 +80,9 @@ type Source struct {
 	// one sent URL-encoded. At most one of Body, JSON and Form is set.
 	JSON any                   `yaml:"json,omitempty"`
 	Form map[string]QueryValue `yaml:"form,omitempty"`
+	// GraphQL is a GraphQL request: a POST of {query, variables}. Not
+	// with Body, JSON or Form. See graphql.go.
+	GraphQL *GraphQLSpec `yaml:"graphql,omitempty"`
 	// Auth authenticates every request with exactly one scheme. See
 	// auth.go.
 	Auth *AuthSpec `yaml:"auth,omitempty"`
@@ -419,6 +422,7 @@ func (s *Source) Clone() *Source {
 		out.Command = append([]string(nil), s.Command...)
 	}
 	out.Auth = s.Auth.Clone()
+	out.GraphQL = s.GraphQL.Clone()
 	out.Retry = s.Retry.Clone()
 	if s.Conditional != nil {
 		c := *s.Conditional
@@ -496,6 +500,9 @@ func (s *Source) BindParams(params map[string]string) error {
 	}
 	if s.JSON != nil {
 		s.JSON = typeJSONParams(s.JSON, s.Parameters, resolved)
+	}
+	if s.GraphQL != nil && s.GraphQL.Variables != nil {
+		s.GraphQL.Variables = typeJSONParams(s.GraphQL.Variables, s.Parameters, resolved).(map[string]any)
 	}
 	s.SubstituteStrings(func(t string) string { return substituteParams(t, resolved) })
 	return nil

@@ -86,9 +86,18 @@ func newHTTP(d *cfg.Source) (Source, error) {
 		emptyOn[code] = true
 	}
 	body, kind := d.Body, ""
+	jsonBody, errorPath := d.JSON, d.ErrorPath
+	if d.GraphQL != nil {
+		// graphql: is a json: body of {query, variables}, and a 200 with
+		// errors in it is an error.
+		jsonBody = d.GraphQL.Body()
+		if errorPath == "" {
+			errorPath = cfg.GraphQLErrorPath
+		}
+	}
 	switch {
-	case d.JSON != nil:
-		b, err := json.Marshal(d.JSON)
+	case jsonBody != nil:
+		b, err := json.Marshal(jsonBody)
 		if err != nil {
 			return nil, fmt.Errorf("json: %w", err)
 		}
@@ -120,7 +129,7 @@ func newHTTP(d *cfg.Source) (Source, error) {
 		headers:     d.Headers,
 		body:        body,
 		bodyKind:    kind,
-		json:        d.JSON,
+		json:        jsonBody,
 		form:        d.Form,
 		query:       d.Query,
 		auth:        newAuthState(d.Auth, d.URL, d.Headers),
@@ -129,7 +138,7 @@ func newHTTP(d *cfg.Source) (Source, error) {
 		conditional: conditional,
 		validators:  &validators{},
 		emptyOn:     emptyOn,
-		errorPath:   d.ErrorPath,
+		errorPath:   errorPath,
 		format:      d.Format,
 		root:        d.Root,
 		follow:      d.Follow,
