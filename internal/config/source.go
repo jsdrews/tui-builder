@@ -78,7 +78,14 @@ type Source struct {
 	// one sent URL-encoded. At most one of Body, JSON and Form is set.
 	JSON any                   `yaml:"json,omitempty"`
 	Form map[string]QueryValue `yaml:"form,omitempty"`
-	Follow  bool              `yaml:"follow,omitempty"`
+	// EmptyOn lists statuses answered with the empty result (null)
+	// rather than an error, e.g. a 404 from a lookup.
+	EmptyOn []int `yaml:"empty_on,omitempty"`
+	// ErrorPath is a locator for an error's message. On a non-2xx it
+	// replaces the built-in guesses; on a 2xx, a value there makes the
+	// response an error. See response.go in internal/datasource.
+	ErrorPath string `yaml:"error_path,omitempty"`
+	Follow    bool   `yaml:"follow,omitempty"`
 
 	// Paginate opts an http source into multi-page walking. On Fetch,
 	// the source fetches the URL, applies Root: to get the page's
@@ -231,6 +238,9 @@ func (s *Source) Validate(path string) error {
 		return err
 	}
 	if err := s.validateRequest(path); err != nil {
+		return err
+	}
+	if err := s.validateResponse(path); err != nil {
 		return err
 	}
 	if err := s.validateResume(path); err != nil {
@@ -388,6 +398,9 @@ func (s *Source) Clone() *Source {
 	}
 	if s.Command != nil {
 		out.Command = append([]string(nil), s.Command...)
+	}
+	if s.EmptyOn != nil {
+		out.EmptyOn = append([]int(nil), s.EmptyOn...)
 	}
 	if s.Unset != nil {
 		out.Unset = append([]string(nil), s.Unset...)

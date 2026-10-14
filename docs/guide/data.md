@@ -68,6 +68,22 @@ search:
 Tokens written straight into `url:` are escaped by where they sit. The
 details are in [Reference → Requests](../reference/sources.md#requests).
 
+### When a request fails
+
+A failed request shows as `<source>: HTTP 404 Not Found — <message>`,
+with the message read from the usual places in an error body (and the
+full request and response in the output console). Two settings cover
+what the defaults can't:
+
+- `empty_on: [404]` treats a status as "nothing here" rather than an
+  error: right for a lookup by id.
+- `error_path:` points at an API's message when it's somewhere unusual,
+  and makes a `200` carrying an error into one (GraphQL does this).
+
+`total_path:` and `paginate.next_path:` can read a header too
+(`header:X-Total-Count`, `link:next` for a `Link` header). See
+[Reference → Responses](../reference/sources.md#responses).
+
 ### Sharing settings with a preset
 
 Sources against one API repeat its base URL, headers and timeout. Put

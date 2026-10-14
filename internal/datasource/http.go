@@ -37,21 +37,23 @@ var UserAgent = "tui-builder/" + version.String()
 // StreamingSource so the screen / wrangl picks Subscribe over the
 // poll-via-Fetch path.
 type httpSource struct {
-	url      string
-	method   string
-	headers  map[string]string
-	body     string                    // the encoded body: raw, JSON or URL-encoded
-	bodyKind string                    // "", "raw", "json" or "form"
-	json     any                       // json:, kept as a tree so patches merge into it
-	form     map[string]cfg.QueryValue // form:
-	query    map[string]cfg.QueryValue // query:, laid over the url's own
-	format   string                    // "json" (default) or "text"
-	root     string // dot-path applied to parsed JSON before return
-	follow   bool
-	timeout  time.Duration
-	refresh  time.Duration
-	paginate *cfg.PaginateConfig // nil = single-page fetch
-	window   *cfg.WindowConfig   // nil = not windowed
+	url       string
+	method    string
+	headers   map[string]string
+	body      string                    // the encoded body: raw, JSON or URL-encoded
+	bodyKind  string                    // "", "raw", "json" or "form"
+	json      any                       // json:, kept as a tree so patches merge into it
+	form      map[string]cfg.QueryValue // form:
+	query     map[string]cfg.QueryValue // query:, laid over the url's own
+	format    string                    // "json" (default) or "text"
+	emptyOn   map[int]bool              // statuses answered with the empty result
+	errorPath string                    // locator for an error's message
+	root      string                    // dot-path applied to parsed JSON before return
+	follow    bool
+	timeout   time.Duration
+	refresh   time.Duration
+	paginate  *cfg.PaginateConfig // nil = single-page fetch
+	window    *cfg.WindowConfig   // nil = not windowed
 }
 
 // defaultMaxPages caps a paginate walk when the user didn't set one.
@@ -67,6 +69,10 @@ func newHTTP(d *cfg.Source) (Source, error) {
 		if d.HasBody() {
 			method = http.MethodPost
 		}
+	}
+	emptyOn := map[int]bool{}
+	for _, code := range d.EmptyOn {
+		emptyOn[code] = true
 	}
 	body, kind := d.Body, ""
 	switch {
@@ -98,21 +104,23 @@ func newHTTP(d *cfg.Source) (Source, error) {
 		}
 	}
 	return &httpSource{
-		url:      d.URL,
-		method:   method,
-		headers:  d.Headers,
-		body:     body,
-		bodyKind: kind,
-		json:     d.JSON,
-		form:     d.Form,
-		query:    d.Query,
-		format:   d.Format,
-		root:     d.Root,
-		follow:   d.Follow,
-		timeout:  timeout,
-		refresh:  refresh,
-		paginate: d.Paginate,
-		window:   d.Window,
+		url:       d.URL,
+		method:    method,
+		headers:   d.Headers,
+		body:      body,
+		bodyKind:  kind,
+		json:      d.JSON,
+		form:      d.Form,
+		query:     d.Query,
+		emptyOn:   emptyOn,
+		errorPath: d.ErrorPath,
+		format:    d.Format,
+		root:      d.Root,
+		follow:    d.Follow,
+		timeout:   timeout,
+		refresh:   refresh,
+		paginate:  d.Paginate,
+		window:    d.Window,
 	}, nil
 }
 
@@ -148,44 +156,25 @@ func (s *httpSource) Fetch(ctx context.Context) (any, error) {
 		return page.Items, nil
 	}
 
-	raw, err := s.fetchOne(ctx, s.requestURL())
+	r, err := s.send(ctx, s.requestURL(), s.body)
 	if err != nil {
 		return nil, err
 	}
 	if s.format == "text" {
-		return string(raw), nil
-	}
-	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("parse json: %w", err)
-	}
-	return applyRoot(out, s.root), nil
-}
-
-// fetchOne issues one request against url and returns the raw body.
-// Shared between the single-page path and the paginate walk so both
-// use the same timeout / auth / non-2xx handling.
-func (s *httpSource) fetchOne(ctx context.Context, url string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, s.timeout)
-	defer cancel()
-
-	resp, err := s.doURL(ctx, url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
-	}
-	if resp.StatusCode/100 != 2 {
-		snippet := string(raw)
-		if len(snippet) > 200 {
-			snippet = snippet[:200] + "…"
+		switch {
+		case s.empty(r):
+			return "", nil
+		case !r.ok():
+			return nil, s.httpError(r, nil)
 		}
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, snippet)
+		return string(r.raw), nil
 	}
-	return raw, nil
+	parsed, err := s.parse(r)
+	if err != nil {
+		// Whatever root: still finds is kept, and the error reported too.
+		return s.partial(parsed), err
+	}
+	return applyRoot(parsed, s.root), nil
 }
 
 // fetchPaginated walks the configured paginate strategy until either
@@ -209,7 +198,11 @@ func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
 	// next URL exactly as the server sent it, without re-applying query:.
 	url := s.requestURL()
 	for page := 0; page < max; page++ {
-		raw, err := s.fetchOne(ctx, url)
+		r, err := s.send(ctx, url, s.body)
+		var parsed any
+		if err == nil {
+			parsed, err = s.parse(r)
+		}
 		if err != nil {
 			if skipOnErr && page > 0 {
 				// Return what we have; the caller sees a partial result
@@ -218,28 +211,21 @@ func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
 			}
 			return nil, fmt.Errorf("page %d: %w", page+1, err)
 		}
-		var parsed any
-		if err := json.Unmarshal(raw, &parsed); err != nil {
-			if skipOnErr && page > 0 {
-				return acc, nil
-			}
-			return nil, fmt.Errorf("page %d: parse json: %w", page+1, err)
-		}
 		// Extract this page's items via Root, then flatten into acc.
 		// Non-array pages pass through as one element — matches the
 		// non-paginated Fetch's behaviour on single-object responses.
-		items := applyRoot(parsed, s.root)
-		acc = append(acc, Iter(items)...)
+		items := Iter(applyRoot(parsed, s.root))
+		acc = append(acc, items...)
 
-		// Find the next page's URL. Missing / null / empty string all
-		// mean "no more pages" — Django REST returns null for `next`
-		// on the last page, and that's how we know to stop.
-		next := Get(parsed, s.paginate.NextPath)
-		nextStr, ok := next.(string)
-		if !ok || nextStr == "" {
+		// Find the next page's URL, through its locator: a body path, a
+		// header or a Link entry. Missing / null / empty all mean "no more
+		// pages" — Django REST returns null for `next` on the last page.
+		// A relative URL resolves against the page that sent it.
+		next, ok := s.locate(s.paginate.NextPath, parsed, r, items).(string)
+		if !ok || next == "" {
 			return acc, nil
 		}
-		url = nextStr
+		url = resolveRef(r.url, next)
 	}
 	// Hit max_pages with more pages potentially available. Return what
 	// we have; the cap is a safety measure, not an error. If callers
@@ -272,20 +258,21 @@ func (s *httpSource) FetchWindow(ctx context.Context, q WindowQuery) (WindowPage
 	if err != nil {
 		return WindowPage{}, err
 	}
-	raw, err := s.fetchOne(ctx, url)
+	r, err := s.send(ctx, url, s.body)
 	if err != nil {
 		return WindowPage{}, err
 	}
-	var parsed any
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return WindowPage{}, fmt.Errorf("parse json: %w", err)
+	parsed, err := s.parse(r)
+	if err != nil {
+		return WindowPage{}, err
 	}
-	// Root sees the items, total_path sees the envelope — the same
-	// split fetchPaginated uses for next_path, and for the same reason:
-	// in `{numFound: N, docs: [...]}` both live at the top level.
-	page := WindowPage{Items: Iter(applyRoot(parsed, s.root)), Total: -1}
+	// Root sees the items, total_path sees the envelope (or a header) —
+	// the same split fetchPaginated uses for next_path, and for the same
+	// reason: in `{numFound: N, docs: [...]}` both live at the top level.
+	items := Iter(applyRoot(parsed, s.root))
+	page := WindowPage{Items: items, Total: -1}
 	if p := s.window.TotalPath; p != "" {
-		if n, ok := toInt(Get(parsed, p)); ok {
+		if n, ok := toInt(s.locate(p, parsed, r, items)); ok {
 			page.Total = n
 		}
 		// A missing or non-numeric total is not an error: -1 means
@@ -349,23 +336,13 @@ func (s *httpSource) FetchEdge(ctx context.Context, q EdgeQuery) (EdgePage, erro
 	}
 	u.RawQuery = params.Encode()
 
-	ctx, cancel := context.WithTimeout(ctx, s.timeout)
-	defer cancel()
-	resp, err := s.doWith(ctx, u.String(), body)
+	r, err := s.send(ctx, u.String(), body)
 	if err != nil {
 		return EdgePage{}, err
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	parsed, err := s.parse(r)
 	if err != nil {
 		return EdgePage{}, err
-	}
-	if resp.StatusCode >= 300 {
-		return EdgePage{}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
-	}
-	var parsed any
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return EdgePage{}, fmt.Errorf("parse json: %w", err)
 	}
 	return edgePage(Iter(applyRoot(parsed, s.root)), q, w.Cursor), nil
 }
@@ -460,11 +437,10 @@ func (s *httpSource) subscribe(ctx context.Context) (<-chan Event, error) {
 	if resp.StatusCode/100 != 2 {
 		raw, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		snippet := string(raw)
-		if len(snippet) > 200 {
-			snippet = snippet[:200] + "…"
-		}
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, snippet)
+		r := answered(resp, raw)
+		var parsed any
+		_ = json.Unmarshal(raw, &parsed)
+		return nil, s.httpError(r, parsed)
 	}
 
 	ch := make(chan Event, 64)
