@@ -26,22 +26,38 @@ type response struct {
 
 func (r *response) ok() bool { return r.status/100 == 2 }
 
-// send issues one request against url with body, under the source's
-// timeout, and reads the whole response.
-func (s *httpSource) send(ctx context.Context, url, body string) (*response, error) {
+// sendOnce makes one attempt at a request, under the source's timeout,
+// and reads the whole response, up to max_body.
+func (s *httpSource) sendOnce(ctx context.Context, url, body string, extra http.Header) (*response, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
-	resp, err := s.doWith(ctx, url, body)
+	resp, err := s.doWith(ctx, url, body, extra)
 	if err != nil {
 		// A transport error quotes the URL, query api_key and all.
 		return nil, s.auth.redactErr(err)
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, s.maxBody+1))
 	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
+		return nil, s.auth.redactErr(fmt.Errorf("read body: %w", err))
+	}
+	if int64(len(raw)) > s.maxBody {
+		return nil, fmt.Errorf("response larger than %s (max_body)", sizeText(s.maxBody))
 	}
 	return answered(resp, raw), nil
+}
+
+// sizeText writes a byte count the way max_body is written.
+func sizeText(n int64) string {
+	switch {
+	case n%(1<<30) == 0:
+		return fmt.Sprintf("%dGB", n>>30)
+	case n%(1<<20) == 0:
+		return fmt.Sprintf("%dMB", n>>20)
+	case n%(1<<10) == 0:
+		return fmt.Sprintf("%dKB", n>>10)
+	}
+	return fmt.Sprintf("%d bytes", n)
 }
 
 func answered(resp *http.Response, raw []byte) *response {

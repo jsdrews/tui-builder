@@ -37,24 +37,28 @@ var UserAgent = "tui-builder/" + version.String()
 // StreamingSource so the screen / wrangl picks Subscribe over the
 // poll-via-Fetch path.
 type httpSource struct {
-	url       string
-	method    string
-	headers   map[string]string
-	body      string                    // the encoded body: raw, JSON or URL-encoded
-	bodyKind  string                    // "", "raw", "json" or "form"
-	json      any                       // json:, kept as a tree so patches merge into it
-	form      map[string]cfg.QueryValue // form:
-	query     map[string]cfg.QueryValue // query:, laid over the url's own
-	format    string                    // "json" (default) or "text"
-	auth      *authState                // auth: and the secrets to mask
-	emptyOn   map[int]bool              // statuses answered with the empty result
-	errorPath string                    // locator for an error's message
-	root      string                    // dot-path applied to parsed JSON before return
-	follow    bool
-	timeout   time.Duration
-	refresh   time.Duration
-	paginate  *cfg.PaginateConfig // nil = single-page fetch
-	window    *cfg.WindowConfig   // nil = not windowed
+	url         string
+	method      string
+	headers     map[string]string
+	body        string                    // the encoded body: raw, JSON or URL-encoded
+	bodyKind    string                    // "", "raw", "json" or "form"
+	json        any                       // json:, kept as a tree so patches merge into it
+	form        map[string]cfg.QueryValue // form:
+	query       map[string]cfg.QueryValue // query:, laid over the url's own
+	format      string                    // "json" (default) or "text"
+	auth        *authState                // auth: and the secrets to mask
+	retry       *retryPolicy              // nil: one attempt per request
+	maxBody     int64                     // the largest response read, per page
+	conditional bool                      // send If-None-Match / If-Modified-Since
+	validators  *validators               // what conditional GET remembers
+	emptyOn     map[int]bool              // statuses answered with the empty result
+	errorPath   string                    // locator for an error's message
+	root        string                    // dot-path applied to parsed JSON before return
+	follow      bool
+	timeout     time.Duration
+	refresh     time.Duration
+	paginate    *cfg.PaginateConfig // nil = single-page fetch
+	window      *cfg.WindowConfig   // nil = not windowed
 }
 
 func newHTTP(d *cfg.Source) (Source, error) {
@@ -65,6 +69,18 @@ func newHTTP(d *cfg.Source) (Source, error) {
 			method = http.MethodPost
 		}
 	}
+	maxBody := int64(cfg.DefaultMaxBody)
+	if d.MaxBody != "" {
+		n, err := cfg.ParseSize(d.MaxBody)
+		if err != nil {
+			return nil, fmt.Errorf("max_body: %w", err)
+		}
+		maxBody = n
+	}
+	// Conditional GET is for a source that asks one question and asks it
+	// again: not a walk, a window or a stream, and not a POST.
+	conditional := (d.Conditional == nil || *d.Conditional) && d.Paginate == nil &&
+		d.Window == nil && !d.Follow && method == http.MethodGet
 	emptyOn := map[int]bool{}
 	for _, code := range d.EmptyOn {
 		emptyOn[code] = true
@@ -99,24 +115,28 @@ func newHTTP(d *cfg.Source) (Source, error) {
 		}
 	}
 	return &httpSource{
-		url:       d.URL,
-		method:    method,
-		headers:   d.Headers,
-		body:      body,
-		bodyKind:  kind,
-		json:      d.JSON,
-		form:      d.Form,
-		query:     d.Query,
-		auth:      newAuthState(d.Auth, d.URL, d.Headers),
-		emptyOn:   emptyOn,
-		errorPath: d.ErrorPath,
-		format:    d.Format,
-		root:      d.Root,
-		follow:    d.Follow,
-		timeout:   timeout,
-		refresh:   refresh,
-		paginate:  d.Paginate,
-		window:    d.Window,
+		url:         d.URL,
+		method:      method,
+		headers:     d.Headers,
+		body:        body,
+		bodyKind:    kind,
+		json:        d.JSON,
+		form:        d.Form,
+		query:       d.Query,
+		auth:        newAuthState(d.Auth, d.URL, d.Headers),
+		retry:       newRetryPolicy(d.Retry),
+		maxBody:     maxBody,
+		conditional: conditional,
+		validators:  &validators{},
+		emptyOn:     emptyOn,
+		errorPath:   d.ErrorPath,
+		format:      d.Format,
+		root:        d.Root,
+		follow:      d.Follow,
+		timeout:     timeout,
+		refresh:     refresh,
+		paginate:    d.Paginate,
+		window:      d.Window,
 	}, nil
 }
 
@@ -152,25 +172,44 @@ func (s *httpSource) Fetch(ctx context.Context) (any, error) {
 		return page.Items, nil
 	}
 
-	r, err := s.send(ctx, s.requestURL(), s.body)
+	url := s.requestURL()
+	key := url + "\x00" + s.body
+	var extra http.Header
+	if s.conditional {
+		extra = s.validators.headers(key)
+	}
+	r, err := s.sendWith(ctx, url, s.body, extra)
 	if err != nil {
 		return nil, err
 	}
+	if s.conditional && r.status == http.StatusNotModified {
+		// Nothing changed: the last answer stands.
+		if v, ok := s.validators.last(key); ok {
+			return v, nil
+		}
+	}
+	var out any
 	if s.format == "text" {
 		switch {
 		case s.empty(r):
-			return "", nil
+			out = ""
 		case !r.ok():
 			return nil, s.httpError(r, nil)
+		default:
+			out = string(r.raw)
 		}
-		return string(r.raw), nil
+	} else {
+		parsed, err := s.parse(r)
+		if err != nil {
+			// Whatever root: still finds is kept, and the error reported too.
+			return s.partial(parsed), err
+		}
+		out = applyRoot(parsed, s.root)
 	}
-	parsed, err := s.parse(r)
-	if err != nil {
-		// Whatever root: still finds is kept, and the error reported too.
-		return s.partial(parsed), err
+	if s.conditional {
+		s.validators.remember(key, r, out)
 	}
-	return applyRoot(parsed, s.root), nil
+	return out, nil
 }
 
 // pageSize is the configured window size, or the default.
@@ -422,13 +461,13 @@ func (s *httpSource) do(ctx context.Context) (*http.Response, error) {
 // are meant to be called with the same auth headers, so this is
 // correct-by-default.
 func (s *httpSource) doURL(ctx context.Context, url string) (*http.Response, error) {
-	return s.doWith(ctx, url, s.body)
+	return s.doWith(ctx, url, s.body, nil)
 }
 
 // doWith is doURL with the body overridden — an Anchored window renders a
 // body per request.
-func (s *httpSource) doWith(ctx context.Context, url, body string) (*http.Response, error) {
-	req, err := s.newRequest(ctx, url, body)
+func (s *httpSource) doWith(ctx context.Context, url, body string, extra http.Header) (*http.Response, error) {
+	req, err := s.newRequest(ctx, url, body, extra)
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +477,7 @@ func (s *httpSource) doWith(ctx context.Context, url, body string) (*http.Respon
 	if err == nil && resp.StatusCode == http.StatusUnauthorized && s.auth.spec.Scheme() == "oauth2" {
 		resp.Body.Close()
 		s.auth.forgetToken()
-		if req, err = s.newRequest(ctx, url, body); err != nil {
+		if req, err = s.newRequest(ctx, url, body, extra); err != nil {
 			return nil, err
 		}
 		resp, err = http.DefaultClient.Do(req)
@@ -447,7 +486,7 @@ func (s *httpSource) doWith(ctx context.Context, url, body string) (*http.Respon
 }
 
 // newRequest builds one request: headers:, the defaults, then auth:.
-func (s *httpSource) newRequest(ctx context.Context, url, body string) (*http.Request, error) {
+func (s *httpSource) newRequest(ctx context.Context, url, body string, extra http.Header) (*http.Request, error) {
 	var bodyReader io.Reader
 	if body != "" {
 		bodyReader = strings.NewReader(body)
@@ -472,6 +511,9 @@ func (s *httpSource) newRequest(ctx context.Context, url, body string) (*http.Re
 		case "form":
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		}
+	}
+	for k, vs := range extra {
+		req.Header[k] = vs
 	}
 	if err := s.auth.apply(ctx, req.Header, req.URL, s.timeout); err != nil {
 		return nil, err

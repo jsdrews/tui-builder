@@ -97,6 +97,7 @@ func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
 		// clamps it (json-server v1), answers the same page forever.
 		if p.Strategy == "offset" || p.Strategy == "page" {
 			if len(items) > 0 && reflect.DeepEqual(items, prevItems) {
+				notify("%s: page %d repeated page %d — stopped the walk there", s.label(), n+1, n)
 				return acc, nil
 			}
 			prevItems = items
@@ -127,6 +128,7 @@ func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
 			}
 			next = resolveRef(r.url, nextURL)
 			if next == prevNext {
+				notify("%s: page %d named the same next URL as page %d — stopped the walk there", s.label(), n+1, n)
 				return acc, nil
 			}
 			prevNext = next
@@ -134,7 +136,11 @@ func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
 			// An empty page doesn't end a cursor walk (Graph, Google,
 			// DynamoDB and Slack send them mid-walk); the cursor does.
 			c := s.locate(p.CursorPath, parsed, r, items)
-			if !present(c) || reflect.DeepEqual(c, pos.cursor) {
+			if !present(c) {
+				return acc, nil
+			}
+			if reflect.DeepEqual(c, pos.cursor) {
+				notify("%s: page %d gave the same cursor as page %d — stopped the walk there", s.label(), n+1, n)
 				return acc, nil
 			}
 			pos.cursor = c

@@ -101,6 +101,14 @@ OAuth 2 client credentials fetch and refresh their own token. A preset
 is the natural home for `auth:`, so every source against an API shares
 it. See [Reference → `auth`](../reference/sources.md#auth).
 
+### Flaky and rate-limited APIs
+
+`retry: {max: 3}` tries a failed request again (network errors, `429`,
+`5xx`), waiting as long as the server's rate-limit headers ask. A polled
+`GET` source also sends `If-None-Match` for you, so an unchanged
+response comes back as a cheap `304` (GitHub doesn't count those against
+its rate limit). See [Reference → `retry`](../reference/sources.md#retry).
+
 ### Sharing settings with a preset
 
 Sources against one API repeat its base URL, headers and timeout. Put

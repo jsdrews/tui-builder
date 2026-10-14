@@ -316,9 +316,8 @@ Shared by every strategy:
 - **The repeat guard** stops the walk when the next URL or cursor equals
   the previous page's, or an `offset` / `page` walk returns identical
   items (json-server v1 clamps out-of-range pages). The repeated page is
-  dropped. *As built, there's no console warning:* the data layer has no
-  warning channel, and returning one as an error would fail `wrangl` on
-  json-server's normal last page. A follow-up if it's missed.
+  dropped, and a notice goes to the output console (stderr from
+  `wrangl`) through `datasource.Notify`, added with PR 6.
 - **`on_page_error: fail | skip`** is unchanged, and applies once a
   page's retries ([§8](#8-retries-rate-limits-and-conditional-get)) run
   out.
@@ -358,7 +357,9 @@ notion_pages:
 ## 7. Auth
 
 From [Auth: schemes, placement and redaction](https://github.com/jsdrews/tui-builder/issues/14).
-Ships in PR 5.
+**Landed in [#85](https://github.com/jsdrews/tui-builder/pull/85).** Values under 4 characters
+aren't masked (they'd mask ordinary text), and a cookie `api_key` works
+on a websocket handshake too.
 
 `auth:` holds exactly one scheme; none or two is a load error. In a
 flow map the token needs quotes (`{bearer: "${env.X}"}`): an unquoted
@@ -457,8 +458,11 @@ window edge or seek fetch.
 skipped. Each retry writes a console line (`retrying 2/3 in 4s — HTTP
 503`), and the last value stays on screen.
 
-**Conditional GET:** automatic for single-request http sources, with
-`conditional: false` to opt out. `ETag` and `Last-Modified` are stored
+**Conditional GET:** automatic for single-request `GET` http sources,
+with `conditional: false` to opt out. *As built, a 304 hands back the
+last value rather than emitting nothing:* every consumer of a source
+(pipelines, joins, `wrangl`) then works unchanged, and the screen
+re-applies identical rows. `ETag` and `Last-Modified` are stored
 against the exact resolved URL and body. A 304 emits nothing, so the
 last value stands with its focused row and scroll, and any error
 clears. It's off for paginate walks and windows. `r` still sends the
