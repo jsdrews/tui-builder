@@ -1,71 +1,102 @@
-# http_paginated.yaml — walk a paginated REST API in one Fetch.
+# http_paginated.yaml — walk every page of an API up front, into one list.
 #
-# The public JSONPlaceholder API returns 100 photos across pages of 30
-# (with `?_page=N&_limit=30`) and links `Link: <...>; rel="next"` in
-# the response header. It doesn't quite fit the `link` strategy (which
-# reads the `next` URL from the response BODY, Django REST style), but
-# it makes a self-contained demo when we substitute a body-carrying
-# stub in tests.
+# `paginate:` fetches page after page and concatenates them. APIs say
+# "there's another page" in different ways, and each `strategy:` reads
+# one of them:
 #
-# For a real-world Django REST / AWX / GitLab endpoint that ships the
-# next URL in the body:
+#   link    the response names the next page's URL (in the body, or in a
+#           `Link:` header — `next_path: "link:next"`)
+#   cursor  the response names a token for the next page, which goes back
+#           in the query string (cursor_param) or the body (patch:)
+#   offset  the walk counts items: ?offset=0, 30, 60, …
+#   page    the walk counts pages: ?page=1, 2, 3, … (page_start: 0 for
+#           zero-based APIs)
 #
-#   sources:
-#     awx_jobs:
-#       type: http
-#       url: ${env.AWX_HOST}/api/v2/jobs/?order_by=-created
-#       headers: {Authorization: "Bearer ${env.AWX_TOKEN}"}
-#       root: results
-#       paginate:
-#         strategy: link          # follow response.next
-#         next_path: next
-#         max_pages: 20           # safety cap; ~4000 jobs at page_size=200
-#
-# Semantics:
-#   - Fetch the URL, parse JSON, extract items via `root:`.
-#   - Look up the `next_path` in the RAW response (pre-root) to find
-#     the next page's URL. Missing / null / empty string = we're done.
-#   - Concatenate all pages' items into one flat list; hand back.
-#   - Mutually exclusive with `follow: true` (streaming) and
-#     `format: text` (needs JSON to find the next link).
-#   - `on_page_error: skip` returns what we have on a mid-walk error
-#     instead of throwing everything away.
+# Each stops on its own signal (no next URL, no cursor, the total
+# reached, an empty page), on `more_when:` turning false, or at
+# `max_pages` (20 unless set). Both APIs here are public, with no key.
 #
 # Try it:
 #
-#   task wrangl -- examples/http_paginated.yaml photos_all | jq 'length'
+#   task wrangl -- examples/http_paginated.yaml photos | jq length       # 150
+#   task wrangl -- examples/http_paginated.yaml hn_stories | jq length   # 100
+#
+# A cursor walk looks the same. Slack, with the cursor in the query:
+#
+#   paginate:
+#     strategy: cursor
+#     cursor_path: response_metadata.next_cursor   # "" on the last page
+#     cursor_param: cursor
+#     limit_param: limit
+#     page_size: 200
+#
+# Notion, with the cursor in the JSON body:
+#
+#   json: {page_size: 100}
+#   paginate:
+#     strategy: cursor
+#     cursor_path: next_cursor
+#     more_when: has_more
+#     patch: {start_cursor: "${paginate.cursor}"}   # left out on page 1
+#
+# And Stripe, where the cursor is the last item's id:
+#
+#   paginate:
+#     strategy: cursor
+#     cursor_path: "last:id"
+#     cursor_param: starting_after
+#     more_when: has_more
 
 app:
   title: Paginated fetch demo
 
 data:
   sources:
-    # Same public API as http_countries.yaml, but sized so pagination
-    # actually matters. JSONPlaceholder doesn't carry a body-next
-    # link — this entry works as a config-load smoke test but a real
-    # fetch will just return one page's worth. Point at a Django REST
-    # / AWX endpoint to see the walk in action.
-    photos_all:
+    # JSONPlaceholder sends `Link: <…?_page=2…>; rel="next"`, GitHub-style.
+    photos:
       type: http
-      url: https://jsonplaceholder.typicode.com/photos
+      url: https://jsonplaceholder.typicode.com/photos?_page=1&_limit=30
       paginate:
         strategy: link
-        next_path: next   # JSONPlaceholder returns a flat array, so
-                          # this lookup returns nil and the walk stops
-                          # after page 1. Real APIs carry a URL.
+        next_path: "link:next"
         max_pages: 5
+
+    # Hacker News search (Algolia) counts pages from 0 and says how many
+    # there are.
+    hn_stories:
+      type: http
+      url: https://hn.algolia.com/api/v1/search_by_date
+      query: {tags: story, hitsPerPage: "25"}
+      root: hits
+      paginate:
+        strategy: page
+        page_param: page
+        page_start: 0
+        more_when: "page + 1 < nbPages"
+        max_pages: 4
 
 tui:
   components:
     photos:
       type: table
       title: Photos
-      source: photos_all
+      source: photos
       columns:
         - {title: ID,     width: 6,  value: id,        sort: number}
         - {title: Album,  width: 6,  value: albumId,   sort: number}
         - {title: Title,  width: 60, value: title}
       filterable: true
+    stories:
+      type: table
+      title: Newest HN stories
+      source: hn_stories
+      columns:
+        - {title: Points, width: 7,  value: points, sort: number, align: right}
+        - {title: Title,  width: 60, value: title}
+        - {title: By,     width: 16, value: author}
+      filterable: true
   screen:
     layout:
-      component: photos
+      hstack:
+        - {component: photos}
+        - {component: stories}

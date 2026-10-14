@@ -13,18 +13,28 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// checkStrict reports keys under data.presets that Source doesn't
-// define. root is the whole document's node.
+// checkStrict reports unknown keys in the blocks that decode strictly:
+// every preset, and every source's or preset's paginate:. root is the
+// whole document's node.
 func checkStrict(root *yaml.Node) error {
-	presets := mappingAt(root, "data", "presets")
-	if presets == nil {
-		return nil
-	}
 	known := yamlFields(reflect.TypeOf(Source{}))
-	for i := 0; i+1 < len(presets.Content); i += 2 {
-		name, body := presets.Content[i].Value, presets.Content[i+1]
-		if err := checkKeys(body, "data.presets."+name, known); err != nil {
-			return err
+	paginate := yamlFields(reflect.TypeOf(PaginateConfig{}))
+	for _, section := range []string{"presets", "sources"} {
+		entries := mappingAt(root, "data", section)
+		if entries == nil {
+			continue
+		}
+		for i := 0; i+1 < len(entries.Content); i += 2 {
+			name, body := entries.Content[i].Value, entries.Content[i+1]
+			path := "data." + section + "." + name
+			if section == "presets" {
+				if err := checkKeys(body, path, known); err != nil {
+					return err
+				}
+			}
+			if err := checkKeys(mappingAt(body, "paginate"), path+".paginate", paginate); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

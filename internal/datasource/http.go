@@ -56,12 +56,6 @@ type httpSource struct {
 	window    *cfg.WindowConfig   // nil = not windowed
 }
 
-// defaultMaxPages caps a paginate walk when the user didn't set one.
-// Sized to comfortably handle typical REST APIs (AWX defaults to 25/page;
-// Django REST 100; GitHub 30/100) without exposing runaway walks that
-// could OOM the process on a badly-configured endpoint.
-const defaultMaxPages = 20
-
 func newHTTP(d *cfg.Source) (Source, error) {
 	method := strings.ToUpper(d.Method)
 	if method == "" {
@@ -175,64 +169,6 @@ func (s *httpSource) Fetch(ctx context.Context) (any, error) {
 		return s.partial(parsed), err
 	}
 	return applyRoot(parsed, s.root), nil
-}
-
-// fetchPaginated walks the configured paginate strategy until either
-// there's no next page, MaxPages is reached, or a mid-walk error kills
-// the walk (respecting OnPageError). Each page's Root-sliced items are
-// concatenated into one []any.
-//
-// The walk exclusively uses the RAW (pre-Root) response for
-// next-link lookup — Root sees the items, next_path sees the envelope
-// (both live at the same level in Django REST / AWX responses:
-// `{next: "...", results: [...]}`).
-func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
-	max := s.paginate.MaxPages
-	if max == 0 {
-		max = defaultMaxPages
-	}
-	skipOnErr := s.paginate.OnPageError == "skip"
-
-	var acc []any
-	// The first page is the configured request; later ones follow the
-	// next URL exactly as the server sent it, without re-applying query:.
-	url := s.requestURL()
-	for page := 0; page < max; page++ {
-		r, err := s.send(ctx, url, s.body)
-		var parsed any
-		if err == nil {
-			parsed, err = s.parse(r)
-		}
-		if err != nil {
-			if skipOnErr && page > 0 {
-				// Return what we have; the caller sees a partial result
-				// rather than losing every page we already succeeded on.
-				return acc, nil
-			}
-			return nil, fmt.Errorf("page %d: %w", page+1, err)
-		}
-		// Extract this page's items via Root, then flatten into acc.
-		// Non-array pages pass through as one element — matches the
-		// non-paginated Fetch's behaviour on single-object responses.
-		items := Iter(applyRoot(parsed, s.root))
-		acc = append(acc, items...)
-
-		// Find the next page's URL, through its locator: a body path, a
-		// header or a Link entry. Missing / null / empty all mean "no more
-		// pages" — Django REST returns null for `next` on the last page.
-		// A relative URL resolves against the page that sent it.
-		next, ok := s.locate(s.paginate.NextPath, parsed, r, items).(string)
-		if !ok || next == "" {
-			return acc, nil
-		}
-		url = resolveRef(r.url, next)
-	}
-	// Hit max_pages with more pages potentially available. Return what
-	// we have; the cap is a safety measure, not an error. If callers
-	// need to know we truncated they can set on_page_error: fail and
-	// bump max_pages, or add a follow-up feature (a "truncated" flag
-	// on the result) if this becomes a real complaint.
-	return acc, nil
 }
 
 // pageSize is the configured window size, or the default.

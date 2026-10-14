@@ -96,6 +96,10 @@ func (s *Source) rewriteTemplates(fn func(string) string) {
 	if s.JSON != nil {
 		s.JSON, _ = substituteJSON(s.JSON, fn)
 	}
+	if s.Paginate != nil && s.Paginate.Patch != nil {
+		patch, _ := substituteJSON(s.Paginate.Patch, fn)
+		s.Paginate.Patch = patch.(map[string]any)
+	}
 }
 
 // substituteJSON returns v with fn applied to every string in it. ok is
@@ -279,11 +283,26 @@ func (s *Source) validateRequest(path string) error {
 // filters or finds, so a value in url: or query: is the default they
 // replace (`?q=tolkien` until the user types a search).
 func (s *Source) ownedQueryKeys() map[string]string {
+	owned := map[string]string{}
+	if p := s.Paginate; p != nil {
+		for _, sh := range []struct{ field, key string }{
+			{"cursor_param", p.CursorParam}, {"offset_param", p.OffsetParam},
+			{"page_param", p.PageParam}, {"limit_param", p.LimitParam},
+		} {
+			if sh.key != "" {
+				owned[sh.key] = "paginate (" + sh.field + ")"
+			}
+		}
+		if !s.HasBody() {
+			for k := range p.Patch {
+				owned[k] = "paginate (patch)"
+			}
+		}
+	}
 	w := s.Window
 	if w == nil {
-		return nil
+		return owned
 	}
-	owned := map[string]string{}
 	own := func(key, field string) {
 		if key != "" {
 			owned[key] = "window (" + field + ")"

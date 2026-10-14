@@ -25,6 +25,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/jsdrews/tui-builder/internal/expr"
 )
 
 type Source struct {
@@ -426,6 +428,13 @@ func (s *Source) Clone() *Source {
 	}
 	if s.Paginate != nil {
 		cp := *s.Paginate
+		if s.Paginate.PageStart != nil {
+			n := *s.Paginate.PageStart
+			cp.PageStart = &n
+		}
+		if s.Paginate.Patch != nil {
+			cp.Patch = cloneJSON(s.Paginate.Patch).(map[string]any)
+		}
 		out.Paginate = &cp
 	}
 	if s.Window != nil {
@@ -525,6 +534,9 @@ func (s *Source) validateHTTP(path string) error {
 	}
 	if s.Paginate != nil {
 		if err := s.Paginate.validate(path + ".paginate"); err != nil {
+			return err
+		}
+		if err := s.validatePaginateRequest(path + ".paginate"); err != nil {
 			return err
 		}
 		if s.Follow {
@@ -727,24 +739,122 @@ func (w *WindowConfig) validateExecWindow(path string, argv []string) error {
 // validate enforces PaginateConfig's per-strategy required fields +
 // value ranges. path is the YAML path (e.g.
 // `data.sources.users.paginate`); errors embed it.
+// paginateFields says which strategy each strategy-specific field
+// belongs to. Fields not listed (page_size, limit_param, more_when,
+// stop_on_short_page, max_pages, on_page_error, patch) are shared.
+var paginateFields = []struct{ field, strategy string }{
+	{"next_path", "link"},
+	{"cursor_path", "cursor"}, {"cursor_param", "cursor"},
+	{"offset_param", "offset"},
+	{"page_param", "page"}, {"page_start", "page"},
+}
+
+func (p *PaginateConfig) set(field string) bool {
+	switch field {
+	case "next_path":
+		return p.NextPath != ""
+	case "cursor_path":
+		return p.CursorPath != ""
+	case "cursor_param":
+		return p.CursorParam != ""
+	case "offset_param":
+		return p.OffsetParam != ""
+	case "page_param":
+		return p.PageParam != ""
+	case "page_start":
+		return p.PageStart != nil
+	}
+	return false
+}
+
 func (p *PaginateConfig) validate(path string) error {
 	switch p.Strategy {
 	case "":
-		return fmt.Errorf("%s: `strategy:` is required (one of: link)", path)
+		return fmt.Errorf("%s: `strategy:` is required (one of: link, cursor, offset, page)", path)
+	case "link", "cursor", "offset", "page":
+	default:
+		return fmt.Errorf("%s: unknown strategy %q (want: link, cursor, offset, page)", path, p.Strategy)
+	}
+	for _, f := range paginateFields {
+		if f.strategy != p.Strategy && p.set(f.field) {
+			return fmt.Errorf("%s: %s belongs to strategy %s, not %s", path, f.field, f.strategy, p.Strategy)
+		}
+	}
+	switch p.Strategy {
 	case "link":
 		if p.NextPath == "" {
-			return fmt.Errorf("%s.next_path: required for strategy=link (dot-path into the response body to the next page's URL, e.g. \"next\")", path)
+			return fmt.Errorf("%s.next_path: required for strategy link (where the next page's URL is: a body path like \"next\", or \"link:next\" for the Link header)", path)
 		}
-	default:
-		return fmt.Errorf("%s: unknown strategy %q (want: link)", path, p.Strategy)
+		if len(p.Patch) > 0 {
+			return fmt.Errorf("%s.patch: doesn't apply to strategy link — it follows the next URL exactly as the server sent it", path)
+		}
+		if p.LimitParam != "" {
+			return fmt.Errorf("%s.limit_param: doesn't apply to strategy link — it follows the next URL as sent; put the page size in url: or query:", path)
+		}
+	case "cursor":
+		if p.CursorPath == "" {
+			return fmt.Errorf("%s.cursor_path: required for strategy cursor (where the next cursor is, e.g. \"next_cursor\")", path)
+		}
+		if p.CursorParam == "" && len(p.Patch) == 0 {
+			return fmt.Errorf("%s: strategy cursor needs cursor_param (the query parameter the cursor goes in) or a patch: using ${paginate.cursor}", path)
+		}
+	case "offset":
+		if p.OffsetParam == "" && len(p.Patch) == 0 {
+			return fmt.Errorf("%s: strategy offset needs offset_param or a patch: using ${paginate.offset}", path)
+		}
+	case "page":
+		if p.PageParam == "" && len(p.Patch) == 0 {
+			return fmt.Errorf("%s: strategy page needs page_param or a patch: using ${paginate.page}", path)
+		}
+		if p.PageStart != nil && *p.PageStart < 0 {
+			return fmt.Errorf("%s.page_start: must be >= 0", path)
+		}
+	}
+	for field, loc := range map[string]string{"next_path": p.NextPath, "cursor_path": p.CursorPath, "total_path": p.TotalPath} {
+		if err := validateLocator(path+"."+field, loc); err != nil {
+			return err
+		}
+	}
+	if p.MoreWhen != "" {
+		if _, err := expr.Compile(p.MoreWhen); err != nil {
+			return fmt.Errorf("%s.more_when: %w", path, err)
+		}
+	}
+	if p.PageSize < 0 {
+		return fmt.Errorf("%s.page_size: must be >= 0 (0 = default %d)", path, DefaultWindowPageSize)
 	}
 	if p.MaxPages < 0 {
-		return fmt.Errorf("%s.max_pages: must be >= 0 (0 = unlimited; positive = cap)", path)
+		return fmt.Errorf("%s.max_pages: must be >= 0 (0 = the default of 20)", path)
 	}
 	switch p.OnPageError {
 	case "", "fail", "skip":
 	default:
 		return fmt.Errorf("%s.on_page_error: unknown %q (want: fail|skip)", path, p.OnPageError)
+	}
+	return nil
+}
+
+// validatePaginateRequest checks paginate against the rest of the
+// request: a patch needs something to merge into, and mustn't write a
+// key its own shorthand writes.
+func (s *Source) validatePaginateRequest(path string) error {
+	p := s.Paginate
+	if len(p.Patch) == 0 {
+		return nil
+	}
+	if s.Body != "" {
+		return fmt.Errorf("%s.patch: can't merge into a raw body: — use json: or form:", path)
+	}
+	if s.HasBody() {
+		return nil
+	}
+	for _, sh := range []struct{ field, key string }{
+		{"cursor_param", p.CursorParam}, {"offset_param", p.OffsetParam},
+		{"page_param", p.PageParam}, {"limit_param", p.LimitParam},
+	} {
+		if _, ok := p.Patch[sh.key]; ok && sh.key != "" {
+			return fmt.Errorf("%s.patch: %q is also set by %s", path, sh.key, sh.field)
+		}
 	}
 	return nil
 }

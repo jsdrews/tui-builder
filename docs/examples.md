@@ -425,7 +425,9 @@ task example NAME=params_demo
 
 ### http_paginated
 
-`paginate:` walks every page up front into one list.
+`paginate:` walks every page up front into one list: a `Link` header
+walk over JSONPlaceholder and a zero-based page walk over Hacker News
+search, with cursor walks (Slack, Notion, Stripe) in the comments.
 
 ```sh
 task example NAME=http_paginated
