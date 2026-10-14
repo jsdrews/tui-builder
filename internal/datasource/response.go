@@ -33,7 +33,8 @@ func (s *httpSource) send(ctx context.Context, url, body string) (*response, err
 	defer cancel()
 	resp, err := s.doWith(ctx, url, body)
 	if err != nil {
-		return nil, err
+		// A transport error quotes the URL, query api_key and all.
+		return nil, s.auth.redactErr(err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
@@ -79,7 +80,7 @@ func (s *httpSource) parse(r *response) (any, error) {
 	}
 	if s.errorPath != "" {
 		if v := s.locate(s.errorPath, parsed, r, nil); present(v) {
-			return parsed, &HTTPError{Status: r.status, Message: messageText(v), Method: r.method, URL: r.url, Body: snippet(r.raw, detailBytes)}
+			return parsed, s.masked(&HTTPError{Status: r.status, Message: messageText(v), Method: r.method, URL: r.url, Body: snippet(r.raw, detailBytes)})
 		}
 	}
 	return parsed, nil
@@ -142,22 +143,32 @@ var errorGuesses = []string{"message", "error.message", "error", "error_descript
 // the start of the body.
 func (s *httpSource) httpError(r *response, parsed any) *HTTPError {
 	e := &HTTPError{Status: r.status, Method: r.method, URL: r.url, Body: snippet(r.raw, detailBytes)}
+	e.Message = s.errorMessage(r, parsed)
+	return s.masked(e)
+}
+
+func (s *httpSource) errorMessage(r *response, parsed any) string {
 	if s.errorPath != "" {
 		if v := s.locate(s.errorPath, parsed, r, nil); present(v) {
-			e.Message = messageText(v)
-			return e
+			return messageText(v)
 		}
 	}
 	if parsed != nil {
 		for _, path := range errorGuesses {
 			if str, ok := Get(parsed, path).(string); ok && strings.TrimSpace(str) != "" {
-				e.Message = str
-				return e
+				return str
 			}
 		}
 	}
-	e.Message = snippet(r.raw, messageBytes)
-	return e
+	return snippet(r.raw, messageBytes)
+}
+
+// masked is e with the source's secrets masked out of it.
+func (s *httpSource) masked(e *HTTPError) *HTTPError {
+	if s.auth == nil {
+		return e
+	}
+	return s.auth.redactErr(e).(*HTTPError)
 }
 
 // locate reads a response-level value. A locator is a dot-path into the

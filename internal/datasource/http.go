@@ -46,6 +46,7 @@ type httpSource struct {
 	form      map[string]cfg.QueryValue // form:
 	query     map[string]cfg.QueryValue // query:, laid over the url's own
 	format    string                    // "json" (default) or "text"
+	auth      *authState                // auth: and the secrets to mask
 	emptyOn   map[int]bool              // statuses answered with the empty result
 	errorPath string                    // locator for an error's message
 	root      string                    // dot-path applied to parsed JSON before return
@@ -106,6 +107,7 @@ func newHTTP(d *cfg.Source) (Source, error) {
 		json:      d.JSON,
 		form:      d.Form,
 		query:     d.Query,
+		auth:      newAuthState(d.Auth, d.URL, d.Headers),
 		emptyOn:   emptyOn,
 		errorPath: d.ErrorPath,
 		format:    d.Format,
@@ -368,7 +370,7 @@ func (s *httpSource) subscribe(ctx context.Context) (<-chan Event, error) {
 	}
 	resp, err := s.do(ctx)
 	if err != nil {
-		return nil, err
+		return nil, s.auth.redactErr(err)
 	}
 	if resp.StatusCode/100 != 2 {
 		raw, _ := io.ReadAll(resp.Body)
@@ -426,6 +428,26 @@ func (s *httpSource) doURL(ctx context.Context, url string) (*http.Response, err
 // doWith is doURL with the body overridden — an Anchored window renders a
 // body per request.
 func (s *httpSource) doWith(ctx context.Context, url, body string) (*http.Response, error) {
+	req, err := s.newRequest(ctx, url, body)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	// An OAuth 2 token the server no longer accepts is fetched afresh,
+	// and the request tried once more. This is separate from retry:.
+	if err == nil && resp.StatusCode == http.StatusUnauthorized && s.auth.spec.Scheme() == "oauth2" {
+		resp.Body.Close()
+		s.auth.forgetToken()
+		if req, err = s.newRequest(ctx, url, body); err != nil {
+			return nil, err
+		}
+		resp, err = http.DefaultClient.Do(req)
+	}
+	return resp, err
+}
+
+// newRequest builds one request: headers:, the defaults, then auth:.
+func (s *httpSource) newRequest(ctx context.Context, url, body string) (*http.Request, error) {
 	var bodyReader io.Reader
 	if body != "" {
 		bodyReader = strings.NewReader(body)
@@ -451,7 +473,10 @@ func (s *httpSource) doWith(ctx context.Context, url, body string) (*http.Respon
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		}
 	}
-	return http.DefaultClient.Do(req)
+	if err := s.auth.apply(ctx, req.Header, req.URL, s.timeout); err != nil {
+		return nil, err
+	}
+	return req, nil
 }
 
 // requestURL is s.url with query: laid over its own query string. A

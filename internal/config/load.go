@@ -51,6 +51,13 @@ func Load(path string) (*Config, error) {
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("validate %s: %w", path, err)
 	}
+	// Keep each auth secret's template as written, so a run-time "is
+	// empty" error can name the env var behind it.
+	for _, s := range c.Data.Sources {
+		if s != nil && s.Auth != nil {
+			s.Auth.captureTemplates()
+		}
+	}
 	// Env-var check runs after Validate so schema errors surface
 	// first. Applies defaults, errors on missing required vars,
 	// warns on undeclared-and-unset references.

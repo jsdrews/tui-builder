@@ -80,7 +80,7 @@ data:
       type: http
       url: https://api.github.com
       headers: {Accept: application/vnd.github+json}
-      auth: {bearer: ${env.GITHUB_TOKEN}}
+      auth: {bearer: "${env.GITHUB_TOKEN}"}
       retry: {max: 3, backoff: 500ms}
   sources:
     issues:
@@ -287,7 +287,8 @@ skip` does today.
 
 From [Paginate strategies and stop conditions](https://github.com/jsdrews/tui-builder/issues/13)
 and [GraphQL shorthand and body-carried cursors](https://github.com/jsdrews/tui-builder/issues/16).
-Ships in PR 4.
+**Landed in [#84](https://github.com/jsdrews/tui-builder/pull/84).** An `offset` walk advances by
+the items actually received, and `page_size` defaults to 100.
 
 `strategy:` is required, and each strategy accepts only its own fields;
 a field from another strategy is a load error.
@@ -359,13 +360,15 @@ notion_pages:
 From [Auth: schemes, placement and redaction](https://github.com/jsdrews/tui-builder/issues/14).
 Ships in PR 5.
 
-`auth:` holds exactly one scheme; none or two is a load error.
+`auth:` holds exactly one scheme; none or two is a load error. In a
+flow map the token needs quotes (`{bearer: "${env.X}"}`): an unquoted
+`${` there isn't valid YAML.
 
 ```yaml
-auth: {bearer: ${env.GH_TOKEN}}
-auth: {basic: {user: ${env.U}, pass: ${env.P}}}
-auth: {api_key: {in: header, name: X-Api-Key, value: ${env.K}}}   # in: header | query | cookie
-auth: {oauth2: {token_url: /oauth/token, client_id: ${env.ID}, client_secret: ${env.SECRET}, scopes: [read]}}
+auth: {bearer: "${env.GH_TOKEN}"}
+auth: {basic: {user: "${env.U}", pass: "${env.P}"}}
+auth: {api_key: {in: header, name: X-Api-Key, value: "${env.K}"}}   # in: header | query | cookie
+auth: {oauth2: {token_url: /oauth/token, client_id: "${env.ID}", client_secret: "${env.SECRET}", scopes: [read]}}
 ```
 
 | OpenAPI security scheme | `auth:` |
@@ -573,7 +576,7 @@ for its block, `httptest`-based tests, updates to
 `docs/reference/sources.md` and `docs/guide/data.md`, and `--describe`
 lines for its fields. **Examples:** presets rework `http_github.yaml`
 and `http_github_auth.yaml` to extend a `github` preset; auth moves
-`http_github_auth.yaml` to `auth: {bearer: ${env.GITHUB_TOKEN}}`;
+`http_github_auth.yaml` to `auth: {bearer: "${env.GITHUB_TOKEN}"}`;
 paginate adds a `cursor` example; GraphQL adds the Relay example. New
 behaviour is proven in tests, not in examples that need the network.
 

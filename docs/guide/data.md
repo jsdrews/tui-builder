@@ -84,6 +84,23 @@ what the defaults can't:
 (`header:X-Total-Count`, `link:next` for a `Link` header). See
 [Reference → Responses](../reference/sources.md#responses).
 
+### Authenticating
+
+Put credentials in `auth:` rather than `headers:`: they're applied to
+every request (and every page of a walk), and masked as `•••` wherever
+they could otherwise show up — errors, the output console,
+`wrangl --describe`.
+
+```yaml
+auth: {bearer: "${env.GITHUB_TOKEN}"}
+auth: {basic: {user: "${env.JIRA_USER}", pass: "${env.JIRA_TOKEN}"}}
+auth: {api_key: {in: query, name: appid, value: "${env.OWM_KEY}"}}
+```
+
+OAuth 2 client credentials fetch and refresh their own token. A preset
+is the natural home for `auth:`, so every source against an API shares
+it. See [Reference → `auth`](../reference/sources.md#auth).
+
 ### Sharing settings with a preset
 
 Sources against one API repeat its base URL, headers and timeout. Put
