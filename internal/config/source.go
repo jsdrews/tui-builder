@@ -80,6 +80,9 @@ type Source struct {
 	// one sent URL-encoded. At most one of Body, JSON and Form is set.
 	JSON any                   `yaml:"json,omitempty"`
 	Form map[string]QueryValue `yaml:"form,omitempty"`
+	// Auth authenticates every request with exactly one scheme. See
+	// auth.go.
+	Auth *AuthSpec `yaml:"auth,omitempty"`
 	// EmptyOn lists statuses answered with the empty result (null)
 	// rather than an error, e.g. a 404 from a lookup.
 	EmptyOn []int `yaml:"empty_on,omitempty"`
@@ -245,6 +248,9 @@ func (s *Source) Validate(path string) error {
 	if err := s.validateResponse(path); err != nil {
 		return err
 	}
+	if err := s.validateAuth(path); err != nil {
+		return err
+	}
 	if err := s.validateResume(path); err != nil {
 		return err
 	}
@@ -401,6 +407,7 @@ func (s *Source) Clone() *Source {
 	if s.Command != nil {
 		out.Command = append([]string(nil), s.Command...)
 	}
+	out.Auth = s.Auth.Clone()
 	if s.EmptyOn != nil {
 		out.EmptyOn = append([]int(nil), s.EmptyOn...)
 	}

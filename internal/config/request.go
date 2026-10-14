@@ -96,6 +96,7 @@ func (s *Source) rewriteTemplates(fn func(string) string) {
 	if s.JSON != nil {
 		s.JSON, _ = substituteJSON(s.JSON, fn)
 	}
+	s.Auth.visit(func(_ string, v *string) { *v = fn(*v) })
 	if s.Paginate != nil && s.Paginate.Patch != nil {
 		patch, _ := substituteJSON(s.Paginate.Patch, fn)
 		s.Paginate.Patch = patch.(map[string]any)
@@ -284,6 +285,9 @@ func (s *Source) validateRequest(path string) error {
 // replace (`?q=tolkien` until the user types a search).
 func (s *Source) ownedQueryKeys() map[string]string {
 	owned := map[string]string{}
+	if a := s.Auth; a.Scheme() == "api_key" && a.APIKey.In == "query" {
+		owned[a.APIKey.Name] = "auth (api_key)"
+	}
 	if p := s.Paginate; p != nil {
 		for _, sh := range []struct{ field, key string }{
 			{"cursor_param", p.CursorParam}, {"offset_param", p.OffsetParam},

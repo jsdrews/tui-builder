@@ -48,6 +48,10 @@ var referencePages = map[string][]string{
 	"Source":         {"sources.md", "pipelines.md"},
 	"Parameter":      {"sources.md", "actions.md", "app.md"},
 	"PaginateConfig": {"sources.md"},
+	"AuthSpec":       {"sources.md"},
+	"BasicAuth":      {"sources.md"},
+	"APIKeyAuth":     {"sources.md"},
+	"OAuth2Auth":     {"sources.md"},
 	"WindowConfig":   {"sources.md"},
 	"FindConfig":     {"sources.md"},
 	"ResumeSpec":     {"sources.md"},
@@ -81,7 +85,7 @@ var documentedInline = map[string]string{
 func TestReferenceDocumentsEveryField(t *testing.T) {
 	rows := map[string]map[string]bool{} // page -> documented names
 	dir := filepath.Join("..", "..", "docs", "reference")
-	rowRe := regexp.MustCompile("^\\|\\s*`([a-z_]+)`\\s*\\|")
+	rowRe := regexp.MustCompile("^\\|\\s*`([a-z0-9_]+)`\\s*\\|")
 	for _, pages := range referencePages {
 		for _, page := range pages {
 			if rows[page] != nil {

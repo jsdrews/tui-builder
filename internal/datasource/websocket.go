@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	"time"
 
 	"github.com/coder/websocket"
@@ -24,6 +25,7 @@ type websocketSource struct {
 	headers         map[string]string
 	initialMessages []string
 	timeout         time.Duration // connect timeout
+	auth            *authState    // applied to the handshake; masks secrets
 }
 
 func newWebsocket(d *cfg.Source) (Source, error) {
@@ -40,6 +42,7 @@ func newWebsocket(d *cfg.Source) (Source, error) {
 		headers:         d.Headers,
 		initialMessages: append([]string(nil), d.InitialMessages...),
 		timeout:         timeout,
+		auth:            newAuthState(d.Auth, d.URL, d.Headers),
 	}, nil
 }
 
@@ -89,24 +92,30 @@ func (s *websocketSource) subscribe(ctx context.Context) (<-chan Event, error) {
 		// during the dial. Use a non-blocking-style select so we don't
 		// hang if the consumer goes away before reading.
 		select {
-		case ch <- Event{Line: fmt.Sprintf("(connecting to %s)", s.url)}:
+		case ch <- Event{Line: fmt.Sprintf("(connecting to %s)", s.auth.redact(s.url))}:
 		case <-ctx.Done():
 			return
 		}
 
 		connectCtx, cancelConnect := context.WithTimeout(ctx, s.timeout)
-		opts := &websocket.DialOptions{}
-		if len(s.headers) > 0 {
-			opts.HTTPHeader = make(http.Header, len(s.headers))
-			for k, v := range s.headers {
-				opts.HTTPHeader.Set(k, v)
-			}
+		opts := &websocket.DialOptions{HTTPHeader: make(http.Header, len(s.headers))}
+		for k, v := range s.headers {
+			opts.HTTPHeader.Set(k, v)
 		}
-		conn, _, err := websocket.Dial(connectCtx, s.url, opts)
+		dialURL := s.url
+		u, err := neturl.Parse(s.url)
+		if err == nil {
+			err = s.auth.apply(connectCtx, opts.HTTPHeader, u, s.timeout)
+			dialURL = u.String()
+		}
+		var conn *websocket.Conn
+		if err == nil {
+			conn, _, err = websocket.Dial(connectCtx, dialURL, opts)
+		}
 		cancelConnect()
 		if err != nil {
 			select {
-			case ch <- Event{Err: fmt.Errorf("dial %s: %w", s.url, err)}:
+			case ch <- Event{Err: s.auth.redactErr(fmt.Errorf("dial %s: %w", s.url, err))}:
 			case <-ctx.Done():
 			}
 			return
@@ -129,7 +138,7 @@ func (s *websocketSource) subscribe(ctx context.Context) (<-chan Event, error) {
 		// successfully. If only this line appears with no subsequent
 		// data, the server is silent (connectivity / subscription
 		// content issue) — distinguishable from a hung TUI.
-		confirm := fmt.Sprintf("(connected to %s", s.url)
+		confirm := fmt.Sprintf("(connected to %s", s.auth.redact(s.url))
 		if n := len(s.initialMessages); n > 0 {
 			confirm += fmt.Sprintf("; sent %d initial message(s)", n)
 		}

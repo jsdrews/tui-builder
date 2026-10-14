@@ -103,7 +103,8 @@ Requests a URL and parses the response. For REST and JSON APIs, GraphQL
 |---|---|---|---|---|
 | `url` | template | — | required | The endpoint. Tokens are escaped by where they sit; see [requests](#requests). |
 | `method` | template | `POST` with a body, else `GET` | — | HTTP method. |
-| `headers` | map of template | — | — | Request headers, e.g. `Authorization: "Bearer ${env.TOKEN}"`. They win over every header set for you (`Accept`, `User-Agent`, `Content-Type`). |
+| `headers` | map of template | — | — | Request headers. They win over every header set for you (`Accept`, `User-Agent`, `Content-Type`). Credentials belong in `auth:`, which keeps them out of output. |
+| `auth` | map | — | — | Authenticates every request: `bearer`, `basic`, `api_key` or `oauth2`. See [`auth`](#auth). |
 | `query` | map of template or list | — | — | Query parameters, laid over any written in `url`. A list becomes repeated keys; an empty value drops its key. See [requests](#requests). |
 | `json` | any | — | not with `form`, `body` | Request body written as YAML and sent as JSON, with `Content-Type: application/json`. See [requests](#requests). |
 | `form` | map of template or list | — | not with `json`, `body` | Request body sent URL-encoded, with `Content-Type: application/x-www-form-urlencoded`. Values work as in `query`. |
@@ -122,7 +123,8 @@ releases:
   timeout: 15s
   headers:
     Accept: application/vnd.github+json
-    Authorization: "Bearer ${env.GITHUB_TOKEN}"
+  auth:
+    bearer: ${env.GITHUB_TOKEN}
 ```
 
 ### Requests
@@ -235,6 +237,75 @@ marked `results="false"` (Sentry's last page) counts as missing.
 Fields that read inside each item (`window.cursor`, `find.position`, a
 column's `value:`, `mark_key:`) take a dot-path only.
 
+### `auth`
+
+Authenticates every request of an `http` source (and the upgrade request
+of a `websocket` one). Set exactly one scheme. Secrets come from the
+environment, `${env.NAME}`, rather than the YAML; in a flow map like
+`{bearer: …}` the token needs quotes.
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `bearer` | template | — | — | Sends `Authorization: Bearer <value>`. |
+| `basic` | map | — | — | HTTP basic auth: `user` and `pass`. |
+| `user` | template | — | `basic`; required | The user name (Stripe-style APIs put the key here and leave `pass` empty). |
+| `pass` | template | — | `basic` | The password. May be empty. |
+| `api_key` | map | — | — | A key sent as `in` / `name` / `value`. |
+| `in` | string | — | `api_key`; required | `header`, `query` or `cookie`. |
+| `name` | string | — | `api_key`; required | The header, query parameter or cookie it goes in. |
+| `value` | template | — | `api_key` | The key. |
+| `oauth2` | map | — | `http` only | The OAuth 2 client-credentials grant: fetches a token and sends it as a bearer token. |
+| `token_url` | template | — | `oauth2`; required | Where to get the token. A relative URL resolves against the source's `url`. |
+| `client_id` | template | — | `oauth2`; required | The client ID. |
+| `client_secret` | template | — | `oauth2`; required | The client secret. |
+| `scopes` | list of string | — | `oauth2` | Scopes to ask for, sent space-separated. |
+| `client_auth` | string | `body` | `oauth2` | How the client proves itself to `token_url`: `body` (in the form) or `basic`. |
+
+```yaml
+data:
+  presets:
+    github:
+      type: http
+      url: https://api.github.com
+      auth: {bearer: "${env.GITHUB_TOKEN}"}
+    spotify:
+      type: http
+      url: https://api.spotify.com/v1
+      auth:
+        oauth2:
+          token_url: https://accounts.spotify.com/api/token
+          client_id: ${env.SPOTIFY_ID}
+          client_secret: ${env.SPOTIFY_SECRET}
+          client_auth: basic
+    weather:
+      type: http
+      url: https://api.openweathermap.org/data/2.5
+      auth: {api_key: {in: query, name: appid, value: "${env.OWM_KEY}"}}
+```
+
+**Where it goes:** auth sets its header (`Authorization`, an `api_key`
+header, or `Cookie`) after `headers:`, so setting the same header in
+`headers:` too is a load error; `unset: [auth]` drops an inherited auth
+first. A `query` key is set last on every request, including the next
+URLs `paginate:` follows, and can't also be set in `url:` or `query:`.
+
+**OAuth 2:** the token is fetched on the first request and kept in
+memory, shared by every source with the same token URL, client and
+scopes. It's fetched again 30 seconds before `expires_in` runs out, and
+once more if a request comes back `401` (which is then tried once
+again). A failed token request fails the source: `auth: token request
+failed — HTTP 401 Unauthorized — invalid_client`.
+
+**Missing secrets:** an empty value fails the source when it runs,
+naming what was empty: `auth: bearer is empty (${env.GITHUB_TOKEN} is
+unset)`. Other sources keep working.
+
+**Masking:** every resolved `auth:` value, and every `headers:` value
+whose name is `Authorization`, `Proxy-Authorization` or `Cookie` or
+contains `token`, `key` or `secret`, shows as `•••` in error messages,
+the output console, and response snippets. `wrangl --describe` prints
+templates as written and literal values as `•••`.
+
 ## `exec`
 
 Runs a command and consumes its stdout. Any CLI that prints JSON becomes
@@ -278,7 +349,8 @@ Connects to a WebSocket and emits one event per frame. Always streamed.
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
 | `url` | template | — | required | `ws://` or `wss://` endpoint. |
-| `headers` | map of template | — | — | Sent on the upgrade request (auth). |
+| `headers` | map of template | — | — | Sent on the upgrade request. |
+| `auth` | map | — | not `oauth2` | Applied to the upgrade request. See [`auth`](#auth). |
 | `initial_messages` | list of template | — | — | Text frames sent, in order, right after connecting, for protocols that need a subscribe message first. |
 
 ```yaml

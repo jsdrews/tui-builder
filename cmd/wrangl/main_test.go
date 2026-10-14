@@ -214,6 +214,48 @@ func TestPresetsListedAndNotRunnable(t *testing.T) {
 	}
 }
 
+// A literal secret in auth: or a secret-named header never prints;
+// a template does.
+func TestRunDescribeMasksLiteralSecrets(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "auth.yaml")
+	write(t, cfgPath, `
+data:
+  sources:
+    api:
+      type: http
+      url: https://example.test/api
+      headers: {X-Api-Token: literal-hdr-secret, Accept: application/json}
+      auth: {bearer: literal-bearer-secret}
+    templated:
+      type: http
+      url: https://example.test/api
+      auth: {api_key: {in: query, name: key, value: "${env.API_KEY}"}}
+tui:
+  components:
+    t: {type: table, source: api, columns: [{title: V, width: 20, value: v}]}
+  screen:
+    layout: {component: t}
+`)
+	out := captureStdout(t, func() {
+		if err := runDescribe(cfgPath, "api"); err != nil {
+			t.Fatal(err)
+		}
+		if err := runDescribe(cfgPath, "templated"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, leak := range []string{"literal-hdr-secret", "literal-bearer-secret"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("%q printed:\n%s", leak, out)
+		}
+	}
+	for _, want := range []string{"Auth:       bearer •••", "X-Api-Token: •••", "Accept: application/json", "api_key query key = ${env.API_KEY}"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+}
+
 func write(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {

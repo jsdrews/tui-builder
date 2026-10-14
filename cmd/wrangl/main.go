@@ -311,6 +311,38 @@ func describeLeaf(w *os.File, name string, s *cfg.Source, extendedBy []string) {
 	if len(s.Command) > 0 {
 		fmt.Fprintf(w, "  Command:    %v%s\n", s.Command, from("command"))
 	}
+	if len(s.Headers) > 0 {
+		names := make([]string, 0, len(s.Headers))
+		for k := range s.Headers {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		for i, k := range names {
+			label := "  Headers:    "
+			if i > 0 {
+				label = "              "
+			}
+			v := s.Headers[k]
+			if cfg.IsSecretHeader(k) {
+				v = maskLiteral(v)
+			}
+			fmt.Fprintf(w, "%s%s: %s%s\n", label, k, v, from("headers"))
+		}
+	}
+	if a := s.Auth; a.Scheme() != "" {
+		var how string
+		switch a.Scheme() {
+		case "bearer":
+			how = maskLiteral(a.Bearer)
+		case "basic":
+			how = "user " + maskLiteral(a.Basic.User)
+		case "api_key":
+			how = fmt.Sprintf("%s %s = %s", a.APIKey.In, a.APIKey.Name, maskLiteral(a.APIKey.Value))
+		case "oauth2":
+			how = fmt.Sprintf("client %s via %s", maskLiteral(a.OAuth2.ClientID), a.OAuth2.TokenURL)
+		}
+		fmt.Fprintf(w, "  Auth:       %s %s%s\n", a.Scheme(), how, from("auth"))
+	}
 	if p := s.Paginate; p != nil {
 		max := p.MaxPages
 		if max == 0 {
@@ -640,4 +672,13 @@ func extendedBy(c *cfg.Config, preset string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// maskLiteral shows a templated secret as written (`${env.TOKEN}`) and a
+// literal one as •••, so --describe never prints a credential.
+func maskLiteral(v string) string {
+	if strings.Contains(v, "${") {
+		return v
+	}
+	return "•••"
 }
