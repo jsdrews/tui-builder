@@ -83,6 +83,14 @@ type Source struct {
 	// Auth authenticates every request with exactly one scheme. See
 	// auth.go.
 	Auth *AuthSpec `yaml:"auth,omitempty"`
+	// Retry retries a failed request (opt-in). See retry.go.
+	Retry *RetrySpec `yaml:"retry,omitempty"`
+	// Conditional turns conditional GET off with false: by default a
+	// single-request source sends If-None-Match / If-Modified-Since and
+	// keeps its last value on a 304.
+	Conditional *bool `yaml:"conditional,omitempty"`
+	// MaxBody caps a response's size (default 50MB), per page.
+	MaxBody string `yaml:"max_body,omitempty"`
 	// EmptyOn lists statuses answered with the empty result (null)
 	// rather than an error, e.g. a 404 from a lookup.
 	EmptyOn []int `yaml:"empty_on,omitempty"`
@@ -251,6 +259,9 @@ func (s *Source) Validate(path string) error {
 	if err := s.validateAuth(path); err != nil {
 		return err
 	}
+	if err := s.validateResilience(path); err != nil {
+		return err
+	}
 	if err := s.validateResume(path); err != nil {
 		return err
 	}
@@ -408,6 +419,11 @@ func (s *Source) Clone() *Source {
 		out.Command = append([]string(nil), s.Command...)
 	}
 	out.Auth = s.Auth.Clone()
+	out.Retry = s.Retry.Clone()
+	if s.Conditional != nil {
+		c := *s.Conditional
+		out.Conditional = &c
+	}
 	if s.EmptyOn != nil {
 		out.EmptyOn = append([]int(nil), s.EmptyOn...)
 	}

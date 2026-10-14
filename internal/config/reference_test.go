@@ -49,6 +49,7 @@ var referencePages = map[string][]string{
 	"Parameter":      {"sources.md", "actions.md", "app.md"},
 	"PaginateConfig": {"sources.md"},
 	"AuthSpec":       {"sources.md"},
+	"RetrySpec":      {"sources.md"},
 	"BasicAuth":      {"sources.md"},
 	"APIKeyAuth":     {"sources.md"},
 	"OAuth2Auth":     {"sources.md"},

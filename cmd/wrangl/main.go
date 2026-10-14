@@ -53,6 +53,7 @@ import (
 
 func main() {
 	datasource.UserAgent = "wrangl/" + version.String()
+	datasource.Notify = func(msg string) { fmt.Fprintln(os.Stderr, "notice:", msg) }
 	// Cobra returns the error from RunE; it has already been printed
 	// via SilenceErrors=false behavior. We just need the right exit code.
 	if err := newRoot().Execute(); err != nil {
@@ -342,6 +343,16 @@ func describeLeaf(w *os.File, name string, s *cfg.Source, extendedBy []string) {
 			how = fmt.Sprintf("client %s via %s", maskLiteral(a.OAuth2.ClientID), a.OAuth2.TokenURL)
 		}
 		fmt.Fprintf(w, "  Auth:       %s %s%s\n", a.Scheme(), how, from("auth"))
+	}
+	if r := s.Retry; r != nil {
+		max, backoff := r.Max, r.Backoff
+		if max == 0 {
+			max = cfg.DefaultRetryMax
+		}
+		if backoff == "" {
+			backoff = cfg.DefaultRetryBackoff.String()
+		}
+		fmt.Fprintf(w, "  Retry:      %d × %s%s\n", max, backoff, from("retry"))
 	}
 	if p := s.Paginate; p != nil {
 		max := p.MaxPages

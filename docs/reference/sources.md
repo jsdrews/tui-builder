@@ -105,6 +105,9 @@ Requests a URL and parses the response. For REST and JSON APIs, GraphQL
 | `method` | template | `POST` with a body, else `GET` | — | HTTP method. |
 | `headers` | map of template | — | — | Request headers. They win over every header set for you (`Accept`, `User-Agent`, `Content-Type`). Credentials belong in `auth:`, which keeps them out of output. |
 | `auth` | map | — | — | Authenticates every request: `bearer`, `basic`, `api_key` or `oauth2`. See [`auth`](#auth). |
+| `retry` | map | — (no retries) | — | Tries a failed request again, honouring the server's rate-limit headers. See [`retry`](#retry). |
+| `conditional` | bool | `true` | — | Conditional GET: send `If-None-Match` / `If-Modified-Since`, and keep the last value on a `304`. Applies to a `GET` source with no `paginate`, `window` or `follow`. `false` turns it off. |
+| `max_body` | size | `50MB` | — | The largest response read (per page): `512KB`, `200MB`. A bigger one fails the source. |
 | `query` | map of template or list | — | — | Query parameters, laid over any written in `url`. A list becomes repeated keys; an empty value drops its key. See [requests](#requests). |
 | `json` | any | — | not with `form`, `body` | Request body written as YAML and sent as JSON, with `Content-Type: application/json`. See [requests](#requests). |
 | `form` | map of template or list | — | not with `json`, `body` | Request body sent URL-encoded, with `Content-Type: application/x-www-form-urlencoded`. Values work as in `query`. |
@@ -305,6 +308,39 @@ whose name is `Authorization`, `Proxy-Authorization` or `Cookie` or
 contains `token`, `key` or `secret`, shows as `•••` in error messages,
 the output console, and response snippets. `wrangl --describe` prints
 templates as written and literal values as `•••`.
+
+### `retry`
+
+Tries a failed request again. Off unless set; a preset turns it on for
+a whole API. Every request is retried on its own: each page of a
+`paginate:` walk, each window fetch.
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `max` | int | `3` | — | Attempts, the first included. |
+| `backoff` | duration | `500ms` | — | The base of the exponential curve: attempt *n* waits a random time up to `backoff × 2ⁿ⁻¹`. |
+| `max_backoff` | duration | `30s` | — | Caps the curve. |
+| `max_wait` | duration | `60s` | — | The longest wait a server can ask for. A longer one fails at once: `rate limited until 14:32:05 (HTTP 429)`. |
+| `on` | list of int | `[408, 429, 500, 502, 503, 504]` | not `401` or a success | Replaces the statuses retried. |
+
+```yaml
+retry: {max: 4, backoff: 1s}
+```
+
+**What's retried:** network errors and timeouts always; a status in
+`on:`; and a `403` that says no requests remain (`X-RateLimit-Remaining:
+0`, GitHub's rate limit). A `401` never is. Every method is retried, a
+`POST` included, since a source only reads.
+
+**How long it waits:** the server's word beats the curve. `Retry-After`
+first (seconds, fractional allowed, or a date); then
+`X-RateLimit-Reset`, `X-Rate-Limit-Reset` or `RateLimit-Reset` when the
+matching `…-Remaining` header is `0` (a Unix time or seconds from now).
+`timeout:` applies to each attempt; the waits don't count against it.
+
+Each retry writes a line to the output console (`retrying 2/3 in 4s —
+HTTP 503`; on stderr from `wrangl`), and the last value stays on screen.
+A polled source skips its ticks while a retry is pending.
 
 ## `exec`
 

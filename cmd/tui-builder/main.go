@@ -28,6 +28,7 @@ import (
 
 	"github.com/jsdrews/tui-builder/internal/build"
 	cfg "github.com/jsdrews/tui-builder/internal/config"
+	"github.com/jsdrews/tui-builder/internal/datasource"
 	tqscreen "github.com/jsdrews/tui-builder/internal/screen"
 	"github.com/jsdrews/tui-builder/internal/version"
 )
@@ -147,6 +148,10 @@ func run() error {
 		model = titled{Model: shell, title: c.App.Title}
 	}
 	prog := tea.NewProgram(model, tea.WithAltScreen())
+	// A source's passing notices (a retry, a walk stopped early) go to
+	// the output console. Send is safe from the fetch goroutines.
+	datasource.Notify = func(msg string) { prog.Send(app.StatusInfoMsg{Text: msg}) }
+	defer func() { datasource.Notify = nil }()
 	_, err = prog.Run()
 	return err
 }

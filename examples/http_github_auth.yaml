@@ -37,6 +37,9 @@ data:
         X-GitHub-Api-Version: "2022-11-28"
       auth:
         bearer: ${env.GITHUB_TOKEN}
+      # Ride out a blip or a rate limit; polls send If-None-Match on
+      # their own, and GitHub doesn't charge 304s against the limit.
+      retry: {max: 3}
 
   sources:
     starred:

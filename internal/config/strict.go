@@ -19,6 +19,7 @@ import (
 func checkStrict(root *yaml.Node) error {
 	known := yamlFields(reflect.TypeOf(Source{}))
 	paginate := yamlFields(reflect.TypeOf(PaginateConfig{}))
+	retry := yamlFields(reflect.TypeOf(RetrySpec{}))
 	auth := map[string][]string{
 		"":        yamlFields(reflect.TypeOf(AuthSpec{})),
 		"basic":   yamlFields(reflect.TypeOf(BasicAuth{})),
@@ -39,6 +40,9 @@ func checkStrict(root *yaml.Node) error {
 				}
 			}
 			if err := checkKeys(mappingAt(body, "paginate"), path+".paginate", paginate); err != nil {
+				return err
+			}
+			if err := checkKeys(mappingAt(body, "retry"), path+".retry", retry); err != nil {
 				return err
 			}
 			for _, scheme := range []string{"", "basic", "api_key", "oauth2"} {
