@@ -15,9 +15,9 @@ pipeline name), it writes that entry's value.
 
 | Flag | Does |
 |---|---|
-| `--list` | Lists every source and pipeline with its kind, lifecycle and upstream. Also the default with no target. |
+| `--list` | Lists every source and pipeline with its kind, lifecycle and upstream, then the presets and the sources that extend each. Also the default with no target. |
 | `-a`, `--all` | With `--list`, includes hidden entries (names starting with `_`, such as `pipe:` intermediates). |
-| `--describe` | Prints a target's kind, lifecycle, request template and parameters. `${env.*}` is not substituted, so secrets aren't printed. |
+| `--describe` | Prints a target's kind, lifecycle, request (URL, headers, body kind, auth, retry, paginate) and parameters. A source that extends a preset shows its merged settings, its `Extends:` chain and `(from <preset>)` on each inherited field; a preset name describes the preset. `${env.*}` is not substituted and literal secrets print as `•••`, so credentials aren't printed. |
 | `--param name=value` | Passes an argument for one of the target's parameters. Repeatable. |
 | `--pretty` | Indents one-shot JSON output. Streams stay one value per line. |
 | `--raw` | Writes text values and text stream frames as plain text, not JSON strings. |
@@ -26,6 +26,9 @@ pipeline name), it writes that entry's value.
 | `--list-actions` | Lists the config's actions with their kinds and inputs. |
 | `--describe-action` | Shows one action's inputs and a dry run of the command or request it would send. Bind inputs with `--param`. |
 | `-v`, `--version` | Prints the version and exits. |
+
+A preset can be described but not run: `wrangl config.yaml github`
+fails with `github is a preset; run a source that extends it`.
 
 There is no flag to run an action: confirm dialogs, exclusivity and input
 forms only exist in the TUI, and a headless run would skip them all.
@@ -51,6 +54,15 @@ wrangl --for 10s --raw examples/stream_exec.yaml ticker
 wrangl --list-actions examples/kube.yaml
 wrangl --describe-action examples/kube.yaml delete_pod --param name=nginx --param namespace=default
 ```
+
+## Errors and notices
+
+A failed fetch goes to stderr and `wrangl` exits 1. An HTTP failure reads
+`fetch: HTTP 404 Not Found — <message>`, with the API's own message
+(see [Responses](../reference/sources.md#responses)) and any secret
+masked. Passing notices, such as a retry (`retrying 2/3 in 4s — HTTP
+503`) or a paginate walk stopped because a page repeated, go to stderr as
+`notice: …` lines and don't change the exit code.
 
 ## Output
 
