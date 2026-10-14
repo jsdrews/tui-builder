@@ -13,7 +13,13 @@ import (
 	"time"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
+	"github.com/jsdrews/tui-builder/internal/version"
 )
+
+// UserAgent is sent on every http request whose headers don't set one.
+// GitHub rejects requests without one, and some APIs throttle generic
+// ones. wrangl sets its own name at startup.
+var UserAgent = "tui-builder/" + version.String()
 
 // httpSource is the http data source. Two modes mirror the exec source:
 //
@@ -34,8 +40,12 @@ type httpSource struct {
 	url      string
 	method   string
 	headers  map[string]string
-	body     string
-	format   string // "json" (default) or "text"
+	body     string                    // the encoded body: raw, JSON or URL-encoded
+	bodyKind string                    // "", "raw", "json" or "form"
+	json     any                       // json:, kept as a tree so patches merge into it
+	form     map[string]cfg.QueryValue // form:
+	query    map[string]cfg.QueryValue // query:, laid over the url's own
+	format   string                    // "json" (default) or "text"
 	root     string // dot-path applied to parsed JSON before return
 	follow   bool
 	timeout  time.Duration
@@ -54,6 +64,22 @@ func newHTTP(d *cfg.Source) (Source, error) {
 	method := strings.ToUpper(d.Method)
 	if method == "" {
 		method = http.MethodGet
+		if d.HasBody() {
+			method = http.MethodPost
+		}
+	}
+	body, kind := d.Body, ""
+	switch {
+	case d.JSON != nil:
+		b, err := json.Marshal(d.JSON)
+		if err != nil {
+			return nil, fmt.Errorf("json: %w", err)
+		}
+		body, kind = string(b), "json"
+	case len(d.Form) > 0:
+		body, kind = formValues(d.Form).Encode(), "form"
+	case d.Body != "":
+		kind = "raw"
 	}
 	timeout := 10 * time.Second
 	if d.Timeout != "" {
@@ -75,7 +101,11 @@ func newHTTP(d *cfg.Source) (Source, error) {
 		url:      d.URL,
 		method:   method,
 		headers:  d.Headers,
-		body:     d.Body,
+		body:     body,
+		bodyKind: kind,
+		json:     d.JSON,
+		form:     d.Form,
+		query:    d.Query,
 		format:   d.Format,
 		root:     d.Root,
 		follow:   d.Follow,
@@ -118,7 +148,7 @@ func (s *httpSource) Fetch(ctx context.Context) (any, error) {
 		return page.Items, nil
 	}
 
-	raw, err := s.fetchOne(ctx, s.url)
+	raw, err := s.fetchOne(ctx, s.requestURL())
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +205,9 @@ func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
 	skipOnErr := s.paginate.OnPageError == "skip"
 
 	var acc []any
-	url := s.url
+	// The first page is the configured request; later ones follow the
+	// next URL exactly as the server sent it, without re-applying query:.
+	url := s.requestURL()
 	for page := 0; page < max; page++ {
 		raw, err := s.fetchOne(ctx, url)
 		if err != nil {
@@ -283,6 +315,7 @@ func (s *httpSource) FetchEdge(ctx context.Context, q EdgeQuery) (EdgePage, erro
 		return EdgePage{}, fmt.Errorf("url: %w", err)
 	}
 	params := u.Query()
+	s.applyQuery(params)
 	if w.LimitParam != "" {
 		params.Set(w.LimitParam, vals["limit"])
 	}
@@ -293,7 +326,7 @@ func (s *httpSource) FetchEdge(ctx context.Context, q EdgeQuery) (EdgePage, erro
 	// source. With one, they're ${window.filters.*} tokens in the body,
 	// and strict APIs (Elasticsearch among them) reject parameters they
 	// don't know.
-	if s.body == "" {
+	if s.bodyKind == "" {
 		for title, val := range q.Filters {
 			if param, ok := w.Filters[title]; ok {
 				params.Set(param, val)
@@ -301,7 +334,7 @@ func (s *httpSource) FetchEdge(ctx context.Context, q EdgeQuery) (EdgePage, erro
 		}
 	}
 	body := s.body
-	if body == "" {
+	if s.bodyKind == "" {
 		rendered, _ := renderPatch(patch, q, vals)
 		for k, v := range rendered.(map[string]any) {
 			if str, ok := v.(string); ok {
@@ -311,7 +344,7 @@ func (s *httpSource) FetchEdge(ctx context.Context, q EdgeQuery) (EdgePage, erro
 			b, _ := json.Marshal(v)
 			params.Set(k, cursorText(string(b)))
 		}
-	} else if body, err = renderEdgeBody(body, patch, q, vals); err != nil {
+	} else if body, err = s.edgeBody(patch, q, vals); err != nil {
 		return EdgePage{}, err
 	}
 	u.RawQuery = params.Encode()
@@ -348,6 +381,7 @@ func (s *httpSource) windowURL(q WindowQuery) (string, error) {
 	}
 	w := s.window
 	vals := u.Query()
+	s.applyQuery(vals)
 	vals.Set(w.OffsetParam, strconv.Itoa(q.Offset))
 	vals.Set(w.LimitParam, strconv.Itoa(q.Limit))
 
@@ -465,7 +499,7 @@ func (s *httpSource) subscribe(ctx context.Context) (<-chan Event, error) {
 // do builds a request against s.url, applies headers, and dispatches
 // it. Shared between the non-paginated Fetch and Subscribe (streaming).
 func (s *httpSource) do(ctx context.Context) (*http.Response, error) {
-	return s.doURL(ctx, s.url)
+	return s.doURL(ctx, s.requestURL())
 }
 
 // doURL is the URL-override form used by the paginate walker to hit
@@ -494,5 +528,104 @@ func (s *httpSource) doWith(ctx context.Context, url, body string) (*http.Respon
 	if req.Header.Get("Accept") == "" {
 		req.Header.Set("Accept", "application/json")
 	}
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", UserAgent)
+	}
+	if body != "" && req.Header.Get("Content-Type") == "" {
+		switch s.bodyKind {
+		case "json":
+			req.Header.Set("Content-Type", "application/json")
+		case "form":
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
+	}
 	return http.DefaultClient.Do(req)
+}
+
+// requestURL is s.url with query: laid over its own query string. A
+// source without query: sends its url exactly as written.
+func (s *httpSource) requestURL() string {
+	if len(s.query) == 0 {
+		return s.url
+	}
+	u, err := neturl.Parse(s.url)
+	if err != nil {
+		return s.url
+	}
+	vals := u.Query()
+	s.applyQuery(vals)
+	u.RawQuery = vals.Encode()
+	return u.String()
+}
+
+// applyQuery lays query: over vals: each key it sets replaces the url's
+// values for that key. Empty values are dropped, and a key whose values
+// are all empty is left out entirely.
+func (s *httpSource) applyQuery(vals neturl.Values) {
+	for k, vs := range s.query {
+		vals.Del(k)
+		for _, v := range vs {
+			if v != "" {
+				vals.Add(k, v)
+			}
+		}
+	}
+}
+
+// formValues encodes form: the way applyQuery does query:.
+func formValues(form map[string]cfg.QueryValue) neturl.Values {
+	vals := neturl.Values{}
+	for k, vs := range form {
+		for _, v := range vs {
+			if v != "" {
+				vals.Add(k, v)
+			}
+		}
+	}
+	return vals
+}
+
+// edgeBody renders the body for one window request (an Anchored edge or
+// a find) and merges patch into it: deep into json:, as top-level fields
+// into form:, and into a raw body: that parses as a JSON object.
+func (s *httpSource) edgeBody(patch map[string]any, q EdgeQuery, vals map[string]string) (string, error) {
+	switch s.bodyKind {
+	case "json":
+		rendered, _ := renderPatch(s.json, q, vals)
+		doc, ok := rendered.(map[string]any)
+		if !ok {
+			if len(patch) > 0 {
+				return "", fmt.Errorf("json: must be an object for the window's patches to merge into")
+			}
+			b, err := json.Marshal(rendered)
+			return string(b), err
+		}
+		p, _ := renderPatch(patch, q, vals)
+		deepMerge(doc, p.(map[string]any))
+		b, err := json.Marshal(doc)
+		return string(b), err
+	case "form":
+		out := neturl.Values{}
+		for k, vs := range s.form {
+			for _, v := range vs {
+				v = windowTokenRe.ReplaceAllStringFunc(v, func(tok string) string {
+					return vals[windowTokenRe.FindStringSubmatch(tok)[1]]
+				})
+				if v != "" {
+					out.Add(k, v)
+				}
+			}
+		}
+		p, _ := renderPatch(patch, q, vals)
+		for k, v := range p.(map[string]any) {
+			if str, ok := v.(string); ok {
+				out.Set(k, str)
+				continue
+			}
+			b, _ := json.Marshal(v)
+			out.Set(k, cursorText(string(b)))
+		}
+		return out.Encode(), nil
+	}
+	return renderEdgeBody(s.body, patch, q, vals)
 }

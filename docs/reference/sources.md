@@ -101,10 +101,13 @@ Requests a URL and parses the response. For REST and JSON APIs, GraphQL
 
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
-| `url` | template | — | required | The endpoint. |
-| `method` | template | `GET` | — | HTTP method. |
-| `headers` | map of template | — | — | Request headers, e.g. `Authorization: "Bearer ${env.TOKEN}"`. |
-| `body` | template | — | — | Request body, sent as written after substitution. |
+| `url` | template | — | required | The endpoint. Tokens are escaped by where they sit; see [requests](#requests). |
+| `method` | template | `POST` with a body, else `GET` | — | HTTP method. |
+| `headers` | map of template | — | — | Request headers, e.g. `Authorization: "Bearer ${env.TOKEN}"`. They win over every header set for you (`Accept`, `User-Agent`, `Content-Type`). |
+| `query` | map of template or list | — | — | Query parameters, laid over any written in `url`. A list becomes repeated keys; an empty value drops its key. See [requests](#requests). |
+| `json` | any | — | not with `form`, `body` | Request body written as YAML and sent as JSON, with `Content-Type: application/json`. See [requests](#requests). |
+| `form` | map of template or list | — | not with `json`, `body` | Request body sent URL-encoded, with `Content-Type: application/x-www-form-urlencoded`. Values work as in `query`. |
+| `body` | template | — | not with `json`, `form` | Request body, sent as written after substitution. |
 | `follow` | bool | `false` | not with `paginate`, `window` | Streams: holds the response open and emits one event per line (kube `?follow=true`, SSE, NDJSON feeds). |
 | `paginate` | map | — | json; not with `follow`, `window` | Walks every page up front into one list. See [`paginate`](#paginate). |
 | `window` | map | — | json; not with `follow`, `paginate` | Fetches only the rows on screen and lets the server filter and sort. See [`window`](#window). |
@@ -119,6 +122,69 @@ releases:
     Accept: application/vnd.github+json
     Authorization: "Bearer ${env.GITHUB_TOKEN}"
 ```
+
+### Requests
+
+**The query string** is built in layers, each winning over the one
+before on a shared key:
+
+1. parameters written in `url:`
+2. `query:`
+3. what a [`window`](#window) or [`paginate`](#paginate) sets on each
+   request
+
+```yaml
+issues:
+  type: http
+  url: https://api.github.com/repos/${params.repo}/issues?per_page=50
+  query:
+    state: ${params.state}       # left out when the parameter is empty
+    labels: [bug, triage]        # ?labels=bug&labels=triage
+```
+
+A key that a window writes on every request (`offset_param`,
+`limit_param`, and an Anchored window's `older:` / `newer:` keys when
+there's no body) can't also be set in `url:` or `query:`, since it would
+be overwritten each time; that's a load error. A key it writes only
+some of the time (`search_param`, `sort_param`, `filters`) may: the
+value written is the default until the user searches, sorts or
+filters.
+
+A next URL that `paginate:` follows is used exactly as the server sent
+it, without `query:`.
+
+**Tokens in `url:`** are escaped by where they sit, so a value with a
+space, `?` or `&` can't break the request:
+
+| Where | Escaping | Example |
+|---|---|---|
+| before the path | none: it's the base | `${env.API_URL}/items` |
+| in the path | path-escaped, keeping `/` | `/repos/${params.full_name}` with `owner/my repo` → `/repos/owner/my%20repo` |
+| in the query string | query-escaped | `?q=${input.search}` with `a&b` → `?q=a%26b` |
+
+**Bodies:** at most one of `json:`, `form:` and `body:`. `json:` is
+any YAML value, encoded as JSON. Its strings are templated *before*
+encoding, so a quote in a value can't break it, and a string that is
+exactly one token takes a typed value: `"${params.limit}"` is a number
+for an `int` parameter and a boolean for a `bool` one. A token inside a
+longer string substitutes as text, and an exact-token value that
+resolves empty drops its key.
+
+```yaml
+search:
+  type: http
+  url: ${env.ES_URL}/logs/_search          # POST: it has a body
+  json:
+    size: "${params.limit}"                # a number
+    query: {match: {message: "${params.q}"}}
+```
+
+A window's `older:` / `newer:` patches and `find.body` deep-merge into
+`json:`, and merge as top-level fields into `form:`.
+
+**Headers set for you**, unless `headers:` sets them: `Accept:
+application/json`, `User-Agent: tui-builder/<version>` (`wrangl/<version>`
+from wrangl), and the `Content-Type` of a `json:` or `form:` body.
 
 ## `exec`
 

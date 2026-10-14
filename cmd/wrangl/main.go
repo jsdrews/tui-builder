@@ -45,12 +45,14 @@ import (
 	"github.com/spf13/cobra"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
+	"github.com/jsdrews/tui-builder/internal/datasource"
 	"github.com/jsdrews/tui-builder/internal/output"
 	"github.com/jsdrews/tui-builder/internal/pipeline"
 	"github.com/jsdrews/tui-builder/internal/version"
 )
 
 func main() {
+	datasource.UserAgent = "wrangl/" + version.String()
 	// Cobra returns the error from RunE; it has already been printed
 	// via SilenceErrors=false behavior. We just need the right exit code.
 	if err := newRoot().Execute(); err != nil {

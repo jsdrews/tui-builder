@@ -47,6 +47,27 @@ and again on `r`.
 `root:` picks the list out of the response. `format: text` keeps the
 response as a string, for logs.
 
+### Query strings and request bodies
+
+Build a query string with `query:` rather than by hand in the URL: each
+value is escaped for you, a list repeats its key, and a parameter left
+empty drops out. Send a body as `json:` (written as YAML) or `form:`
+rather than a hand-quoted string; a request with a body is a POST
+unless `method:` says otherwise.
+
+```yaml
+search:
+  type: http
+  url: ${env.ES_URL}/logs/_search
+  query: {ignore_unavailable: "true"}
+  json:
+    size: "${params.limit}"           # a number, if limit is an int parameter
+    query: {match: {message: "${params.q}"}}
+```
+
+Tokens written straight into `url:` are escaped by where they sit. The
+details are in [Reference → Requests](../reference/sources.md#requests).
+
 ### Sharing settings with a preset
 
 Sources against one API repeat its base URL, headers and timeout. Put
