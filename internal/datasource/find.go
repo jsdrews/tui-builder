@@ -69,11 +69,12 @@ func (s *httpSource) FindItem(ctx context.Context, q FindQuery) (FindResult, err
 		return FindResult{}, fmt.Errorf("url: %w", err)
 	}
 	params := u.Query()
+	s.applyQuery(params)
 	// The view's filter applies to the search as to every request.
 	if q.Search != "" && w.SearchParam != "" {
 		params.Set(w.SearchParam, q.Search)
 	}
-	if s.body == "" {
+	if s.bodyKind == "" {
 		for title, val := range q.Filters {
 			if param, ok := w.Filters[title]; ok {
 				params.Set(param, val)
@@ -92,7 +93,7 @@ func (s *httpSource) FindItem(ctx context.Context, q FindQuery) (FindResult, err
 	u.RawQuery = params.Encode()
 	body := s.body
 	if len(f.Body) > 0 {
-		if body, err = renderEdgeBody(body, f.Body, eq, vals); err != nil {
+		if body, err = s.edgeBody(f.Body, eq, vals); err != nil {
 			return FindResult{}, fmt.Errorf("find: %w", err)
 		}
 	}

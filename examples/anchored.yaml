@@ -19,10 +19,9 @@
 #
 #   logs:
 #     type: http
-#     method: POST
 #     url: ${env.ES_URL}/app-logs/_search
 #     root: hits.hits
-#     body: '{"query": {"match_all": {}}, "size": ${window.limit}}'
+#     json: {query: {match_all: {}}, size: "${window.limit}"}
 #     window:
 #       cursor: sort
 #       older: {sort: [{"@timestamp": desc}, {_id: desc}], search_after: "${window.cursor}"}

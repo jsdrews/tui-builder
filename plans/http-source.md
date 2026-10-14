@@ -63,7 +63,11 @@ YAML alone, except where noted.
 ## 1. Presets
 
 From [Presets: the merge rules for extending a partial source](https://github.com/jsdrews/tui-builder/issues/9).
-Ships in PR 1.
+**Landed in [#81](https://github.com/jsdrews/tui-builder/pull/81).** Built as written, plus: a
+`url:` that starts with a token counts as absolute, `false` / `0` /
+`null` can't override a preset's value (only `unset:` can), and the
+undeclared-parameter check applies to every leaf, not only ones that
+extend a preset.
 
 A **preset** is a named, partial leaf under `data.presets`. A source
 names one with `extends:`. Presets aren't HTTP-only: any leaf kind can
@@ -145,9 +149,13 @@ Ships in PR 2.
    `find` patches, and `paginate:`'s parameters and `patch:`
 4. Auth: a query `api_key` (see [§7](#7-auth))
 
-**Owned keys:** a key that layer 3 or 4 writes can't also be set in
-`url:` or `query:`. That's a load error naming the field that owns the
-key; silently dropping the author's value would be a design bug.
+**Owned keys:** a key that layer 3 or 4 writes on *every* request can't
+also be set in `url:` or `query:`. That's a load error naming the field
+that owns the key; silently dropping the author's value would be a
+design bug. A key written only some of the time (`search_param`,
+`sort_param`, `filters`, `find.params`) may be set: the author's value
+is the default it replaces while the user searches, sorts or filters
+(`examples/http_window.yaml` relies on this with `?q=tolkien`).
 
 **`query:` values:** a string, or a list of strings that becomes
 repeated keys (`?tag=a&tag=b`, OpenAPI's default `form` + explode).

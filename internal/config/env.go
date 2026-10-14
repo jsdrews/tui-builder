@@ -224,13 +224,6 @@ func (c *Config) SubstituteEnv() {
 // rather than a template. An inspector field's `value:` IS covered: it
 // is a literal, with `path:` being that field's dot-path.
 func walkTemplates(c *Config, fn func(*string)) {
-	visitMap := func(m map[string]string) {
-		for k, v := range m {
-			s := v
-			fn(&s)
-			m[k] = s
-		}
-	}
 	visitSlice := func(xs []string) {
 		for i := range xs {
 			fn(&xs[i])
@@ -245,14 +238,13 @@ func walkTemplates(c *Config, fn func(*string)) {
 		if src == nil {
 			continue
 		}
-		fn(&src.URL)
-		fn(&src.Body)
-		fn(&src.Method)
-		fn(&src.Path)
-		visitMap(src.Headers)
-		visitSlice(src.Command)
-		visitMap(src.Env)
-		visitSlice(src.InitialMessages)
+		// One walk with Source.SubstituteStrings, so the url's escaping
+		// and json:'s typing apply to env tokens too.
+		src.rewriteTemplates(func(v string) string {
+			s := v
+			fn(&s)
+			return s
+		})
 	}
 
 	// Screens: single-screen shorthand + multi-screen map.

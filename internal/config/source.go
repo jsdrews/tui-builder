@@ -71,6 +71,13 @@ type Source struct {
 	Method  string            `yaml:"method,omitempty"`
 	Headers map[string]string `yaml:"headers,omitempty"`
 	Body    string            `yaml:"body,omitempty"`
+	// Query sets query parameters on an http request, over any written
+	// in URL. A list value becomes repeated keys. See request.go.
+	Query map[string]QueryValue `yaml:"query,omitempty"`
+	// JSON is a request body written as YAML and sent as JSON; Form is
+	// one sent URL-encoded. At most one of Body, JSON and Form is set.
+	JSON any                   `yaml:"json,omitempty"`
+	Form map[string]QueryValue `yaml:"form,omitempty"`
 	Follow  bool              `yaml:"follow,omitempty"`
 
 	// Paginate opts an http source into multi-page walking. On Fetch,
@@ -221,6 +228,9 @@ func (s *Source) IsOperator() bool {
 // error messages.
 func (s *Source) Validate(path string) error {
 	if err := validateParametersMap(s.Parameters, path); err != nil {
+		return err
+	}
+	if err := s.validateRequest(path); err != nil {
 		return err
 	}
 	if err := s.validateResume(path); err != nil {
@@ -386,6 +396,9 @@ func (s *Source) Clone() *Source {
 		out.ExtendsChain = append([]string(nil), s.ExtendsChain...)
 	}
 	out.Inherited = maps.Clone(s.Inherited)
+	out.Query = cloneQuery(s.Query)
+	out.Form = cloneQuery(s.Form)
+	out.JSON = cloneJSON(s.JSON)
 	if s.Sources != nil {
 		out.Sources = append([]string(nil), s.Sources...)
 	}
@@ -436,6 +449,9 @@ func (s *Source) BindParams(params map[string]string) error {
 	if err != nil {
 		return err
 	}
+	if s.JSON != nil {
+		s.JSON = typeJSONParams(s.JSON, s.Parameters, resolved)
+	}
 	s.SubstituteStrings(func(t string) string { return substituteParams(t, resolved) })
 	return nil
 }
@@ -451,22 +467,7 @@ func (s *Source) SubstituteStrings(fn func(string) string) {
 	if s == nil {
 		return
 	}
-	s.URL = fn(s.URL)
-	s.Body = fn(s.Body)
-	s.Method = fn(s.Method)
-	s.Path = fn(s.Path)
-	for k, v := range s.Headers {
-		s.Headers[k] = fn(v)
-	}
-	for i, c := range s.Command {
-		s.Command[i] = fn(c)
-	}
-	for k, v := range s.Env {
-		s.Env[k] = fn(v)
-	}
-	for i, m := range s.InitialMessages {
-		s.InitialMessages[i] = fn(m)
-	}
+	s.rewriteTemplates(fn)
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -521,7 +522,7 @@ func (s *Source) validateHTTP(path string) error {
 		}
 	}
 	if s.Window != nil {
-		if err := s.Window.validateHTTPWindow(path+".window", s.Body); err != nil {
+		if err := s.Window.validateHTTPWindow(path+".window", s.bodyText()); err != nil {
 			return err
 		}
 		if s.Paginate != nil {

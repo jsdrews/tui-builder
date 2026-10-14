@@ -183,7 +183,7 @@ func mergeOverPreset(parent, child *Source, parentName, path string) (*Source, e
 			continue
 		}
 		o := ov.Field(i)
-		if c.Kind() == reflect.Map && c.Type().Key().Kind() == reflect.String && c.Type().Elem().Kind() == reflect.String && !o.IsZero() {
+		if isStringMap(c.Type()) && !o.IsZero() {
 			merged := reflect.MakeMap(c.Type())
 			for _, src := range []reflect.Value{o, c} {
 				for it := src.MapRange(); it.Next(); {
@@ -191,7 +191,7 @@ func mergeOverPreset(parent, child *Source, parentName, path string) (*Source, e
 				}
 			}
 			for it := c.MapRange(); it.Next(); {
-				if it.Value().String() == "" {
+				if dropsKey(it.Value()) {
 					merged.SetMapIndex(it.Key(), reflect.Value{})
 				}
 			}
@@ -217,6 +217,21 @@ func mergeOverPreset(parent, child *Source, parentName, path string) (*Source, e
 	out.Unset = nil
 	out.ExtendsChain = append([]string{parentName}, parent.ExtendsChain...)
 	return out.Clone(), nil
+}
+
+// isStringMap reports a map that merges key by key: string keys, and
+// string or QueryValue values (headers, env, query, form).
+func isStringMap(t reflect.Type) bool {
+	return t.Kind() == reflect.Map && t.Key().Kind() == reflect.String &&
+		(t.Elem().Kind() == reflect.String || t.Elem() == reflect.TypeOf(QueryValue(nil)))
+}
+
+// dropsKey reports a map value that removes its key in a merge: "".
+func dropsKey(v reflect.Value) bool {
+	if q, ok := v.Interface().(QueryValue); ok {
+		return q.empty()
+	}
+	return v.String() == ""
 }
 
 // joinPresetURL joins a source url onto its preset's. An absolute url
