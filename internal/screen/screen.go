@@ -1041,16 +1041,27 @@ func (m *Model) handleFetch(msg fetchMsg) tea.Cmd {
 		}
 	}
 	if msg.err != nil {
+		// An HTTP error carries the request and the body it got back:
+		// that goes to the console, under the one-line summary.
+		var detail string
+		var d interface{ Detail() string }
+		if errors.As(msg.err, &d) {
+			detail = d.Detail()
+		}
 		if firstFetch && msg.data == nil {
+			body := msg.err.Error()
+			if detail != "" {
+				body += "\n\n" + detail
+			}
 			cmds = append(cmds, app.ErrorDetail(
 				fmt.Sprintf("%s: initial fetch failed", msg.source),
-				msg.err.Error(),
+				body,
 			))
 		} else if !polled || !failed || startedFailing {
 			// A polled source reports an outage once, when its reads
 			// start failing; the title carries it after that, rather
 			// than a fresh error on the statusbar every poll.
-			cmds = append(cmds, app.Error(fmt.Sprintf("%s: %v", msg.source, msg.err)))
+			cmds = append(cmds, app.ErrorDetail(fmt.Sprintf("%s: %v", msg.source, msg.err), detail))
 		}
 	}
 	// After ApplyData: fan a wake msg to every component so any

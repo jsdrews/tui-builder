@@ -10,11 +10,11 @@ import (
 
 func TestSubstituteURLEscapesByPosition(t *testing.T) {
 	vals := map[string]string{
-		"${env.BASE}":      "https://h.test/api",
-		"${params.repo}":   "owner/my repo",
-		"${params.q}":      "a b&c=d",
-		"${params.id}":     "x?y#z",
-		"${env.HOST}":      "h.test:8080",
+		"${env.BASE}":    "https://h.test/api",
+		"${params.repo}": "owner/my repo",
+		"${params.q}":    "a b&c=d",
+		"${params.id}":   "x?y#z",
+		"${env.HOST}":    "h.test:8080",
 	}
 	fn := func(s string) string {
 		if v, ok := vals[s]; ok {

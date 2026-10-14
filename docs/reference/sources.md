@@ -108,6 +108,8 @@ Requests a URL and parses the response. For REST and JSON APIs, GraphQL
 | `json` | any | — | not with `form`, `body` | Request body written as YAML and sent as JSON, with `Content-Type: application/json`. See [requests](#requests). |
 | `form` | map of template or list | — | not with `json`, `body` | Request body sent URL-encoded, with `Content-Type: application/x-www-form-urlencoded`. Values work as in `query`. |
 | `body` | template | — | not with `json`, `form` | Request body, sent as written after substitution. |
+| `empty_on` | list of int | — | not a 2xx | Statuses answered with the empty result (`null`) instead of an error, e.g. `[404]` for a lookup. See [responses](#responses). |
+| `error_path` | [locator](#locators) | built-in guesses | — | Where an error's message is. On a 2xx, a value there makes the response an error. See [responses](#responses). |
 | `follow` | bool | `false` | not with `paginate`, `window` | Streams: holds the response open and emits one event per line (kube `?follow=true`, SSE, NDJSON feeds). |
 | `paginate` | map | — | json; not with `follow`, `window` | Walks every page up front into one list. See [`paginate`](#paginate). |
 | `window` | map | — | json; not with `follow`, `paginate` | Fetches only the rows on screen and lets the server filter and sort. See [`window`](#window). |
@@ -185,6 +187,53 @@ A window's `older:` / `newer:` patches and `find.body` deep-merge into
 **Headers set for you**, unless `headers:` sets them: `Accept:
 application/json`, `User-Agent: tui-builder/<version>` (`wrangl/<version>`
 from wrangl), and the `Content-Type` of a `json:` or `form:` body.
+
+### Responses
+
+**Empty results:** a `204`, a `2xx` with no body, and any status listed
+in `empty_on:` answer with the empty result (`null`, or `""` with
+`format: text`): a component shows nothing, and a join lookup finds no
+match.
+
+**Errors:** any other non-`2xx` is an error, reported as
+`<source>: HTTP 404 Not Found — <message>`. The message comes from
+`error_path:` when it's set; otherwise the first of these that holds a
+string: `message`, `error.message`, `error`, `error_description`,
+`detail`, `title`, `errors.0.message`; otherwise the first 200 bytes of
+the body. The output console shows the request and the body it got
+back.
+
+A `2xx` is an error only when `error_path:` is set and finds something
+there: the way a GraphQL API reports errors on a `200`. If `root:` still
+finds data in an error's body, that data is shown alongside the error.
+
+```yaml
+user:
+  type: http
+  url: https://api.example.com/users/${params.id}
+  empty_on: [404]                 # no such user: show nothing
+  error_path: error.detail        # where this API puts its message
+```
+
+### Locators
+
+The response-level fields (`error_path`, `paginate.next_path`,
+`window.total_path`) take a **locator**: where in the response a value
+is read from.
+
+| Locator | Reads |
+|---|---|
+| `meta.total` | a dot-path into the raw response body, before `root:` |
+| `header:X-Total-Count` | a response header (any case; the first value if it's sent twice) |
+| `link:next` | the URL of the `Link` header entry with that `rel`, resolved against the request URL |
+| `last:id` | a dot-path into the last item, after `root:` |
+
+A value that isn't there means "not there": no total, no next page, no
+message. A total that isn't a number counts as missing. A `Link` entry
+marked `results="false"` (Sentry's last page) counts as missing.
+
+Fields that read inside each item (`window.cursor`, `find.position`, a
+column's `value:`, `mark_key:`) take a dot-path only.
 
 ## `exec`
 
@@ -337,8 +386,8 @@ thousand rows; for bigger ones use [`window`](#window).
 
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
-| `strategy` | string | — | required | How to find the next page. `link`: the response carries the next page's URL. |
-| `next_path` | string | — | required for `link` | Dot-path into the raw response (before `root:`) to the next page's URL, e.g. `next` or `links.next`. The walk stops when it's empty. |
+| `strategy` | string | — | required | How to find the next page. `link`: the response carries the next page's URL, in the body or the `Link` header. |
+| `next_path` | [locator](#locators) | — | required for `link` | Where the next page's URL is: `next`, `links.next`, or `link:next` for the `Link` header (GitHub, GitLab, Okta, Shopify, Sentry). A relative URL resolves against the page that sent it. The walk stops when it's empty. |
 | `max_pages` | int | `20` | — | Caps the walk. `0` or unset means the default of 20; there is no unlimited setting (one runaway API could exhaust memory), so set a larger number if you need more pages. |
 | `on_page_error` | string | `fail` | — | `fail` returns the error; `skip` returns the pages fetched so far. |
 
@@ -348,6 +397,11 @@ jobs:
   url: ${env.AWX_HOST}/api/v2/jobs/
   root: results
   paginate: {strategy: link, next_path: next, max_pages: 50}
+
+issues:
+  type: http
+  url: https://api.github.com/repos/jsdrews/tui-builder/issues?per_page=100
+  paginate: {strategy: link, next_path: "link:next"}
 ```
 
 ## `window`
@@ -369,7 +423,7 @@ Supported on `http` (the request goes in the query string) and `exec`
 |---|---|---|---|---|
 | `page_size` | int | `100` | — | Rows per request. |
 | `prefetch` | int | `0` | — | Extra pages fetched beyond the screen. `1` hides the placeholder flash at page boundaries, for one extra request. |
-| `total_path` | string | — | — | Dot-path into the raw response (before `root:`) to the total match count. Without it the table can't size its scrollbar, and treats the end of what has loaded as the end. |
+| `total_path` | [locator](#locators) | — | — | Where the total match count is: a dot-path into the raw response (before `root:`), or a header such as `header:X-Total-Count`. Without it the table can't size its scrollbar, and treats the end of what has loaded as the end. |
 | `filters` | map of string | — | — | Maps a column **title** to where a scoped `title:value` filter term goes: a query parameter on http, a `${window.filters.NAME}` token name on exec. Terms on unmapped columns are treated as bare terms. |
 | `offset_param` | string | — | required on http; not on exec | Query parameter for the first row wanted (`offset`, `_start`, `skip`). |
 | `limit_param` | string | — | required on http; not on exec | Query parameter for the page size (`limit`, `per_page`). |

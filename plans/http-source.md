@@ -137,7 +137,7 @@ that extends it`.
 ## 2. The query string
 
 From [Who owns the query string](https://github.com/jsdrews/tui-builder/issues/8).
-Ships in PR 2.
+**Landed in [#82](https://github.com/jsdrews/tui-builder/pull/82).**
 
 **Writers, lowest to highest** (later wins on a shared key):
 
@@ -183,7 +183,9 @@ breaks the request.
 ## 3. Request bodies and default headers
 
 From [Request bodies: body vs json vs form](https://github.com/jsdrews/tui-builder/issues/12).
-Ships in PR 2.
+**Landed in [#82](https://github.com/jsdrews/tui-builder/pull/82).** `${env.*}` and every other
+token now go through one template walk, so URL escaping and `json:`'s
+typing apply to all of them.
 
 At most one of these is set (more is a load error):
 

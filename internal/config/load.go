@@ -703,6 +703,20 @@ func (c *Component) validate(path string) error {
 	case !slices.Contains(ComponentKinds, c.Type):
 		return fmt.Errorf("%s: unknown component type %q (want %s)", path, c.Type, strings.Join(ComponentKinds, "|"))
 	}
+	// A row's paths read inside each item, so a response-level locator
+	// (header:, link:, last:) means nothing there.
+	if len(c.MarkKey) > 0 {
+		if err := validateItemPath(path+".mark_key", c.MarkKey[0]); err != nil {
+			return err
+		}
+	}
+	for i, col := range c.Columns {
+		if len(col.Value) > 0 {
+			if err := validateItemPath(fmt.Sprintf("%s.columns[%d].value", path, i), col.Value[0]); err != nil {
+				return err
+			}
+		}
+	}
 	if err := c.validateEventlog(path); err != nil {
 		return err
 	}

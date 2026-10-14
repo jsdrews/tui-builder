@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	neturl "net/url"
 	"strconv"
-	"strings"
 )
 
 // FindingSource answers a search across a remote set, not only the items
@@ -98,23 +96,13 @@ func (s *httpSource) FindItem(ctx context.Context, q FindQuery) (FindResult, err
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, s.timeout)
-	defer cancel()
-	resp, err := s.doWith(ctx, u.String(), body)
+	r, err := s.send(ctx, u.String(), body)
 	if err != nil {
 		return FindResult{}, err
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	parsed, err := s.parse(r)
 	if err != nil {
 		return FindResult{}, err
-	}
-	if resp.StatusCode >= 300 {
-		return FindResult{}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
-	}
-	var parsed any
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return FindResult{}, fmt.Errorf("parse json: %w", err)
 	}
 	items := Iter(applyRoot(parsed, s.root))
 	if len(items) == 0 {
