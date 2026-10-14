@@ -139,6 +139,36 @@ type PaginateConfig struct {
 	//   "skip"                — return the accumulated pages so far
 	//                            (subsequent pages simply omitted)
 	OnPageError string `yaml:"on_page_error,omitempty"`
+
+	// ── cursor: the response names the next page's cursor ──
+	// CursorPath is a locator for the next cursor; CursorParam the query
+	// parameter it's sent in (or use Patch to put it in the body).
+	CursorPath  string `yaml:"cursor_path,omitempty"`
+	CursorParam string `yaml:"cursor_param,omitempty"`
+
+	// ── offset / page: the walk counts ──
+	OffsetParam string `yaml:"offset_param,omitempty"`
+	PageParam   string `yaml:"page_param,omitempty"`
+	// PageStart is the first page's number: 1 unless set (0 for
+	// zero-based APIs such as Algolia).
+	PageStart *int `yaml:"page_start,omitempty"`
+	// TotalPath is a locator for the total item count; the walk stops
+	// once it has that many.
+	TotalPath string `yaml:"total_path,omitempty"`
+
+	// ── shared ──
+	// LimitParam carries PageSize (default DefaultWindowPageSize).
+	LimitParam string `yaml:"limit_param,omitempty"`
+	PageSize   int    `yaml:"page_size,omitempty"`
+	// MoreWhen is an expression over the raw response: false ends the
+	// walk (`has_more`, `!isLast`).
+	MoreWhen string `yaml:"more_when,omitempty"`
+	// StopOnShortPage ends the walk on a page shorter than PageSize.
+	StopOnShortPage bool `yaml:"stop_on_short_page,omitempty"`
+	// Patch is merged into each request: into the query string with no
+	// body, else into json: / form:. Its ${paginate.*} tokens are the
+	// walk's position. Not for strategy link.
+	Patch map[string]any `yaml:"patch,omitempty"`
 }
 
 // WindowConfig opts an http source into *windowed* paging — the lazy

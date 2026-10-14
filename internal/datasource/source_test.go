@@ -411,14 +411,15 @@ func TestHTTPPaginateStopsOnNullNext(t *testing.T) {
 
 // TestHTTPPaginateMaxPagesCaps confirms we stop at MaxPages even when
 // the server would keep serving next links forever. The stub always
-// returns a `next` pointing at itself; without a cap, this would
-// infinite-loop.
+// returns a fresh `next` (?p=N+1); without a cap, this would
+// infinite-loop. (A `next` pointing at the same URL twice is the repeat
+// guard's job — see TestHTTPPaginateRepeatedNextStops.)
 func TestHTTPPaginateMaxPagesCaps(t *testing.T) {
 	var srvURL string
 	var hits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
-		fmt.Fprintf(w, `{"next":%q,"results":[{"h":%d}]}`, srvURL+"/", hits)
+		fmt.Fprintf(w, `{"next":%q,"results":[{"h":%d}]}`, fmt.Sprintf("%s/?p=%d", srvURL, hits), hits)
 	}))
 	defer srv.Close()
 	srvURL = srv.URL
@@ -518,5 +519,25 @@ func TestHTTPPaginateValidatorRejectsFollowCombination(t *testing.T) {
 	err := s.Validate("data.sources.x")
 	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Fatalf("want mutex error, got %v", err)
+	}
+}
+
+// A next URL that repeats the last one ends the walk rather than looping.
+func TestHTTPPaginateRepeatedNextStops(t *testing.T) {
+	var srvURL string
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		fmt.Fprintf(w, `{"next":%q,"results":[{"h":%d}]}`, srvURL+"/again", hits)
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+	s, _ := newHTTP(&cfg.Source{Type: "http", URL: srv.URL + "/", Root: "results",
+		Paginate: &cfg.PaginateConfig{Strategy: "link", NextPath: "next"}})
+	if _, err := s.Fetch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if hits != 2 {
+		t.Errorf("%d hits, want 2: the second page's next repeats the first's", hits)
 	}
 }

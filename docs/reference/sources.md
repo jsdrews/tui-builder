@@ -384,24 +384,78 @@ Walks every page of an http endpoint before returning, concatenating
 each page's items (after `root:`) into one list. For sets of up to a few
 thousand rows; for bigger ones use [`window`](#window).
 
+`strategy:` says how the API names the next page. Each strategy takes
+only its own fields; a field from another is a load error.
+
+| Strategy | The next request | Stops when |
+|---|---|---|
+| `link` | follows the next URL the response names, exactly as sent | the next URL is empty |
+| `cursor` | sends the cursor the response names | the cursor is empty or missing |
+| `offset` | sends the count of items so far | the total is reached, or a page is empty |
+| `page` | sends the next page number | the total is reached, or a page is empty |
+
+Every strategy also stops when `more_when:` is false, on a short page
+with `stop_on_short_page: true`, when a page repeats the one before
+(the same next URL or cursor, or the same items for `offset` / `page`),
+and at `max_pages`. An empty page never stops a `link` or `cursor`
+walk: some APIs send them mid-walk.
+
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
-| `strategy` | string | — | required | How to find the next page. `link`: the response carries the next page's URL, in the body or the `Link` header. |
-| `next_path` | [locator](#locators) | — | required for `link` | Where the next page's URL is: `next`, `links.next`, or `link:next` for the `Link` header (GitHub, GitLab, Okta, Shopify, Sentry). A relative URL resolves against the page that sent it. The walk stops when it's empty. |
+| `strategy` | string | — | required | `link`, `cursor`, `offset` or `page`. |
+| `next_path` | [locator](#locators) | — | `link`; required | Where the next page's URL is: `next`, `links.next`, or `link:next` for the `Link` header (GitHub, GitLab, Okta, Shopify, Sentry). A relative URL resolves against the page that sent it. |
+| `cursor_path` | [locator](#locators) | — | `cursor`; required | Where the next cursor is: `meta.next_cursor`, `header:X-Next-Cursor`, or `last:id` for the last item's id (Stripe). |
+| `cursor_param` | string | — | `cursor` | The query parameter the cursor goes in. Without it, put `${paginate.cursor}` in a `patch:`. |
+| `offset_param` | string | — | `offset` | The query parameter for the number of items fetched so far. |
+| `page_param` | string | — | `page` | The query parameter for the page number. |
+| `page_start` | int | `1` | `page` | The first page's number: `0` for zero-based APIs such as Algolia. |
+| `limit_param` | string | — | not `link` | The query parameter carrying `page_size`. |
+| `page_size` | int | `100` | — | Items per page: sent in `limit_param` and `${paginate.limit}`, and what `stop_on_short_page` compares with. |
+| `total_path` | [locator](#locators) | — | `offset`, `page` | Where the total item count is; the walk stops once it has that many. `header:X-Total-Count` for json-server. |
+| `more_when` | expression | — | — | Evaluated over each raw response; when it's false, the walk stops. `has_more`, `"!isLast"`, `"page + 1 < nbPages"`. |
+| `stop_on_short_page` | bool | `false` | — | Stop on a page with fewer than `page_size` items (Discord). |
+| `patch` | map | — | not `link`; not with `body` | Merged into every request: into the query string, or into `json:` / `form:` when there's a body. Its `${paginate.cursor}`, `${paginate.offset}`, `${paginate.page}` and `${paginate.limit}` tokens are the walk's position. A value that is exactly one token keeps its type (an Elasticsearch `search_after` stays an array) and is left out while empty, so the first request carries no cursor. |
 | `max_pages` | int | `20` | — | Caps the walk. `0` or unset means the default of 20; there is no unlimited setting (one runaway API could exhaust memory), so set a larger number if you need more pages. |
 | `on_page_error` | string | `fail` | — | `fail` returns the error; `skip` returns the pages fetched so far. |
 
+Unknown keys under `paginate:` are a load error, with the nearest field
+suggested. `cursor_param`, `offset_param`, `page_param` and
+`limit_param` are written on every request, so the same key can't also
+be set in `url:` or `query:`.
+
 ```yaml
-jobs:
+jobs:                                     # Django REST / AWX: the next URL in the body
   type: http
   url: ${env.AWX_HOST}/api/v2/jobs/
   root: results
   paginate: {strategy: link, next_path: next, max_pages: 50}
 
-issues:
+issues:                                   # GitHub: the next URL in a Link header
   type: http
   url: https://api.github.com/repos/jsdrews/tui-builder/issues?per_page=100
   paginate: {strategy: link, next_path: "link:next"}
+
+channels:                                 # Slack: a cursor in the query string
+  type: http
+  url: https://slack.com/api/conversations.list
+  root: channels
+  paginate:
+    strategy: cursor
+    cursor_path: response_metadata.next_cursor
+    cursor_param: cursor
+    limit_param: limit
+    page_size: 200
+
+pages:                                    # Notion: a cursor in the JSON body
+  type: http
+  url: https://api.notion.com/v1/databases/${params.db}/query
+  json: {page_size: 100}
+  root: results
+  paginate:
+    strategy: cursor
+    cursor_path: next_cursor
+    more_when: has_more
+    patch: {start_cursor: "${paginate.cursor}"}
 ```
 
 ## `window`

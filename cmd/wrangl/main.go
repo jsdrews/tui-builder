@@ -311,6 +311,13 @@ func describeLeaf(w *os.File, name string, s *cfg.Source, extendedBy []string) {
 	if len(s.Command) > 0 {
 		fmt.Fprintf(w, "  Command:    %v%s\n", s.Command, from("command"))
 	}
+	if p := s.Paginate; p != nil {
+		max := p.MaxPages
+		if max == 0 {
+			max = 20
+		}
+		fmt.Fprintf(w, "  Paginate:   %s (max %d pages)%s\n", p.Strategy, max, from("paginate"))
+	}
 	if preset {
 		by := strings.Join(extendedBy, ", ")
 		if by == "" {

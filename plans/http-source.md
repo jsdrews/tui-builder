@@ -224,7 +224,7 @@ object, as today.
 ## 4. Locators
 
 From [Reading values from headers vs the body](https://github.com/jsdrews/tui-builder/issues/10).
-Ships in PR 3.
+**Landed in [#83](https://github.com/jsdrews/tui-builder/pull/83).**
 
 A **locator** says where a response-level value is read from:
 
@@ -252,7 +252,9 @@ There's no separate `link_header` strategy: `strategy: link` with
 ## 5. Errors and statuses
 
 From [Error and status handling](https://github.com/jsdrews/tui-builder/issues/11).
-Ships in PR 3.
+**Landed in [#83](https://github.com/jsdrews/tui-builder/pull/83).** Partial data is kept only when
+`root:` is set (without it, the error body itself would be the data), and
+`empty_on` rejects 2xx statuses.
 
 **Statuses as data:** `empty_on: [404, 410]` answers those statuses
 with the empty result (`null`) instead of an error. A component shows
@@ -310,10 +312,12 @@ Shared by every strategy:
   than `page_size` (Discord). An empty page never stops a `link` or `cursor`
   walk (Graph, Google, DynamoDB, Slack).
 - **`max_pages`** defaults to 20.
-- **The repeat guard** stops the walk, with a console warning, when the
-  next URL or cursor equals the previous page's, or an `offset` / `page`
-  walk returns identical items (json-server v1 clamps out-of-range
-  pages).
+- **The repeat guard** stops the walk when the next URL or cursor equals
+  the previous page's, or an `offset` / `page` walk returns identical
+  items (json-server v1 clamps out-of-range pages). The repeated page is
+  dropped. *As built, there's no console warning:* the data layer has no
+  warning channel, and returning one as an error would fail `wrangl` on
+  json-server's normal last page. A follow-up if it's missed.
 - **`on_page_error: fail | skip`** is unchanged, and applies once a
   page's retries ([§8](#8-retries-rate-limits-and-conditional-get)) run
   out.
