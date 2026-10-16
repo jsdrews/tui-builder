@@ -34,5 +34,5 @@ section in the plan gets trimmed or deleted.
   pagination strategies, `auth:`, `retry:`, conditional GET and a
   `graphql:` shorthand, each mapping from OpenAPI 3. Decided on
   [Map: HTTP source spec](https://github.com/jsdrews/tui-builder/issues/7);
-  seven PRs, none landed yet. The API survey behind it is in
+  seven PRs, **all landed** (#81–#87). The API survey behind it is in
   [`research/http-survey.md`](research/http-survey.md).
