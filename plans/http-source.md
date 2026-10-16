@@ -7,6 +7,11 @@ the map
 and each section links the ticket that holds its detail and reasoning.
 Seven PRs, in the [order at the bottom](#implementation-order).
 
+**All of it has now landed**, in
+[#81](https://github.com/jsdrews/tui-builder/pull/81) through
+[#87](https://github.com/jsdrews/tui-builder/pull/87). Each section notes
+where the build differed from what was decided.
+
 One constraint shaped every decision: **each field maps cleanly from
 OpenAPI 3**, because the next effort is a skill that turns an OpenAPI
 document into a tui-builder config. Document-level constructs
@@ -477,8 +482,8 @@ map.
 ## 9. GraphQL
 
 From [GraphQL shorthand and body-carried cursors](https://github.com/jsdrews/tui-builder/issues/16).
-Ships in PR 7. Built as written; `examples/graphql_github.yaml` is the
-worked example, run against GitHub.
+**Landed in [#87](https://github.com/jsdrews/tui-builder/pull/87).** Built as written;
+`examples/graphql_github.yaml` is the worked example, run against GitHub.
 
 `graphql: {query, variables}` builds `json: {query, variables}`,
 defaults to POST and to `error_path: errors.0.message`.
