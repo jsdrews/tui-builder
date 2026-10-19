@@ -31,8 +31,31 @@ func TestSubstituteURLEscapesByPosition(t *testing.T) {
 		{"https://h.test/plain", "https://h.test/plain"},
 	}
 	for _, c := range cases {
-		if got := substituteURL(c.in, fn); got != c.want {
+		if got := substituteURL(c.in, fn, nil); got != c.want {
 			t.Errorf("substituteURL(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// A segment: true parameter is one path segment: "/" is escaped too. In
+// the query string it's query-escaped as any value is.
+func TestSubstituteURLSegment(t *testing.T) {
+	fn := func(s string) string {
+		if s == "${params.id}" {
+			return "a/b c"
+		}
+		return s
+	}
+	seg := SegmentTokens("params", map[string]*Parameter{"id": {Segment: true}, "other": {}})
+	if len(seg) != 1 {
+		t.Fatalf("segments = %v", seg)
+	}
+	for in, want := range map[string]string{
+		"https://h.test/users/${params.id}/orders": "https://h.test/users/a%2Fb%20c/orders",
+		"https://h.test/s?id=${params.id}":         "https://h.test/s?id=a%2Fb+c",
+	} {
+		if got := substituteURL(in, fn, seg); got != want {
+			t.Errorf("substituteURL(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

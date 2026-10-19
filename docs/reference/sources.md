@@ -168,7 +168,11 @@ space, `?` or `&` can't break the request:
 |---|---|---|
 | before the path | none: it's the base | `${env.API_URL}/items` |
 | in the path | path-escaped, keeping `/` | `/repos/${params.full_name}` with `owner/my repo` → `/repos/owner/my%20repo` |
+| in the path, [`segment: true`](#parameters) | fully path-escaped | `/users/${params.id}` with `a/b` → `/users/a%2Fb` |
 | in the query string | query-escaped | `?q=${input.search}` with `a&b` → `?q=a%26b` |
+
+Some servers and proxies decode `%2F` back into a separator, or reject
+it; that's the server's behaviour, not something a config can change.
 
 **Bodies:** at most one of `json:`, `form:` and `body:`. `json:` is
 any YAML value, encoded as JSON. Its strings are templated *before*
@@ -502,6 +506,7 @@ expressions as `params.NAME` (see
 | `required` | bool | `false` | not with `default` | The source can't run until a caller supplies a value. |
 | `default` | string | — | not with `required` | Used when no caller supplies one. |
 | `description` | string | — | — | One-line summary, shown by `wrangl --describe`. |
+| `segment` | bool | `false` | — | The value is one URL path segment: in a `url:` path it's fully escaped, `/` included (`a/b` → `a%2Fb`). Without it `/` is kept, so `owner/repo` spans two segments. An OpenAPI `in: path` parameter. |
 
 The form fields (`label`, `placeholder`, `options`, `mask`, `order`) are
 accepted too but only matter where a parameter is rendered as a form

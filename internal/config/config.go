@@ -809,6 +809,10 @@ type Parameter struct {
 	// Description shows up in --list / --describe / --list-actions
 	// output. One-line summary.
 	Description string `yaml:"description,omitempty"`
+	// Segment marks the value as one URL path segment: in a url's path
+	// it's fully escaped, "/" included, rather than keeping "/" so that
+	// owner/repo spans two segments. An OpenAPI `in: path` parameter.
+	Segment bool `yaml:"segment,omitempty"`
 
 	// The remaining fields matter only when this parameter is rendered
 	// as a form field. They're inert for wrangl --param binding.
