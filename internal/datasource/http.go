@@ -59,7 +59,7 @@ type httpSource struct {
 	refresh     time.Duration
 	paginate    *cfg.PaginateConfig // nil = single-page fetch
 	window      *cfg.WindowConfig   // nil = not windowed
-	notices     notices             // what this source last said, per subject
+	notices     *notices            // what this source last said, per subject
 }
 
 func newHTTP(d *cfg.Source) (Source, error) {
@@ -145,6 +145,7 @@ func newHTTP(d *cfg.Source) (Source, error) {
 		follow:      d.Follow,
 		timeout:     timeout,
 		refresh:     refresh,
+		notices:     &notices{},
 		paginate:    d.Paginate,
 		window:      d.Window,
 	}, nil

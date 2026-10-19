@@ -559,8 +559,8 @@ walk: some APIs send them mid-walk.
 | `more_when` | expression | — | — | Evaluated over each raw response; when it's false, the walk stops. `has_more`, `"!isLast"`, `"page + 1 < nbPages"`. |
 | `stop_on_short_page` | bool | `false` | — | Stop on a page with fewer than `page_size` items (Discord). |
 | `patch` | map | — | not `link`; not with `body` | Merged into every request: into the query string, or into `json:` / `form:` when there's a body. Its `${paginate.cursor}`, `${paginate.offset}`, `${paginate.page}` and `${paginate.limit}` tokens are the walk's position. A value that is exactly one token keeps its type (an Elasticsearch `search_after` stays an array) and is left out while empty, so the first request carries no cursor. |
-| `max_pages` | int | `20` | — | Caps the walk. `0` or unset means the default of 20; there is no unlimited setting (one runaway API could exhaust memory), so set a larger number if you need more pages. |
-| `on_page_error` | string | `fail` | — | `fail` returns the error; `skip` returns the pages fetched so far. |
+| `max_pages` | int | `20` | — | Caps the walk. `0` or unset means the default of 20; there is no unlimited setting (one runaway API could exhaust memory), so set a larger number if you need more pages. A walk that stops here with more to come posts one notice: `stopped at max_pages (20) — 2000 of 3500 rows; raise paginate.max_pages or use window:`. |
+| `on_page_error` | string | `fail` | — | `fail` returns the error; `skip` returns the pages fetched so far, and posts a notice naming the failed page. |
 
 Unknown keys under `paginate:` are a load error, with the nearest field
 suggested. `cursor_param`, `offset_param`, `page_param` and
