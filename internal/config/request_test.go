@@ -197,3 +197,14 @@ func TestSubstituteEnvUsesTheSameWalk(t *testing.T) {
 		t.Errorf("json = %#v", s.JSON)
 	}
 }
+
+func TestActionBodiesMutuallyExclusive(t *testing.T) {
+	err := validateActionDefs(map[string]*Action{"x": {Type: "http", URL: "http://h", Body: "{}", JSON: map[string]any{}}})
+	if err == nil || err.Error() != "actions.x: json and body are mutually exclusive" {
+		t.Errorf("err = %v", err)
+	}
+	err = validateActionDefs(map[string]*Action{"x": {Run: []string{"true"}, JSON: map[string]any{}}})
+	if err == nil || !strings.Contains(err.Error(), "not valid on an exec action") {
+		t.Errorf("exec with json: err = %v", err)
+	}
+}

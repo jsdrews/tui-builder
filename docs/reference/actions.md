@@ -47,9 +47,11 @@ reason. `enter` (or a double click) fires its binding directly.
 | `inputs` | map | — | exec, http | Typed slots referenced as `${inputs.NAME}`. Filled from the binding's `bind:`, else collected in a generated form, else `default`. See [inputs](#inputs). |
 | `run` | list of template | — | required on exec | The argv. Not run through a shell: use `[sh, -c, "…"]` explicitly, so the quoting is visible. `${inputs.*}` and `${env.*}` substitute; other `${…}` (such as a shell's `${PAGER:-less}`) is left as written. |
 | `method` | template | `POST` | http | HTTP method. |
-| `url` | template | — | required on http | The endpoint. |
+| `url` | template | — | required on http | The endpoint. Tokens are escaped by where they sit, as in a [source url](sources.md#http): path-escaped (keeping `/`, unless the input is `segment: true`) or query-escaped. |
 | `headers` | map of template | — | http | Request headers. |
-| `body` | template | — | http | Request body, sent as written after substitution. |
+| `body` | template | — | http; one of `body` / `json` / `form` | Request body, sent as written after substitution. `Content-Type: application/json` unless `headers:` sets one. |
+| `json` | any | — | http; one of `body` / `json` / `form` | Request body as any YAML value, encoded as JSON. Strings are templated before encoding, so a quote in an input can't break it. A string that is exactly one token, `"${inputs.count}"`, takes the input's type (a number for `int`, a boolean for `bool`), and drops its key when it resolves empty, so blank optional inputs are left out. |
+| `form` | map of template or list | — | http; one of `body` / `json` / `form` | Request body as form fields, `application/x-www-form-urlencoded`. A list repeats the key; empty values are dropped. |
 | `timeout` | duration | `30s` | http | Request limit. |
 | `push` | string | — | push | Opens this screen from `tui.screens`. See [push actions](#push-actions). |
 | `success` | expr | exec: `code == 0`; http: `code < 400` | exec, http | Decides whether the run worked, over `code` (exit or HTTP status), `output` (stdout or response body) and `body` (the parsed JSON body). For tools that exit non-zero on success, or an API's harmless 409: `code < 400 or code == 409`. |
@@ -61,8 +63,10 @@ reason. `enter` (or a double click) fires its binding directly.
 
 **Validation:**
 
-- exec needs `run:` and takes no `url`, `method`, `headers` or `body`.
-- http needs `url:` and takes no `run:`.
+- exec needs `run:` and takes no `url`, `method`, `headers`, `body`,
+  `json` or `form`.
+- http needs `url:` and takes no `run:`; `json`, `form` and `body` are
+  mutually exclusive.
 - push needs `push:` and takes no `run:`, `url:`, `inputs:` or
   `multi: true`.
 - Inputs follow the [input rules](#inputs).
@@ -76,6 +80,25 @@ actions:
     inputs: {app: {required: true}}
     success: code < 400 or code == 409
     error_message: ${body.message}
+```
+
+A PATCH that sends only what was filled in, and clears a field with a
+literal (a literal `""` or `null` isn't a token, so it's kept):
+
+```yaml
+actions:
+  edit_item:
+    type: http
+    method: PATCH
+    url: ${env.API_URL}/items/${inputs.id}
+    inputs:
+      id:    {required: true, segment: true}
+      name:  {}
+      count: {type: int}
+    json:
+      name: ${inputs.name}       # left out when blank
+      count: ${inputs.count}     # a number
+      note: null                 # always sent, clearing the note
 ```
 
 ## Claims
@@ -137,6 +160,7 @@ so every input is fillable one way or another.
 | `required` | bool | `false` | not with `default` | Must have a value before the action runs. On a select, the form starts with nothing highlighted, so the answer is picked on purpose. |
 | `default` | string | — | not with `required` | The value when nothing else supplies one, and the form field's starting value. For `bool`, `"true"` / `"false"`; with `options:`, one of the options. |
 | `description` | string | — | — | Shown by `wrangl --list-actions`. |
+| `segment` | bool | `false` | http | The value is one URL path segment: in the `url:` path it's fully escaped, `/` included. An OpenAPI `in: path` parameter. |
 | `label` | string | the input name | — | The form field's caption. |
 | `placeholder` | string | — | text inputs | Hint inside an empty text input. |
 | `options` | list of string | — | not with `mask` | Turns the field into a select over these values. |

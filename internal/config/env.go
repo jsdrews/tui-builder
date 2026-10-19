@@ -344,6 +344,17 @@ func visitActions(actions map[string]*Action, fn func(*string)) {
 			fn(&str)
 			a.Headers[k] = str
 		}
+		if a.JSON != nil {
+			a.JSON, _ = substituteJSON(a.JSON, func(v string) string {
+				fn(&v)
+				return v
+			})
+		}
+		for _, vals := range a.Form {
+			for i := range vals {
+				fn(&vals[i])
+			}
+		}
 	}
 }
 

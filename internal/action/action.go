@@ -24,7 +24,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -70,7 +72,9 @@ type Resolved struct {
 	URL     string
 	Headers map[string]string
 	Body    string
-	Timeout time.Duration
+	// ContentType is what Body is, sent unless Headers sets one.
+	ContentType string
+	Timeout     time.Duration
 
 	def *cfg.Action
 	// vals is the resolved input set, kept so message: / error_message:
@@ -117,8 +121,18 @@ func Resolve(a *cfg.Action, in Inputs) (*Resolved, error) {
 		if r.Method == "" {
 			r.Method = http.MethodPost
 		}
-		r.URL = substitute(a.URL, vals)
-		r.Body = substitute(a.Body, vals)
+		// The url's tokens are escaped by where they sit, as a source's
+		// are; a `segment: true` input stays one path segment.
+		segments := cfg.SegmentTokens("inputs", a.Inputs)
+		for tok := range segments {
+			segments["${"+strings.TrimPrefix(tok, "${inputs.")] = true
+		}
+		r.URL = cfg.SubstituteURL(a.URL, func(tok string) string { return substitute(tok, vals) }, segments)
+		body, contentType, err := requestBody(a, vals)
+		if err != nil {
+			return nil, err
+		}
+		r.Body, r.ContentType = body, contentType
 		r.Headers = make(map[string]string, len(a.Headers))
 		for k, v := range a.Headers {
 			r.Headers[k] = substitute(v, vals)
@@ -161,7 +175,11 @@ func (r *Resolved) Do(ctx context.Context) Result {
 	// common case and forgetting the header produces a confusing 4xx
 	// from the far end rather than an error here.
 	if r.Body != "" && req.Header.Get("Content-Type") == "" {
-		req.Header.Set("Content-Type", "application/json")
+		ct := r.ContentType
+		if ct == "" {
+			ct = "application/json"
+		}
+		req.Header.Set("Content-Type", ct)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
@@ -281,6 +299,71 @@ func (r *Resolved) messageVals(code int, output string) map[string]string {
 	vals["output"] = strings.TrimSpace(output)
 	flattenJSON("body", parseJSON(output), vals)
 	return vals
+}
+
+// requestBody renders an http action's body and says what it is:
+// `json:` (strings templated before encoding, an exact input token
+// typed and dropped when empty), `form:` (empty values dropped), or the
+// raw `body:`.
+func requestBody(a *cfg.Action, vals map[string]string) (string, string, error) {
+	sub := func(s string) string { return substitute(s, vals) }
+	switch {
+	case a.JSON != nil:
+		b, err := json.Marshal(cfg.SubstituteJSON(typeInputs(a.JSON, a.Inputs, vals), sub))
+		if err != nil {
+			return "", "", fmt.Errorf("json: %w", err)
+		}
+		return string(b), "application/json", nil
+	case len(a.Form) > 0:
+		form := url.Values{}
+		for k, vs := range a.Form {
+			for _, v := range vs {
+				if v = sub(v); v != "" {
+					form.Add(k, v)
+				}
+			}
+		}
+		return form.Encode(), "application/x-www-form-urlencoded", nil
+	}
+	return sub(a.Body), "", nil
+}
+
+// inputToken matches a string that is exactly one input token:
+// ${inputs.NAME}, or a bare ${NAME}.
+var inputToken = regexp.MustCompile(`^\$\{(?:inputs\.)?([A-Za-z0-9_]+)\}$`)
+
+// typeInputs gives an exact input token in json: its input's type — a
+// number for int, a boolean for bool — before the text substitution,
+// which then leaves the typed values alone.
+func typeInputs(v any, decl map[string]*cfg.Parameter, vals map[string]string) any {
+	switch x := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, sub := range x {
+			out[k] = typeInputs(sub, decl, vals)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, sub := range x {
+			out[i] = typeInputs(sub, decl, vals)
+		}
+		return out
+	case string:
+		m := inputToken.FindStringSubmatch(x)
+		if m == nil {
+			return x
+		}
+		p, val := decl[m[1]], vals[m[1]]
+		if p == nil || val == "" || (p.Type != "int" && p.Type != "bool") {
+			return x
+		}
+		var typed any
+		if json.Unmarshal([]byte(val), &typed) == nil {
+			return typed
+		}
+	}
+	return v
 }
 
 // withDefaults fills unset inputs from their declared Default.

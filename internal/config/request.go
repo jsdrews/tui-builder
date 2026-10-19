@@ -227,6 +227,18 @@ func substituteURL(u string, fn func(string) string, segments map[string]bool) s
 	return b.String()
 }
 
+// SubstituteURL is substituteURL for callers outside the package: http
+// actions template their url the way sources do.
+func SubstituteURL(u string, fn func(string) string, segments map[string]bool) string {
+	return substituteURL(u, fn, segments)
+}
+
+// SubstituteJSON is substituteJSON for callers outside the package.
+func SubstituteJSON(v any, fn func(string) string) any {
+	out, _ := substituteJSON(v, fn)
+	return out
+}
+
 // SegmentTokens is the set of tokens — ${ns.NAME} for each declared
 // `segment: true` parameter — that substituteURL escapes as one path
 // segment.

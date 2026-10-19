@@ -89,6 +89,13 @@ type Action struct {
 	Headers map[string]string `yaml:"headers,omitempty"`
 	// Body is the request body, sent verbatim after substitution.
 	Body string `yaml:"body,omitempty"`
+	// JSON is the body as any YAML value, encoded as JSON. Strings are
+	// templated before encoding; one that is exactly one input token
+	// takes the input's type, and drops its key when it resolves empty.
+	JSON any `yaml:"json,omitempty"`
+	// Form is the body as form fields, a string or a list per key;
+	// empty values are dropped.
+	Form map[string]QueryValue `yaml:"form,omitempty"`
 	// Timeout bounds the request. Go duration string; defaults to 30s.
 	Timeout string `yaml:"timeout,omitempty"`
 
@@ -158,6 +165,28 @@ func (a *Action) Templates() []string {
 	out = append(out, a.Method, a.URL, a.Body)
 	for _, v := range a.Headers {
 		out = append(out, v)
+	}
+	out = append(out, jsonStrings(a.JSON)...)
+	for _, vs := range a.Form {
+		out = append(out, vs...)
+	}
+	return out
+}
+
+// jsonStrings lists every string in a decoded YAML / JSON value.
+func jsonStrings(v any) []string {
+	var out []string
+	switch x := v.(type) {
+	case string:
+		out = append(out, x)
+	case map[string]any:
+		for _, sub := range x {
+			out = append(out, jsonStrings(sub)...)
+		}
+	case []any:
+		for _, sub := range x {
+			out = append(out, jsonStrings(sub)...)
+		}
 	}
 	return out
 }
