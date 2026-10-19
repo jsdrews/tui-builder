@@ -134,7 +134,7 @@ sources:
   issues:
     type: http
     url: "https://h?q=tolkien&sort=title"
-    window: {offset_param: offset, limit_param: limit, search_param: q, sort_param: sort}`); err != nil {
+    window: {offset_param: offset, limit_param: limit, search_param: q, sort_param: sort, total_path: total}`); err != nil {
 		t.Fatal(err)
 	}
 }

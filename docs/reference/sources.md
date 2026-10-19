@@ -621,8 +621,8 @@ Supported on `http` (the request goes in the query string) and `exec`
 |---|---|---|---|---|
 | `page_size` | int | `100` | — | Rows per request. |
 | `prefetch` | int | `0` | — | Extra pages fetched beyond the screen. `1` hides the placeholder flash at page boundaries, for one extra request. |
-| `total_path` | [locator](#locators) | — | — | Where the total match count is: a dot-path into the raw response (before `root:`), or a header such as `header:X-Total-Count`. Without it the table can't size its scrollbar, and treats the end of what has loaded as the end. |
-| `filters` | map of string | — | — | Maps a column **title** to where a scoped `title:value` filter term goes: a query parameter on http, a `${window.filters.NAME}` token name on exec. Terms on unmapped columns are treated as bare terms. |
+| `total_path` | [locator](#locators) | — | required, except with `cursor` | Where the total match count is: a dot-path into the raw response (before `root:`), or a header such as `header:X-Total-Count`. Without a total the table never scrolls past its first window, so it's required; a response that lacks it posts one notice. |
+| `filters` | map of string | — | — | Maps a column **title** to where a scoped `title:value` filter term goes: a query parameter on http, a `${window.filters.NAME}` token name on exec. Terms on unmapped columns are treated as bare terms. Without `search_param` (or `${window.search}` on exec), bare terms aren't sent: the table says so and its placeholder shows the column syntax. |
 | `offset_param` | string | — | required on http; not on exec | Query parameter for the first row wanted (`offset`, `_start`, `skip`). |
 | `limit_param` | string | — | required on http; not on exec | Query parameter for the page size (`limit`, `per_page`). |
 | `search_param` | string | — | http only | Query parameter for bare filter terms, joined with spaces. |
@@ -647,7 +647,7 @@ On exec, `command:` uses these tokens instead of the `*_param` fields:
 | `${window.search}` | Bare filter terms joined with spaces; empty when none. |
 | `${window.filters.NAME}` | A scoped term's value, where `NAME` is what `filters:` maps the column to. |
 | `${window.sort}` | The sort column's title; the command maps it itself. |
-| `${window.sort_dir}` | `asc` or `desc`; empty when unsorted. |
+| `${window.sort_dir}` | `asc` or `desc`; empty when unsorted. A sortable column needs `command:` to reference both this and `${window.sort}`. |
 | `${window.cursor}` | Anchored only: the edge item's cursor; empty on the first request. |
 | `${window.dir}` | Anchored only: `older` or `newer`. |
 
@@ -818,15 +818,21 @@ data:
   everything). `growing:` is eventlog-only, can't be combined with
   `refresh:`, and its `source:` must exist and its `while:` compile;
   `follow_every` needs `growing`.
-- http: `offset_param` and `limit_param` are required, and at least one
-  of `search_param` / `filters` (otherwise the filter bar has nowhere to
-  send input). An Anchored http window can instead carry the filter as
-  `${window.search}` in `body:`, `older:` or `newer:`. `sorts` and `sort_desc_prefix` need `sort_param`.
+- A seekable window (no `cursor:`) needs `total_path`.
+- http: `offset_param` and `limit_param` are required. `sorts` and
+  `sort_desc_prefix` need `sort_param`.
 - exec: the http-only fields are errors. `command:` must reference
-  `${window.offset}`, `${window.limit}` and at least one filter token;
-  every `filters:` entry must be referenced; `command[0]` can't use a
-  window token.
-- A `sortable` column on the bound table needs `sort_param` (http).
+  `${window.offset}` and `${window.limit}`; every `filters:` entry must
+  be referenced; `command[0]` can't use a window token.
+- A `filterable: true` table needs somewhere to send the filter: at
+  least one of `search_param` / `filters` on http, or `${window.search}`
+  / a declared filter token on exec. An Anchored http window can carry
+  it as `${window.search}` in `body:`, `older:` or `newer:`. A table
+  without `filterable` needs none, which is how to window an API that
+  can't filter.
+- A `sortable` column on the bound table needs `sort_param` (http), or
+  a `command:` that references both `${window.sort}` and
+  `${window.sort_dir}` (exec).
 - `page_size` and `prefetch` are not negative.
 - With `cursor:`: http needs both `older:` and `newer:`, which are
   http-only; exec must reference `${window.cursor}`, `${window.dir}` and

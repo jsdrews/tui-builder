@@ -221,11 +221,11 @@ type WindowConfig struct {
 	// OffsetParam is the query parameter carrying the first row wanted
 	// (e.g. "offset", "_start", "skip"). Required on http; rejected on
 	// exec, which uses ${window.offset} in the argv instead.
-	OffsetParam string `yaml:"offset_param"`
+	OffsetParam string `yaml:"offset_param,omitempty"`
 	// LimitParam is the query parameter carrying the page size (e.g.
 	// "limit", "_limit", "per_page"). Required on http; rejected on
 	// exec, which uses ${window.limit} in the argv instead.
-	LimitParam string `yaml:"limit_param"`
+	LimitParam string `yaml:"limit_param,omitempty"`
 	// TotalPath is the dot-path into the RAW response (pre-`root:`
 	// slicing) holding the total row count — "numFound", "count",
 	// "meta.total". Optional: without it the table can't show a

@@ -38,7 +38,11 @@ func TestAnchoredWindowValidation(t *testing.T) {
 		{"patch without cursor", func(c *Config) { c.Data.Sources["events"].Window.Cursor = "" }, "only apply with `cursor:`"},
 		{"offsets don't apply", func(c *Config) { c.Data.Sources["events"].Window.OffsetParam = "from" }, "offset_param: doesn't apply to an Anchored window"},
 		{"total doesn't apply", func(c *Config) { c.Data.Sources["events"].Window.TotalPath = "hits.total" }, "total_path: doesn't apply"},
-		{"no way to filter", func(c *Config) { c.Data.Sources["events"].Body = `{"size": ${window.limit}}` }, "set `search_param:` or at least one `filters:` entry"},
+		{"no way to filter", func(c *Config) {
+			c.Data.Sources["events"].Body = `{"size": ${window.limit}}`
+			c.TUI.Components["events"].Filterable = true
+		}, "gives the filter nowhere to go"},
+		{"no filter bar, no destination needed", func(c *Config) { c.Data.Sources["events"].Body = `{"size": ${window.limit}}` }, ""},
 		{"span table", func(c *Config) {
 			c.TUI.Components["events"] = &Component{Type: "table", Source: "events", MarkKey: Path{"_id"},
 				Columns: []Column{{Title: "T", Value: Path{"t"}}}}

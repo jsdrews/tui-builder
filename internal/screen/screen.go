@@ -200,6 +200,9 @@ type Model struct {
 	// size / prefetch the remote table needs and the column-title →
 	// query-parameter map the query translation needs.
 	windowDefs map[string]*cfg.WindowConfig
+	// windowSearches says, per windowed source, whether it has
+	// somewhere to send a bare filter term (cfg.Source.WindowSearches).
+	windowSearches map[string]bool
 
 	// Confirm-modal state. When confirmModal is non-nil it overlays the
 	// body via ZStack and captures all keys until ConfirmedMsg /
@@ -338,6 +341,10 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, entries map[str
 				m.windowDefs = map[string]*cfg.WindowConfig{}
 			}
 			m.windowDefs[boundName] = def.Window
+			if m.windowSearches == nil {
+				m.windowSearches = map[string]bool{}
+			}
+			m.windowSearches[boundName] = def.WindowSearches()
 		}
 	}
 	// A growing condition reads another source — a job's status, beside

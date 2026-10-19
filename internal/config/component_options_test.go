@@ -64,7 +64,7 @@ func TestDistinctAcceptsAListOrASource(t *testing.T) {
 
 func TestDistinctValidation(t *testing.T) {
 	phases := &Source{Type: "static", Data: []any{"Running"}}
-	paged := &Source{Type: "http", URL: "http://x", Window: &WindowConfig{OffsetParam: "o", LimitParam: "l", SearchParam: "q"}}
+	paged := &Source{Type: "http", URL: "http://x", Window: &WindowConfig{OffsetParam: "o", LimitParam: "l", SearchParam: "q", TotalPath: "total"}}
 	cases := []struct {
 		name     string
 		windowed bool

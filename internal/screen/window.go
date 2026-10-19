@@ -495,7 +495,34 @@ func (m *Model) handleWindowQuery(msg windowQueryMsg) tea.Cmd {
 	if rt == nil {
 		return nil
 	}
-	return tagCursorFocused(rt.Update(msg.msg), msg.component)
+	cmd := tagCursorFocused(rt.Update(msg.msg), msg.component)
+	if q, ok := msg.msg.(table.QueryChangedMsg); ok {
+		if notice := m.unsentTerms(msg.component, q.Terms); notice != "" {
+			return tea.Batch(cmd, app.Info(notice))
+		}
+	}
+	return cmd
+}
+
+// unsentTerms names the terms a committed query couldn't send: bare
+// terms, or terms on unmapped columns, when the source has no search to
+// carry them. "" when everything went.
+func (m *Model) unsentTerms(component string, terms []query.Term) string {
+	w := m.windows[component]
+	if w == nil || m.windowSearches[w.source] {
+		return ""
+	}
+	mapped := m.windowFilters(w.source)
+	var unsent []string
+	for _, t := range terms {
+		if _, ok := mapped[t.Title]; t.Title == "" || !ok {
+			unsent = append(unsent, fmt.Sprintf("%q", t.Raw))
+		}
+	}
+	if len(unsent) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s not sent — this table filters only by column: %s", strings.Join(unsent, ", "), cfg.ScopedFilterSyntax(mapped, ", "))
 }
 
 // handleWindowTick re-requests the window on screen and re-arms the

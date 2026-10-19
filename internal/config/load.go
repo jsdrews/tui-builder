@@ -1085,13 +1085,22 @@ func bindWindowed(name string, comp *Component, ref string, entry *Source) error
 		return fmt.Errorf("tui.components.%s: source %q declares `window.growing:`, which only an eventlog can follow", name, ref)
 	}
 	// Sorting is answered by the server under a window, so a sortable
-	// column with no `sort_param:` is a control that can't do anything.
-	if entry.Window.SortParam == "" {
+	// column the source can't carry is a control that can't do anything.
+	if ok, why := entry.windowSorts(); !ok {
 		for i, col := range comp.Columns {
 			if col.Sortable {
-				return fmt.Errorf("tui.components.%s: columns[%d] (%q) is sortable but source %q declares no `window.sort_param:` — a windowed table sorts remotely, so there's nowhere to send the request", name, i, col.Title, ref)
+				return fmt.Errorf("tui.components.%s: columns[%d] (%q) is sortable but source %q%s", name, i, col.Title, ref, why)
 			}
 		}
+	}
+	// A filterable windowed table filters remotely, so the filter needs
+	// somewhere to land. A table without a filter bar needs nothing.
+	if comp.Filterable && !entry.WindowSearches() && len(entry.Window.Filters) == 0 {
+		return fmt.Errorf("tui.components.%s: filterable: true, but source %q gives the filter nowhere to go — set window.search_param or window.filters (exec: reference ${window.search}), or drop filterable", name, ref)
+	}
+	// With only column filters, a bare term goes nowhere; say what does.
+	if comp.Filterable && comp.FilterPlaceholder == "" && !entry.WindowSearches() {
+		comp.FilterPlaceholder = ScopedFilterSyntax(entry.Window.Filters, " ")
 	}
 	comp.Windowed = true
 	return nil

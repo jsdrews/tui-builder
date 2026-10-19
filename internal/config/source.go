@@ -577,7 +577,7 @@ func (s *Source) validateHTTP(path string) error {
 		}
 	}
 	if s.Window != nil {
-		if err := s.Window.validateHTTPWindow(path+".window", s.bodyText()); err != nil {
+		if err := s.Window.validateHTTPWindow(path + ".window"); err != nil {
 			return err
 		}
 		if s.Paginate != nil {
@@ -661,8 +661,65 @@ func (w *WindowConfig) validateShared(path string) error {
 	return nil
 }
 
+// WindowSearches reports whether a windowed source has somewhere to
+// send a bare filter term: search_param on http, ${window.search} in an
+// exec command, or ${window.search} in an Anchored body or its patches.
+func (s *Source) WindowSearches() bool {
+	if s == nil || s.Window == nil {
+		return false
+	}
+	w := s.Window
+	if s.Type == "exec" {
+		return strings.Contains(strings.Join(s.Command, " "), "${window.search}")
+	}
+	if w.SearchParam != "" {
+		return true
+	}
+	return w.Cursor != "" && (strings.Contains(s.bodyText(), "${window.search}") ||
+		strings.Contains(fmt.Sprint(w.Older, w.Newer), "${window.search}"))
+}
+
+// ScopedFilterSyntax lists a window's filterable columns the way the
+// user types them, "author:…" — lowercased, sorted, joined by sep.
+func ScopedFilterSyntax(filters map[string]string, sep string) string {
+	cols := make([]string, 0, len(filters))
+	for title := range filters {
+		cols = append(cols, strings.ToLower(title)+":…")
+	}
+	sort.Strings(cols)
+	return strings.Join(cols, sep)
+}
+
+// windowSorts reports whether a windowed source can carry a sort, and
+// if not, the end of the error saying why: sort_param on http; ${window.sort} and ${window.sort_dir}
+// in an exec command.
+func (s *Source) windowSorts() (bool, string) {
+	const remote = " — a windowed table sorts remotely, so there's nowhere to send the request"
+	if s.Type != "exec" {
+		return s.Window.SortParam != "", " declares no `window.sort_param:`" + remote
+	}
+	argv := strings.Join(s.Command, " ")
+	if !strings.Contains(argv, "${window.sort}") {
+		return false, "'s command never references ${window.sort}" + remote
+	}
+	if !strings.Contains(argv, "${window.sort_dir}") {
+		return false, "'s command references ${window.sort} but not ${window.sort_dir} — descending would sort the same as ascending"
+	}
+	return true, ""
+}
+
+// requireTotal rejects a seekable window without total_path: without a
+// total the table counts only what has loaded, and never asks past its
+// first window.
+func (w *WindowConfig) requireTotal(path string) error {
+	if w.Cursor == "" && w.TotalPath == "" {
+		return fmt.Errorf("%s.total_path: required — without a total a seekable window never scrolls past its first window. Set it, or use paginate: for the whole set, or window.cursor: for an API that only walks from an edge", path)
+	}
+	return nil
+}
+
 // validateHTTPWindow enforces the query-string half of the schema.
-func (w *WindowConfig) validateHTTPWindow(path, body string) error {
+func (w *WindowConfig) validateHTTPWindow(path string) error {
 	if err := w.validateShared(path); err != nil {
 		return err
 	}
@@ -681,15 +738,8 @@ func (w *WindowConfig) validateHTTPWindow(path, body string) error {
 			return fmt.Errorf("%s.limit_param: required on an http source (the query parameter carrying the page size, e.g. \"limit\")", path)
 		}
 	}
-	// A windowed table always filters remotely — it has no local rows to
-	// filter against. A source that declares no way to carry a filter
-	// would leave the user typing into a filter bar that does nothing.
-	// An Anchored body API carries the filter as tokens in the body or
-	// the patches instead of query parameters.
-	bodySearch := w.Cursor != "" && (strings.Contains(body, "${window.search}") ||
-		strings.Contains(fmt.Sprint(w.Older, w.Newer), "${window.search}"))
-	if w.SearchParam == "" && len(w.Filters) == 0 && !bodySearch {
-		return fmt.Errorf("%s: set `search_param:` or at least one `filters:` entry — a windowed table filters remotely, so with neither the filter bar has nowhere to send what the user types", path)
+	if err := w.requireTotal(path); err != nil {
+		return err
 	}
 	if len(w.Sorts) > 0 && w.SortParam == "" {
 		return fmt.Errorf("%s.sorts: set without `sort_param:` — there's no query parameter to carry the mapped sort field", path)
@@ -742,16 +792,8 @@ func (w *WindowConfig) validateExecWindow(path string, argv []string) error {
 			return fmt.Errorf("%s: `command:` never references %s — without it the command returns the same rows for every window, and the table would scroll through 10,000 copies of page one", path, tok)
 		}
 	}
-	// Same rule as http: a windowed table filters remotely, so it needs
-	// somewhere for the filter to land.
-	hasFilterToken := strings.Contains(joined, "${window.search}")
-	for _, token := range w.Filters {
-		if strings.Contains(joined, "${window.filters."+token+"}") {
-			hasFilterToken = true
-		}
-	}
-	if !hasFilterToken {
-		return fmt.Errorf("%s: `command:` references neither ${window.search} nor any declared ${window.filters.*} — a windowed table filters remotely, so with neither the filter bar has nowhere to send what the user types", path)
+	if err := w.requireTotal(path); err != nil {
+		return err
 	}
 	for title, token := range w.Filters {
 		if !strings.Contains(joined, "${window.filters."+token+"}") {

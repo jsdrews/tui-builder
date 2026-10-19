@@ -266,7 +266,7 @@ type ActionBinding struct {
 	// Any tea.KeyMsg.String() name. Reserved keys (reservedKeys) and the
 	// menu's own keys (menuKeys) are rejected at load — binding one would
 	// either never fire or silently shadow navigation.
-	Key string `yaml:"key"`
+	Key string `yaml:"key,omitempty"`
 	// Action names an entry in the top-level actions: map. Mutually
 	// exclusive with an inline declaration.
 	Action string `yaml:"action,omitempty"`
