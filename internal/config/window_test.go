@@ -383,3 +383,26 @@ func TestWindowFiltersOnlyDefaultsThePlaceholder(t *testing.T) {
 		t.Error("explicit filter_placeholder was replaced")
 	}
 }
+
+func TestWindowPageParam(t *testing.T) {
+	one := 1
+	neg := -1
+	for _, tc := range []struct {
+		name    string
+		mutate  func(w *WindowConfig)
+		wantErr string
+	}{
+		{"page instead of offset", func(w *WindowConfig) { w.OffsetParam, w.PageParam, w.PageStart = "", "page", &one }, ""},
+		{"both", func(w *WindowConfig) { w.PageParam = "page" }, "offset_param and page_param are mutually exclusive"},
+		{"neither", func(w *WindowConfig) { w.OffsetParam = "" }, "set offset_param (row offsets) or page_param (page numbers)"},
+		{"page_start alone", func(w *WindowConfig) { w.PageStart = &one }, "page_start: only with page_param"},
+		{"negative page_start", func(w *WindowConfig) { w.OffsetParam, w.PageParam, w.PageStart = "", "page", &neg }, "page_start: must be >= 0"},
+	} {
+		c := windowedConfig()
+		tc.mutate(c.Data.Sources["books"].Window)
+		err := c.Validate()
+		if tc.wantErr == "" && err != nil || tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+			t.Errorf("%s: err = %v, want %q", tc.name, err, tc.wantErr)
+		}
+	}
+}

@@ -623,8 +623,10 @@ Supported on `http` (the request goes in the query string) and `exec`
 | `prefetch` | int | `0` | — | Extra pages fetched beyond the screen. `1` hides the placeholder flash at page boundaries, for one extra request. |
 | `total_path` | [locator](#locators) | — | required, except with `cursor` | Where the total match count is: a dot-path into the raw response (before `root:`), or a header such as `header:X-Total-Count`. Without a total the table never scrolls past its first window, so it's required; a response that lacks it posts one notice. |
 | `filters` | map of string | — | — | Maps a column **title** to where a scoped `title:value` filter term goes: a query parameter on http, a `${window.filters.NAME}` token name on exec. Terms on unmapped columns are treated as bare terms. Without `search_param` (or `${window.search}` on exec), bare terms aren't sent: the table says so and its placeholder shows the column syntax. |
-| `offset_param` | string | — | required on http; not on exec | Query parameter for the first row wanted (`offset`, `_start`, `skip`). |
-| `limit_param` | string | — | required on http; not on exec | Query parameter for the page size (`limit`, `per_page`). |
+| `offset_param` | string | — | http: this or `page_param`; not on exec | Query parameter for the first row wanted (`offset`, `_start`, `skip`). |
+| `page_param` | string | — | http: this or `offset_param`; not on exec | Query parameter for a page number, for APIs that page by number (`?page=3&per_page=50`). A window that spans several pages is fetched a page at a time, in order, and trimmed. |
+| `page_start` | int | `1` | with `page_param` | The first page's number; `0` for zero-based APIs. |
+| `limit_param` | string | — | required on http; not on exec | Query parameter for the page size (`limit`, `per_page`). With `page_param` it always carries `page_size`, which must not exceed the API's maximum: a server that caps it posts a notice. |
 | `search_param` | string | — | http only | Query parameter for bare filter terms, joined with spaces. |
 | `sort_param` | string | — | http only | Query parameter for the sort field. |
 | `sorts` | map of string | — | http only; needs `sort_param` | Maps a column title to the sort field the API expects. Unlisted columns send their title. |
@@ -819,7 +821,8 @@ data:
   `refresh:`, and its `source:` must exist and its `while:` compile;
   `follow_every` needs `growing`.
 - A seekable window (no `cursor:`) needs `total_path`.
-- http: `offset_param` and `limit_param` are required. `sorts` and
+- http: `limit_param` and exactly one of `offset_param` / `page_param`
+  are required; `page_start` needs `page_param` and is not negative. `sorts` and
   `sort_desc_prefix` need `sort_param`.
 - exec: the http-only fields are errors. `command:` must reference
   `${window.offset}` and `${window.limit}`; every `filters:` entry must

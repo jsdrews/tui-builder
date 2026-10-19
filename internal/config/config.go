@@ -219,13 +219,21 @@ type WindowConfig struct {
 	Prefetch int `yaml:"prefetch,omitempty"`
 
 	// OffsetParam is the query parameter carrying the first row wanted
-	// (e.g. "offset", "_start", "skip"). Required on http; rejected on
-	// exec, which uses ${window.offset} in the argv instead.
+	// (e.g. "offset", "_start", "skip"). On http, this or PageParam;
+	// rejected on exec, which uses ${window.offset} in the argv instead.
 	OffsetParam string `yaml:"offset_param,omitempty"`
 	// LimitParam is the query parameter carrying the page size (e.g.
 	// "limit", "_limit", "per_page"). Required on http; rejected on
 	// exec, which uses ${window.limit} in the argv instead.
 	LimitParam string `yaml:"limit_param,omitempty"`
+	// PageParam is the query parameter carrying a page number instead of
+	// a row offset (e.g. "page"), for APIs that page by number. Exactly
+	// one of OffsetParam / PageParam on a seekable http window. A window
+	// spanning several pages is fetched one page at a time.
+	PageParam string `yaml:"page_param,omitempty"`
+	// PageStart is the first page's number with PageParam: 1 unless set
+	// (0 for zero-based APIs).
+	PageStart *int `yaml:"page_start,omitempty"`
 	// TotalPath is the dot-path into the RAW response (pre-`root:`
 	// slicing) holding the total row count — "numFound", "count",
 	// "meta.total". Optional: without it the table can't show a

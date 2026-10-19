@@ -471,6 +471,10 @@ func (s *Source) Clone() *Source {
 		// through the original's aliased header.
 		cp.Filters = maps.Clone(s.Window.Filters)
 		cp.Sorts = maps.Clone(s.Window.Sorts)
+		if s.Window.PageStart != nil {
+			n := *s.Window.PageStart
+			cp.PageStart = &n
+		}
 		out.Window = &cp
 	}
 	// Parameters / Keep / Compute / Parts / Lookups are treated as
@@ -626,6 +630,7 @@ func (w *WindowConfig) validateShared(path string) error {
 	if w.Cursor != "" {
 		for field, set := range map[string]bool{
 			"offset_param": w.OffsetParam != "", "total_path": w.TotalPath != "",
+			"page_param": w.PageParam != "", "page_start": w.PageStart != nil,
 			"sort_param": w.SortParam != "", "sorts": len(w.Sorts) > 0,
 			"sort_desc_prefix": w.SortDescPrefix != "", "prefetch": w.Prefetch != 0,
 		} {
@@ -731,8 +736,17 @@ func (w *WindowConfig) validateHTTPWindow(path string) error {
 		if len(w.Older) > 0 || len(w.Newer) > 0 {
 			return fmt.Errorf("%s: `older:` / `newer:` only apply with `cursor:`", path)
 		}
-		if w.OffsetParam == "" {
-			return fmt.Errorf("%s.offset_param: required on an http source (the query parameter carrying the first row wanted, e.g. \"offset\")", path)
+		switch {
+		case w.OffsetParam != "" && w.PageParam != "":
+			return fmt.Errorf("%s: offset_param and page_param are mutually exclusive", path)
+		case w.OffsetParam == "" && w.PageParam == "":
+			return fmt.Errorf("%s: set offset_param (row offsets) or page_param (page numbers)", path)
+		}
+		if w.PageStart != nil && w.PageParam == "" {
+			return fmt.Errorf("%s.page_start: only with page_param", path)
+		}
+		if w.PageStart != nil && *w.PageStart < 0 {
+			return fmt.Errorf("%s.page_start: must be >= 0", path)
 		}
 		if w.LimitParam == "" {
 			return fmt.Errorf("%s.limit_param: required on an http source (the query parameter carrying the page size, e.g. \"limit\")", path)
@@ -763,6 +777,8 @@ func (w *WindowConfig) validateExecWindow(path string, argv []string) error {
 	// broken, so name each one that can't apply.
 	for field, set := range map[string]bool{
 		"offset_param":     w.OffsetParam != "",
+		"page_param":       w.PageParam != "",
+		"page_start":       w.PageStart != nil,
 		"limit_param":      w.LimitParam != "",
 		"search_param":     w.SearchParam != "",
 		"sort_param":       w.SortParam != "",

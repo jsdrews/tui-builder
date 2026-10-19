@@ -59,6 +59,7 @@ type httpSource struct {
 	refresh     time.Duration
 	paginate    *cfg.PaginateConfig // nil = single-page fetch
 	window      *cfg.WindowConfig   // nil = not windowed
+	notices     notices             // what this source last said, per subject
 }
 
 func newHTTP(d *cfg.Source) (Source, error) {
@@ -240,32 +241,96 @@ func (s *httpSource) FetchWindow(ctx context.Context, q WindowQuery) (WindowPage
 	if s.window == nil {
 		return WindowPage{}, ErrNotWindowed
 	}
-	url, err := s.windowURL(q)
+	if s.window.PageParam != "" {
+		return s.fetchPagedWindow(ctx, q)
+	}
+	items, total, err := s.fetchWindowPage(ctx, q, 0)
 	if err != nil {
 		return WindowPage{}, err
+	}
+	return WindowPage{Items: items, Total: total}, nil
+}
+
+// fetchWindowPage makes one window request — at q's offset, or at page
+// number page when the window pages by number — and returns its items
+// and the total (-1 when the response doesn't say).
+func (s *httpSource) fetchWindowPage(ctx context.Context, q WindowQuery, page int) ([]any, int, error) {
+	url, err := s.windowURL(q, page)
+	if err != nil {
+		return nil, -1, err
 	}
 	r, err := s.send(ctx, url, s.body)
 	if err != nil {
-		return WindowPage{}, err
+		return nil, -1, err
 	}
 	parsed, err := s.parse(r)
 	if err != nil {
-		return WindowPage{}, err
+		return nil, -1, err
 	}
 	// Root sees the items, total_path sees the envelope (or a header) —
 	// the same split fetchPaginated uses for next_path, and for the same
 	// reason: in `{numFound: N, docs: [...]}` both live at the top level.
 	items := Iter(applyRoot(parsed, s.root))
-	page := WindowPage{Items: items, Total: -1}
+	total := -1
 	if p := s.window.TotalPath; p != "" {
 		if n, ok := toInt(s.locate(p, parsed, r, items)); ok {
-			page.Total = n
+			total = n
+			s.notices.clear("total")
+		} else {
+			// Not an error: -1 means "can't say", and the table treats
+			// the end of what has loaded as the end of the set.
+			s.notices.post("total", fmt.Sprintf("%s: total_path %q not found in the response — the table can't scroll past what's loaded", s.label(), p))
 		}
-		// A missing or non-numeric total is not an error: -1 means
-		// "can't say", and the table degrades to treating the end of
-		// what has loaded as the end of the set.
 	}
-	return page, nil
+	return items, total, nil
+}
+
+// fetchPagedWindow serves a window from an API that pages by number.
+// tuilib's windows are page-aligned but often span several pages, so
+// the window is fetched a page at a time, in order, and trimmed: the
+// first page is offset/page_size + page_start, and the rows before
+// offset within it are dropped.
+func (s *httpSource) fetchPagedWindow(ctx context.Context, q WindowQuery) (WindowPage, error) {
+	size := s.pageSize()
+	start := 1
+	if s.window.PageStart != nil {
+		start = *s.window.PageStart
+	}
+	first, skip := q.Offset/size, q.Offset%size
+	var items []any
+	total := -1
+	for n := first; len(items) < skip+q.Limit; n++ {
+		page, t, err := s.fetchWindowPage(ctx, q, n+start)
+		if err != nil {
+			// The whole window fails: the table never holds half of one.
+			return WindowPage{}, err
+		}
+		if n == first {
+			total = t
+		}
+		items = append(items, page...)
+		// A server that caps per_page below page_size answers a short
+		// page that isn't the last, and every later page starts at the
+		// wrong row; one that ignores it answers a long one.
+		notLast := total >= 0 && (n+1)*size < total
+		switch {
+		case len(page) > size:
+			s.notices.post("page_size", fmt.Sprintf("%s: page_size %d is smaller than what the server returns (%d)", s.label(), size, len(page)))
+		case len(page) < size && notLast:
+			s.notices.post("page_size", fmt.Sprintf("%s: page_size %d exceeds what the server returns (%d)", s.label(), size, len(page)))
+		}
+		if len(page) < size {
+			break
+		}
+	}
+	if skip >= len(items) {
+		return WindowPage{Items: []any{}, Total: total}, nil
+	}
+	items = items[skip:]
+	if len(items) > q.Limit {
+		items = items[:q.Limit]
+	}
+	return WindowPage{Items: items, Total: total}, nil
 }
 
 // FetchEdge implements AnchoredSource: one request for the items beyond
@@ -333,11 +398,12 @@ func (s *httpSource) FetchEdge(ctx context.Context, q EdgeQuery) (EdgePage, erro
 	return edgePage(Iter(applyRoot(parsed, s.root)), q, w.Cursor), nil
 }
 
-// windowURL renders q into s.url's query string. Any parameters already
+// windowURL renders q into s.url's query string — at page number page
+// when the window pages by number. Any parameters already
 // on the configured URL (`?fields=title,author`) survive — only the
 // window's own parameters are set, so a source can pin API options in
 // the URL and let the window drive the rest.
-func (s *httpSource) windowURL(q WindowQuery) (string, error) {
+func (s *httpSource) windowURL(q WindowQuery, page int) (string, error) {
 	u, err := neturl.Parse(s.url)
 	if err != nil {
 		return "", fmt.Errorf("url: %w", err)
@@ -345,8 +411,13 @@ func (s *httpSource) windowURL(q WindowQuery) (string, error) {
 	w := s.window
 	vals := u.Query()
 	s.applyQuery(vals)
-	vals.Set(w.OffsetParam, strconv.Itoa(q.Offset))
-	vals.Set(w.LimitParam, strconv.Itoa(q.Limit))
+	if w.PageParam != "" {
+		vals.Set(w.PageParam, strconv.Itoa(page))
+		vals.Set(w.LimitParam, strconv.Itoa(s.pageSize()))
+	} else {
+		vals.Set(w.OffsetParam, strconv.Itoa(q.Offset))
+		vals.Set(w.LimitParam, strconv.Itoa(q.Limit))
+	}
 
 	if q.Search != "" && w.SearchParam != "" {
 		vals.Set(w.SearchParam, q.Search)

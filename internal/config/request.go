@@ -328,6 +328,7 @@ func (s *Source) ownedQueryKeys() map[string]string {
 	own(w.LimitParam, "limit_param")
 	if w.Cursor == "" {
 		own(w.OffsetParam, "offset_param")
+		own(w.PageParam, "page_param")
 	}
 	// Without a body, an Anchored window's patches go into the query
 	// string; with one, into the body.
