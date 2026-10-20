@@ -79,6 +79,23 @@ type Action struct {
 
 	// --- type: http ---
 
+	// Extends names a preset under data.presets to take the request from:
+	// its url (a relative action url joins onto it), headers, query,
+	// auth and timeout. Its other fields are the source's business and
+	// ignored here. Implies type: http.
+	Extends string `yaml:"extends,omitempty"`
+	// Unset drops inherited fields: url, headers, query, auth, timeout.
+	Unset []string `yaml:"unset,omitempty"`
+	// ExtendsChain and Inherited record where the request came from, for
+	// --describe: the presets, nearest first, and each inherited field's.
+	ExtendsChain []string          `yaml:"-"`
+	Inherited    map[string]string `yaml:"-"`
+	// Auth authenticates the request, as on an http source.
+	Auth *AuthSpec `yaml:"auth,omitempty"`
+	// Query sets query parameters: a string or a list (repeated keys)
+	// per key, templated and escaped; empty values are dropped.
+	Query map[string]QueryValue `yaml:"query,omitempty"`
+
 	// Method defaults to POST for http actions. GET is legal but suspect:
 	// an action that doesn't change anything probably wants to be a
 	// source instead, where it gets caching and polling for free.
@@ -170,6 +187,10 @@ func (a *Action) Templates() []string {
 	for _, vs := range a.Form {
 		out = append(out, vs...)
 	}
+	for _, vs := range a.Query {
+		out = append(out, vs...)
+	}
+	a.Auth.visit(func(_ string, v *string) { out = append(out, *v) })
 	return out
 }
 
@@ -247,6 +268,9 @@ func (c *Claim) SettleReads() int {
 func (a *Action) Kind() string {
 	if a.Type != "" {
 		return a.Type
+	}
+	if a.Extends != "" || len(a.ExtendsChain) > 0 {
+		return "http"
 	}
 	// `push:` is unambiguous on its own — there is no other reason to
 	// name a screen — so it doesn't need `type: push` spelled out. That

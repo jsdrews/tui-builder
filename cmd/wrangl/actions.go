@@ -76,6 +76,16 @@ func runDescribeAction(configPath, target string, params map[string]string) erro
 			method = "POST"
 		}
 		fmt.Fprintf(w, "REQUEST\t%s %s\n", method, a.URL)
+		if len(a.ExtendsChain) > 0 {
+			fmt.Fprintf(w, "EXTENDS\t%s\n", strings.Join(a.ExtendsChain, " → "))
+		}
+		if a.Auth != nil {
+			from := ""
+			if p, ok := a.Inherited["auth"]; ok {
+				from = " (from " + p + ")"
+			}
+			fmt.Fprintf(w, "AUTH\t%s%s\n", a.Auth.Scheme(), from)
+		}
 	}
 	if a.Success != "" {
 		fmt.Fprintf(w, "SUCCESS\t%s\n", a.Success)
@@ -108,12 +118,13 @@ func runDescribeAction(configPath, target string, params map[string]string) erro
 	case "exec":
 		fmt.Fprintf(os.Stdout, "  %s\n", strings.Join(resolved.Argv, " "))
 	case "http":
-		fmt.Fprintf(os.Stdout, "  %s %s\n", resolved.Method, resolved.URL)
+		mask := resolved.Auth.Redact
+		fmt.Fprintf(os.Stdout, "  %s %s\n", resolved.Method, mask(resolved.URL))
 		for _, k := range sortedKeys(resolved.Headers) {
-			fmt.Fprintf(os.Stdout, "  %s: %s\n", k, resolved.Headers[k])
+			fmt.Fprintf(os.Stdout, "  %s: %s\n", k, mask(resolved.Headers[k]))
 		}
 		if resolved.Body != "" {
-			fmt.Fprintf(os.Stdout, "  \n  %s\n", resolved.Body)
+			fmt.Fprintf(os.Stdout, "  \n  %s\n", mask(resolved.Body))
 		}
 	}
 	return nil

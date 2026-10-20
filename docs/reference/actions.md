@@ -52,6 +52,10 @@ reason. `enter` (or a double click) fires its binding directly.
 | `body` | template | — | http; one of `body` / `json` / `form` | Request body, sent as written after substitution. `Content-Type: application/json` unless `headers:` sets one. |
 | `json` | any | — | http; one of `body` / `json` / `form` | Request body as any YAML value, encoded as JSON. Strings are templated before encoding, so a quote in an input can't break it. A string that is exactly one token, `"${inputs.count}"`, takes the input's type (a number for `int`, a boolean for `bool`), and drops its key when it resolves empty, so blank optional inputs are left out. |
 | `form` | map of template or list | — | http; one of `body` / `json` / `form` | Request body as form fields, `application/x-www-form-urlencoded`. A list repeats the key; empty values are dropped. |
+| `query` | map of template or list | — | http | Query parameters laid over the url's, templated and escaped. A list repeats the key; empty values are dropped. |
+| `auth` | map | — | http | Authenticates the request, as on a source: one of `bearer`, `basic`, `api_key`, `oauth2`. See [auth](sources.md#auth). Its secrets are masked as `•••` in console entries, error messages and `wrangl` dry runs. oauth2 tokens are shared with sources that have the same auth. |
+| `extends` | string | — | http (implies it) | Takes the request from a [preset](sources.md#presets): see [extending presets](#extending-presets). |
+| `unset` | list of string | — | with `extends` | Inherited fields to drop: `url`, `headers`, `query`, `auth`, `timeout`. |
 | `timeout` | duration | `30s` | http | Request limit. |
 | `push` | string | — | push | Opens this screen from `tui.screens`. See [push actions](#push-actions). |
 | `success` | expr | exec: `code == 0`; http: `code < 400` | exec, http | Decides whether the run worked, over `code` (exit or HTTP status), `output` (stdout or response body) and `body` (the parsed JSON body). For tools that exit non-zero on success, or an API's harmless 409: `code < 400 or code == 409`. |
@@ -65,8 +69,10 @@ reason. `enter` (or a double click) fires its binding directly.
 
 - exec needs `run:` and takes no `url`, `method`, `headers`, `body`,
   `json` or `form`.
-- http needs `url:` and takes no `run:`; `json`, `form` and `body` are
-  mutually exclusive.
+- http needs `url:` (or one from its preset) and takes no `run:`;
+  `json`, `form` and `body` are mutually exclusive. `auth:` follows the
+  source rules, including that `headers:` can't also set the header it
+  owns.
 - push needs `push:` and takes no `run:`, `url:`, `inputs:` or
   `multi: true`.
 - Inputs follow the [input rules](#inputs).
@@ -100,6 +106,47 @@ actions:
       count: ${inputs.count}     # a number
       note: null                 # always sent, clearing the note
 ```
+
+## Extending presets
+
+An http action can `extends:` the same [preset](sources.md#presets) its
+API's sources do, so reads and writes share one base url and one auth.
+
+```yaml
+data:
+  presets:
+    api:
+      type: http
+      url: ${env.API_URL}/v1
+      auth: {bearer: "${env.API_TOKEN}"}
+  sources:
+    items: {extends: api, url: /items, root: entries}
+
+actions:
+  delete_item:
+    extends: api
+    method: DELETE
+    url: /items/${inputs.id}       # joins onto the preset's url
+    inputs: {id: {required: true, segment: true}}
+```
+
+**Inherited:** `url` (a relative action url joins onto it, as a
+source's does), `headers` and `query` (merged key by key, the action's
+winning; `""` drops one), `auth` and `timeout` (the action's own, else
+the preset's, else 30s).
+
+**Ignored:** every other preset field — `format`, `root`, `paginate`,
+`window`, `refresh`, `retry`, `max_body`, `conditional` and the rest
+belong to sources. In particular actions never retry: a POST or DELETE
+isn't safe to send twice. `method` stays POST unless the action says
+otherwise.
+
+A preset whose inherited fields use `${params.*}` can't be extended by
+an action, which fills `${inputs.*}` instead — declare the value in the
+action's own url or headers.
+
+Every http action sends `User-Agent: tui-builder/<version>` unless
+`headers:` sets one.
 
 ## Claims
 

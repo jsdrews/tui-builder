@@ -355,6 +355,12 @@ func visitActions(actions map[string]*Action, fn func(*string)) {
 				fn(&vals[i])
 			}
 		}
+		for _, vals := range a.Query {
+			for i := range vals {
+				fn(&vals[i])
+			}
+		}
+		a.Auth.visit(func(_ string, v *string) { fn(v) })
 	}
 }
 

@@ -47,6 +47,9 @@ API don't each repeat its base URL, headers and timeout. A preset
 produces nothing: a component can't bind to it and `wrangl` can't run
 it.
 
+http [actions](actions.md#extending-presets) can extend a preset too,
+taking its url, headers, query, auth and timeout.
+
 ```yaml
 data:
   presets:

@@ -48,6 +48,9 @@ func Load(path string) (*Config, error) {
 	if err := hoistInlineActions(&c); err != nil {
 		return nil, fmt.Errorf("expand %s: %w", path, err)
 	}
+	if err := resolveActionPresets(&c); err != nil {
+		return nil, fmt.Errorf("validate %s: %w", path, err)
+	}
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("validate %s: %w", path, err)
 	}
@@ -56,6 +59,11 @@ func Load(path string) (*Config, error) {
 	for _, s := range c.Data.Sources {
 		if s != nil && s.Auth != nil {
 			s.Auth.captureTemplates()
+		}
+	}
+	for _, a := range c.Actions {
+		if a != nil && a.Auth != nil {
+			a.Auth.captureTemplates()
 		}
 	}
 	// Env-var check runs after Validate so schema errors surface

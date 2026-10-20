@@ -280,3 +280,42 @@ func jsonValue(raw json.RawMessage) any {
 	_ = json.Unmarshal(raw, &v)
 	return v
 }
+
+// RequestAuth is an http action's auth: set on its request, and masked
+// out of whatever the action reports. It shares the token cache with
+// sources, so a write and the read beside it use one token.
+type RequestAuth struct{ a *authState }
+
+// NewRequestAuth builds the auth for one action request. base is the
+// action's url, which a relative token_url resolves against; secret
+// headers are masked too. Nil spec means no scheme, masking only.
+func NewRequestAuth(spec *cfg.AuthSpec, base string, headers map[string]string) *RequestAuth {
+	return &RequestAuth{a: newAuthState(spec, base, headers)}
+}
+
+// Apply sets the scheme on req, fetching an oauth2 token when needed.
+func (r *RequestAuth) Apply(req *http.Request, timeout time.Duration) error {
+	if r == nil {
+		return nil
+	}
+	return r.a.apply(req.Context(), req.Header, req.URL, timeout)
+}
+
+// Retryable reports whether a 401 is worth one more try: an oauth2
+// token the server stopped accepting, now forgotten so the next Apply
+// fetches a fresh one.
+func (r *RequestAuth) Retryable(status int) bool {
+	if r == nil || r.a.spec == nil || status != http.StatusUnauthorized || r.a.spec.Scheme() != "oauth2" {
+		return false
+	}
+	r.a.forgetToken()
+	return true
+}
+
+// Redact masks the secrets in s.
+func (r *RequestAuth) Redact(s string) string {
+	if r == nil {
+		return s
+	}
+	return r.a.redact(s)
+}

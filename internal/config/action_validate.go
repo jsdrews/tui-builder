@@ -133,8 +133,8 @@ func validateActionDefs(actions map[string]*Action) error {
 			if len(a.Run) == 0 {
 				return fmt.Errorf("%s: `run:` is required (non-empty argv) for an exec action", path)
 			}
-			if a.URL != "" || a.Method != "" || len(a.Headers) > 0 || a.Body != "" || a.JSON != nil || len(a.Form) > 0 {
-				return fmt.Errorf("%s: http fields (url / method / headers / body / json / form) are not valid on an exec action", path)
+			if a.URL != "" || a.Method != "" || len(a.Headers) > 0 || a.Body != "" || a.JSON != nil || len(a.Form) > 0 || a.Auth != nil || len(a.Query) > 0 {
+				return fmt.Errorf("%s: http fields (url / method / headers / body / json / form / auth / query) are not valid on an exec action", path)
 			}
 		case "http":
 			if a.URL == "" {
@@ -151,6 +151,9 @@ func validateActionDefs(actions map[string]*Action) error {
 			}
 			if len(bodies) > 1 {
 				return fmt.Errorf("%s: %s and %s are mutually exclusive", path, bodies[0], bodies[1])
+			}
+			if err := validateActionRequest(a, path); err != nil {
+				return err
 			}
 			if len(a.Run) > 0 {
 				return fmt.Errorf("%s: `run:` is not valid on an http action", path)

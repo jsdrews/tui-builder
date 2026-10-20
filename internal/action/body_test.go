@@ -1,6 +1,10 @@
 package action
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
@@ -43,5 +47,32 @@ func TestResolveEscapesURL(t *testing.T) {
 	r, _ := Resolve(a, Inputs{"app": "team/my app", "id": "a/b", "q": "x&y"})
 	if want := "https://h.test/apps/team/my%20app/items/a%2Fb?q=x%26y"; r.URL != want {
 		t.Errorf("url %q, want %q", r.URL, want)
+	}
+}
+
+// An http action sends its auth, query and the default User-Agent, and
+// masks its secrets in what it reports.
+func TestDoAuthQueryAndRedaction(t *testing.T) {
+	var got *http.Request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r
+		w.WriteHeader(403)
+		io.WriteString(w, `{"error":"token s3cr3t-tok rejected"}`)
+	}))
+	defer srv.Close()
+	a := &cfg.Action{Type: "http", URL: srv.URL + "/x?keep=1", Auth: &cfg.AuthSpec{Bearer: "s3cr3t-tok"},
+		Query:  map[string]cfg.QueryValue{"q": {"${inputs.q}"}, "empty": {"${inputs.none}"}},
+		Inputs: map[string]*cfg.Parameter{"q": {}, "none": {}}, ErrorMessage: "${output}"}
+	r, err := Resolve(a, Inputs{"q": "a b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := r.Do(t.Context())
+	if got.Header.Get("Authorization") != "Bearer s3cr3t-tok" || got.URL.Query().Get("q") != "a b" ||
+		got.URL.Query().Get("keep") != "1" || got.URL.Query().Has("empty") || !strings.HasPrefix(got.UserAgent(), "tui-builder/") {
+		t.Errorf("request %v %v %q", got.Header, got.URL, got.UserAgent())
+	}
+	if strings.Contains(res.Summary+res.Output, "s3cr3t-tok") {
+		t.Errorf("secret leaked: %q / %q", res.Summary, res.Output)
 	}
 }

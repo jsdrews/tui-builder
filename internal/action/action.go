@@ -33,6 +33,7 @@ import (
 	"time"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
+	ds "github.com/jsdrews/tui-builder/internal/datasource"
 	"github.com/jsdrews/tui-builder/internal/expr"
 )
 
@@ -75,6 +76,9 @@ type Resolved struct {
 	// ContentType is what Body is, sent unless Headers sets one.
 	ContentType string
 	Timeout     time.Duration
+	// Auth sets the action's auth: on the request and masks its secrets
+	// (and secret headers) in what the action reports.
+	Auth *ds.RequestAuth
 
 	def *cfg.Action
 	// vals is the resolved input set, kept so message: / error_message:
@@ -127,7 +131,8 @@ func Resolve(a *cfg.Action, in Inputs) (*Resolved, error) {
 		for tok := range segments {
 			segments["${"+strings.TrimPrefix(tok, "${inputs.")] = true
 		}
-		r.URL = cfg.SubstituteURL(a.URL, func(tok string) string { return substitute(tok, vals) }, segments)
+		sub := func(tok string) string { return substitute(tok, vals) }
+		r.URL = withQuery(cfg.SubstituteURL(a.URL, sub, segments), a.Query, sub)
 		body, contentType, err := requestBody(a, vals)
 		if err != nil {
 			return nil, err
@@ -137,6 +142,11 @@ func Resolve(a *cfg.Action, in Inputs) (*Resolved, error) {
 		for k, v := range a.Headers {
 			r.Headers[k] = substitute(v, vals)
 		}
+		var spec *cfg.AuthSpec
+		if a.Auth != nil {
+			spec = a.Auth.Rewrite(sub)
+		}
+		r.Auth = ds.NewRequestAuth(spec, r.URL, r.Headers)
 		r.Timeout = defaultHTTPTimeout
 		if a.Timeout != "" {
 			d, err := time.ParseDuration(a.Timeout)
@@ -160,13 +170,28 @@ func (r *Resolved) Do(ctx context.Context) Result {
 	ctx, cancel := context.WithTimeout(ctx, r.Timeout)
 	defer cancel()
 
+	code, raw, err := r.send(ctx)
+	// An oauth2 token the server stopped taking is fetched again, once.
+	if err == nil && r.Auth.Retryable(code) {
+		code, raw, err = r.send(ctx)
+	}
+	if err != nil {
+		return Result{Summary: r.Auth.Redact(err.Error())}
+	}
+	res := r.Finish(code, raw)
+	res.Summary, res.Output = r.Auth.Redact(res.Summary), r.Auth.Redact(res.Output)
+	return res
+}
+
+// send makes one request and reads the reply.
+func (r *Resolved) send(ctx context.Context) (int, string, error) {
 	var body io.Reader
 	if r.Body != "" {
 		body = strings.NewReader(r.Body)
 	}
 	req, err := http.NewRequestWithContext(ctx, r.Method, r.URL, body)
 	if err != nil {
-		return Result{Summary: err.Error()}
+		return 0, "", err
 	}
 	for k, v := range r.Headers {
 		req.Header.Set(k, v)
@@ -181,15 +206,42 @@ func (r *Resolved) Do(ctx context.Context) Result {
 		}
 		req.Header.Set("Content-Type", ct)
 	}
-
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", ds.UserAgent)
+	}
+	if err := r.Auth.Apply(req, r.Timeout); err != nil {
+		return 0, "", err
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return Result{Summary: err.Error()}
+		return 0, "", err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(raw), nil
+}
 
-	return r.Finish(resp.StatusCode, string(raw))
+// withQuery lays query: over u's query string: each key's templated
+// values replace whatever u had for it, and empty values are dropped.
+func withQuery(u string, query map[string]cfg.QueryValue, sub func(string) string) string {
+	if len(query) == 0 {
+		return u
+	}
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return u
+	}
+	vals := parsed.Query()
+	for k, vs := range query {
+		vals.Del(k)
+		for _, v := range vs {
+			if v = sub(v); v != "" {
+				vals.Add(k, v)
+			}
+		}
+	}
+	parsed.RawQuery = vals.Encode()
+	return parsed.String()
 }
 
 // Finish normalises a raw (code, output) pair into a Result, applying
