@@ -44,6 +44,10 @@ func (m *Model) handlePoll(x pollMsg) tea.Cmd {
 		return nil
 	}
 	if _, refresh := x.msg.(poll.RefreshMsg); refresh {
+		if m.paused(x.source) {
+			entry.stale = true
+			return nil
+		}
 		if entry.inflight {
 			return nil
 		}
@@ -71,4 +75,47 @@ func wrapPoll(source string, cmd tea.Cmd) tea.Cmd {
 		}
 		return pollMsg{source: source, msg: msg}
 	}
+}
+
+// paused reports whether source's timers should skip their fetch: the
+// screen is covered (a hidden tab, or under a push) and the source
+// didn't ask to keep polling.
+func (m *Model) paused(source string) bool {
+	return m.covered && !m.pollHidden[source]
+}
+
+// setCovered records whether the screen is covered. Covering pauses
+// growing eventlogs (their polling is tuilib's); uncovering refetches
+// every source and window whose poll was skipped meanwhile, and resumes
+// growth. The timers themselves keep ticking either way.
+func (m *Model) setCovered(covered bool) tea.Cmd {
+	if m.covered == covered {
+		return nil
+	}
+	m.covered = covered
+	var cmds []tea.Cmd
+	for _, w := range m.windows {
+		c := m.tree.Components[w.component]
+		if w.grows && !m.pollHidden[w.source] && c != nil && c.RemoteLog != nil {
+			cmds = append(cmds, tagCursorFocused(c.RemoteLog.SetGrowing(!covered), w.component))
+		}
+		if !covered && w.stale {
+			w.stale = false
+			if rt := m.remoteFor(w.component); rt != nil {
+				cmds = append(cmds, tagCursorFocused(rt.Refresh(), w.component))
+			}
+		}
+	}
+	if !covered {
+		for name, entry := range m.sources {
+			if !entry.stale {
+				continue
+			}
+			entry.stale = false
+			if !entry.inflight {
+				cmds = append(cmds, m.startFetch(name))
+			}
+		}
+	}
+	return m.own(tea.Batch(cmds...))
 }

@@ -91,6 +91,9 @@ type sourceEntry struct {
 	// failing is whether the newest fetch failed outright, for the
 	// "· reads failing" title on a polled source's components.
 	failing bool
+	// stale is set when a poll was skipped because the screen was
+	// covered; uncovering refetches it.
+	stale bool
 }
 
 // distinctUse is one windowed-table column whose filter suggestions come
@@ -200,6 +203,9 @@ type Model struct {
 	// size / prefetch the remote table needs and the column-title →
 	// query-parameter map the query translation needs.
 	windowDefs map[string]*cfg.WindowConfig
+	// pollHidden lists the sources with `poll_hidden: true`, which keep
+	// polling while this screen is covered.
+	pollHidden map[string]bool
 	// windowSearches says, per windowed source, whether it has
 	// somewhere to send a bare filter term (cfg.Source.WindowSearches).
 	windowSearches map[string]bool
@@ -365,6 +371,14 @@ func build_(s *cfg.Screen, components map[string]*cfg.Component, entries map[str
 		}
 		m.sources[name] = &sourceEntry{src: src}
 	}
+	for name := range m.sources {
+		if def := entries[name]; def != nil && def.PollHidden {
+			if m.pollHidden == nil {
+				m.pollHidden = map[string]bool{}
+			}
+			m.pollHidden[name] = true
+		}
+	}
 	// A column's `distinct: {source:}` reads a source nothing displays,
 	// like the growing condition above: fetch and poll it the same way,
 	// and hand each answer to the column (handleFetch).
@@ -411,14 +425,14 @@ func (m *Model) Init() tea.Cmd {
 // Subsequent activations (pop-back) reuse cached data and let polling
 // handle refreshes.
 func (m *Model) OnEnter(any) tea.Cmd {
-	m.covered = false
+	resume := m.setCovered(false)
 	// Whatever this screen pushed has been popped: stop its requests and
 	// streams rather than let them run on for a screen nobody can see.
 	for _, cancel := range m.pushed {
 		cancel()
 	}
 	m.pushed = nil
-	return m.own(m.onEnter())
+	return tea.Batch(resume, m.own(m.onEnter()))
 }
 
 func (m *Model) onEnter() tea.Cmd {
@@ -1847,11 +1861,11 @@ func (m *Model) pushAction(b cfg.ActionBinding, def *cfg.Action, sel build.Selec
 	if err != nil {
 		return app.Error(fmt.Sprintf("%s: %v", def.Push, err)), true
 	}
-	m.covered = true
+	pause := m.setCovered(true)
 	if cancel := cancelOf(child); cancel != nil {
 		m.pushed = append(m.pushed, cancel)
 	}
-	return tscreen.Push(child), true
+	return tea.Batch(pause, tscreen.Push(child)), true
 }
 
 // selectionFrom extracts a Selection from a list or table component. The

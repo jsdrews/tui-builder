@@ -20,7 +20,8 @@ import (
 // Model per tab. Each tab is a small screen of its own — its layout, its
 // sources, its bindings — and tuilib does the routing: keys and clicks
 // go to the active tab, everything else (polls, fetch results, streams)
-// to every tab, so hidden tabs keep their data current. A tab pane isn't
+// to every tab. A hidden tab is covered, so its timers skip their
+// fetches until it's shown again (see setCovered). A tab pane isn't
 // a navigation level: it never touches the screen stack, which is why
 // the breadcrumb shows only the screen's title.
 type Tabbed struct {
@@ -97,7 +98,7 @@ func newTabbed(s *cfg.Screen, components map[string]*cfg.Component, entries map[
 	}
 	h.tabs = tab.New(opts)
 	h.active = h.tabs.ActiveTab()
-	h.syncCover()
+	h.syncCover() // nothing is fetching yet, so there's nothing to run
 	return h, nil
 }
 
@@ -118,10 +119,12 @@ func tabKey(k string) key.Binding {
 // background run is claimed by the screen that isn't covered, and a
 // hidden tab is no more the place the user started it than a screen
 // under a push is; without this, two tabs would both report it.
-func (h *Tabbed) syncCover() {
+func (h *Tabbed) syncCover() tea.Cmd {
+	var cmds []tea.Cmd
 	for i, b := range h.bodies {
-		b.covered = i != h.active
+		cmds = append(cmds, b.setCovered(i != h.active))
 	}
+	return tea.Batch(cmds...)
 }
 
 // Title satisfies screen.Screen.
@@ -136,7 +139,7 @@ func (h *Tabbed) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 	h.tabs, cmd = h.tabs.Update(msg)
 	if a := h.tabs.ActiveTab(); a != h.active {
 		h.active = a
-		h.syncCover()
+		cmd = tea.Batch(cmd, h.syncCover())
 	}
 	return h, cmd
 }
@@ -147,8 +150,7 @@ func (h *Tabbed) Layout() layout.Node { return layout.Sized(&h.tabs) }
 // OnEnter tells the active tab — the one a push left from — that it's on
 // top again.
 func (h *Tabbed) OnEnter(result any) tea.Cmd {
-	h.syncCover()
-	return h.tabs.OnEnterActive(result)
+	return tea.Batch(h.syncCover(), h.tabs.OnEnterActive(result))
 }
 
 // SetTheme reaches every tab, hidden ones included.

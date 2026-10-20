@@ -72,6 +72,9 @@ type windowEntry struct {
 	// followed records that growth has started once: the first start
 	// jumps to the newest item, later ones leave a reader where they are.
 	followed bool
+	// stale is set when a poll was skipped because the screen was
+	// covered; uncovering re-requests the window.
+	stale bool
 }
 
 // remoteView is what the screen needs from either kind of remote binding:
@@ -533,8 +536,14 @@ func (m *Model) handleWindowTick(msg windowTickMsg) tea.Cmd {
 	if rt == nil {
 		return nil
 	}
-	cmds := []tea.Cmd{tagCursorFocused(rt.Refresh(), msg.component)}
-	if w := m.windows[msg.component]; w.refresh > 0 {
+	w := m.windows[msg.component]
+	var cmds []tea.Cmd
+	if m.paused(w.source) {
+		w.stale = true
+	} else {
+		cmds = append(cmds, tagCursorFocused(rt.Refresh(), msg.component))
+	}
+	if w.refresh > 0 {
 		cmds = append(cmds, windowTick(msg.component, w.refresh))
 	}
 	return tea.Batch(cmds...)

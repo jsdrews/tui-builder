@@ -61,6 +61,10 @@ type Source struct {
 	Root string `yaml:"root,omitempty"`
 	// Refresh is the polling interval (e.g. "30s"). Empty = fetch once.
 	Refresh string `yaml:"refresh,omitempty"`
+	// PollHidden keeps the source polling while its tab is hidden or its
+	// screen is covered by a push. By default those pause their timers
+	// and refetch when shown. Only the TUI reads it.
+	PollHidden bool `yaml:"poll_hidden,omitempty"`
 	// Timeout caps per-fetch latency. Default 10s for http/exec.
 	Timeout string `yaml:"timeout,omitempty"`
 	// Format selects how the response body is parsed:

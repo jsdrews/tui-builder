@@ -225,7 +225,7 @@ task example NAME=layout
 
 ### tabs
 
-A tabbed screen: `tabs:` in place of `layout:`, each tab with its own layout and actions; hidden tabs keep polling.
+A tabbed screen: `tabs:` in place of `layout:`, each tab with its own layout and actions; a hidden tab pauses its polling and refetches when shown.
 
 ```sh
 task example NAME=tabs

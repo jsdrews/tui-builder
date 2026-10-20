@@ -88,3 +88,24 @@ func TestPollMessagesCarryTheirSource(t *testing.T) {
 		t.Error("a nil cmd should stay nil")
 	}
 }
+
+// A covered screen skips its timed fetches and marks them stale; shown
+// again, it refetches what it skipped. poll_hidden keeps a source going.
+func TestPollPausesWhileCovered(t *testing.T) {
+	m := polledModel(t)
+	m.sources["a"].inflight, m.sources["b"].inflight = false, false
+	m.pollHidden = map[string]bool{"b": true}
+	m.setCovered(true)
+	if cmd := m.handlePoll(pollMsg{source: "a", msg: poll.RefreshMsg{}}); cmd != nil || !m.sources["a"].stale {
+		t.Fatal("a covered screen should skip the fetch and mark it stale")
+	}
+	if cmd := m.handlePoll(pollMsg{source: "b", msg: poll.RefreshMsg{}}); cmd == nil {
+		t.Error("poll_hidden: true should keep fetching while covered")
+	}
+	if cmd := m.setCovered(false); cmd == nil || m.sources["a"].stale || !m.sources["a"].inflight {
+		t.Error("uncovering should refetch the skipped source")
+	}
+	if cmd := m.setCovered(false); cmd != nil {
+		t.Error("uncovering twice refetched again")
+	}
+}

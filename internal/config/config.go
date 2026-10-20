@@ -644,8 +644,9 @@ type Screen struct {
 
 	// Tabs makes this a tabbed screen: each tab is a small screen of its
 	// own (label, layout, actions), shown one at a time under a strip.
-	// Hidden tabs keep polling; keys go to the active one. The fields
-	// below configure the strip and only apply with Tabs.
+	// Hidden tabs pause their polling and refetch when shown (a source
+	// with poll_hidden: true keeps going); keys go to the active one.
+	// The fields below configure the strip and only apply with Tabs.
 	Tabs []Tab `yaml:"tabs,omitempty"`
 	// StripPos puts the tab strip at the "top" (default) or "bottom".
 	StripPos string `yaml:"strip_pos,omitempty"`

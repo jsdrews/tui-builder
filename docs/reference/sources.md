@@ -27,7 +27,8 @@ params": it can only run once a caller passes arguments for them (a push binding
 | `parameters` | map | — | any kind | Typed inputs the source references as `${params.NAME}`. See [parameters](#parameters). |
 | `root` | string | — (whole value) | — | Dot-path selecting the iterable inside the response, e.g. `items` or `data.results`. |
 | `format` | string | `json` | — | `json` parses the response; `text` keeps it as a raw string (for logs and plain-text endpoints). |
-| `refresh` | duration | — (fetch once) | not with `follow` | Poll interval. |
+| `refresh` | duration | — (fetch once) | not with `follow` | Poll interval. A hidden tab or a screen under a push skips its polls and refetches when shown again. |
+| `poll_hidden` | bool | `false` | — | Keeps polling while the source's tab is hidden or its screen is covered by a push. TUI-only: `wrangl` ignores it. |
 | `timeout` | duration | `10s` | http, exec, websocket | Per-fetch limit. On websocket it bounds only the initial connect; ignored with `follow: true`. |
 | `cache` | map | — | sources with `parameters:` | Memoises fetches per parameter combination. See [`cache`](#cache). |
 | `pipe` | list | — | — | Transform stages applied to this source's output. See [pipelines.md](pipelines.md#pipe). |
