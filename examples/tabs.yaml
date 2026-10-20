@@ -8,9 +8,10 @@
 #   click                      a tab in the strip
 #
 # Keys go to the active tab: tab / shift+tab move focus inside it, and
-# its own bindings fire. A hidden tab first fetches when you open it,
-# then keeps polling while hidden — the Events tab's clock keeps ticking
-# while you're on Pods. The breadcrumb stays "Cluster": switching tabs
+# its own bindings fire. A hidden tab pauses its polling: the Events
+# tab's clock stops while you're on Pods, and catches up the moment you
+# switch back (`poll_hidden: true` on a source keeps it polling while
+# hidden). The breadcrumb stays "Cluster": switching tabs
 # isn't moving between screens.
 app:
   title: Tabs

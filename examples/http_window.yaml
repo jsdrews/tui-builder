@@ -59,13 +59,16 @@ data:
         # request per boundary.
         prefetch: 1
 
+        # Row offsets: ?offset=200&limit=100. An API that pages by number
+        # (?page=3&per_page=100) uses `page_param:` instead — see
+        # examples/http_pages.yaml.
         offset_param: offset
         limit_param: limit
         # Where the match count lives in the RAW response (before
         # `root: docs` slices out the items). This is what lets the
-        # table size its scrollbar against 2,060 rows while holding 100.
-        # Drop it and the table just treats the end of what's loaded as
-        # the end — still correct, less informative.
+        # table size its scrollbar against 2,060 rows while holding 100,
+        # and ask for the rows past the first window. It's required: a
+        # window without a total would never scroll past its first one.
         total_path: numFound
 
         # Bare terms — anything typed without a "column:" prefix — go

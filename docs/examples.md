@@ -468,6 +468,20 @@ task example NAME=http_window
     --8<-- "examples/http_window.yaml"
     ```
 
+### http_pages
+
+A page-numbered API (JSONPlaceholder): a `window:` addressed by `page_param:`, field filters without search, a preset shared by sources and actions, a `json:` edit, `segment:` ids, a bold column, an auto inspector colored by path, and a tab that polls only while shown.
+
+```sh
+task example NAME=http_pages
+```
+
+??? example "http_pages.yaml"
+
+    ```yaml
+    --8<-- "examples/http_pages.yaml"
+    ```
+
 ### exec_window
 
 `window:` over exec: `git log --skip/--max-count/--author/--grep` answers the table's paging and filtering.

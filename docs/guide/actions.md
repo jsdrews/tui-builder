@@ -80,6 +80,40 @@ actions:
 Bound with only `name` from the row, this asks for `replicas`, starting at
 3.
 
+## Calling an API
+
+An `http` action sends a request. Give it the same
+[preset](../reference/sources.md#presets) as the API's sources and it
+takes the base url, headers, query, auth and timeout from there, so a
+write and the read beside it can't drift apart. A body written as
+`json:` is templated before it's encoded: a quote in an input can't
+break it, `"${inputs.count}"` is sent as a number for an `int` input,
+and a blank optional input is left out.
+
+```yaml
+data:
+  presets:
+    api:
+      type: http
+      url: ${env.API_URL}/v1
+      auth: {bearer: "${env.API_TOKEN}"}
+
+actions:
+  rename:
+    extends: api
+    method: PATCH
+    url: /items/${inputs.id}         # → ${env.API_URL}/v1/items/…
+    inputs:
+      id:   {required: true, segment: true}
+      name: {required: true}
+    json: {name: "${inputs.name}"}
+```
+
+`segment: true` keeps an id one path segment: `a/b` is sent as `a%2Fb`.
+The token is masked as `•••` in anything the action reports. Actions
+never retry. See [Reference → extending presets](../reference/actions.md#extending-presets)
+and [`examples/http_pages.yaml`](../examples.md#http_pages).
+
 ## Where results go
 
 Every run reports to the output console (`o`): its output streams in as
