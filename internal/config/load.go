@@ -779,6 +779,9 @@ func (c *Component) validate(path string) error {
 	if c.Type == "tree" && c.Root == nil && c.Source == "" {
 		return fmt.Errorf("%s: tree needs root", path)
 	}
+	if err := c.validateRulePaths(path); err != nil {
+		return err
+	}
 	if c.Auto {
 		if c.Type != "inspector" {
 			return fmt.Errorf("%s: `auto: true` is only valid on inspector components (got %q)", path, c.Type)
@@ -851,6 +854,8 @@ func (col *Column) validateMetric(path, source string) error {
 		return fmt.Errorf("%s: not with `color_rules:` — the metric colors the cell itself", mp)
 	case col.Sortable:
 		return fmt.Errorf("%s: not with `sortable: true` — drawn glyphs don't sort meaningfully", mp)
+	case col.Bold:
+		return fmt.Errorf("%s: not with `bold: true` — drawn glyphs don't take text styles", mp)
 	}
 	return nil
 }
@@ -879,6 +884,43 @@ func validateFieldMetrics(fields []InspectorField, path, source string) error {
 		}
 	}
 	return nil
+}
+
+// validateRulePaths allows a color rule's `path:` only on an `auto:
+// true` inspector's own rules: columns and declared fields already say
+// where they apply.
+func (c *Component) validateRulePaths(path string) error {
+	const msg = "%s.color_rules[%d].path: only applies on an auto: true inspector — columns and fields already say where"
+	if !(c.Type == "inspector" && c.Auto) {
+		for j, r := range c.ColorRules {
+			if r.Path != "" {
+				return fmt.Errorf(msg, path, j)
+			}
+		}
+	}
+	for i, col := range c.Columns {
+		for j, r := range col.ColorRules {
+			if r.Path != "" {
+				return fmt.Errorf(msg, fmt.Sprintf("%s.columns[%d]", path, i), j)
+			}
+		}
+	}
+	var fields func(fs []InspectorField, p string) error
+	fields = func(fs []InspectorField, p string) error {
+		for i, f := range fs {
+			fp := fmt.Sprintf("%s.fields[%d]", p, i)
+			for j, r := range f.ColorRules {
+				if r.Path != "" {
+					return fmt.Errorf(msg, fp, j)
+				}
+			}
+			if err := fields(f.Children, fp); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return fields(c.Fields, path)
 }
 
 // validateKindOptions rejects options set on a kind that would ignore

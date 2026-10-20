@@ -537,9 +537,52 @@ func applyInspector(c *Component, data any, th theme.Theme) {
 // labels + paths + color rules.
 func deriveInspectorFields(cfg *cfg.Component, data any, th theme.Theme) []inspector.Field {
 	if cfg.Auto {
-		return inspector.FromAny(data)
+		fields := inspector.FromAny(data)
+		colorAutoFields(fields, nil, cfg.ColorRules, th)
+		return fields
 	}
 	return buildInspectorFields(cfg.Fields, data, th)
+}
+
+// colorAutoFields colors an auto inspector's leaves in place: each takes
+// the first rule whose path matches where it sits and whose when:
+// matches its value. at is the leaf's path from the record root, with
+// array items ("[2]") as their index.
+func colorAutoFields(fields []inspector.Field, at []string, rules []cfg.ColorRule, th theme.Theme) {
+	if len(rules) == 0 {
+		return
+	}
+	for i := range fields {
+		f := &fields[i]
+		seg := strings.TrimSuffix(strings.TrimPrefix(f.Label, "["), "]")
+		here := append(at[:len(at):len(at)], seg)
+		if len(f.Children) > 0 {
+			colorAutoFields(f.Children, here, rules, th)
+			continue
+		}
+		var matching []cfg.ColorRule
+		for _, r := range rules {
+			if r.Path == "" || pathMatches(r.Path, here) {
+				matching = append(matching, r)
+			}
+		}
+		f.Value = applyColorRules(f.Value, matching, th)
+	}
+}
+
+// pathMatches reports whether a rule's dot-path names the leaf at path;
+// "*" matches any one segment.
+func pathMatches(pattern string, path []string) bool {
+	parts := strings.Split(pattern, ".")
+	if len(parts) != len(path) {
+		return false
+	}
+	for i, p := range parts {
+		if p != "*" && p != path[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // buildInspectorFields walks the config field tree, plucking each field's

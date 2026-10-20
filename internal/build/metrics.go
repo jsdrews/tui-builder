@@ -75,7 +75,17 @@ func columnCell(col cfg.Column, item any, th theme.Theme) string {
 	if col.Metric != nil {
 		return renderMetric(col.Metric, item, col.Width, th)
 	}
-	return applyColorRules(ds.FirstString(item, col.Value), col.ColorRules, th)
+	return bold(applyColorRules(ds.FirstString(item, col.Value), col.ColorRules, th), col.Bold)
+}
+
+// bold wraps a cell in SGR bold when on. The color rules reset only the
+// foreground, so bold sits outside them and the row background passes
+// through.
+func bold(cell string, on bool) string {
+	if !on || cell == "" {
+		return cell
+	}
+	return "\x1b[1m" + cell + "\x1b[22m"
 }
 
 // RawSelection puts the logical value back into a table selection's

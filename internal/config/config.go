@@ -985,8 +985,10 @@ type Component struct {
 	Colors *Colors `yaml:"colors,omitempty"`
 
 	// ColorRules drive data-aware coloring for components with a single
-	// value stream — list items and logview lines. (For table, rules
-	// live per Column; for inspector, per InspectorField.) Rules
+	// value stream — list items and logview lines — and for an `auto:
+	// true` inspector's leaves, scoped by each rule's Path. (For table,
+	// rules live per Column; for a declared inspector, per
+	// InspectorField.) Rules
 	// evaluate in order, first match wraps the rendered text with
 	// ansi.CellColor.
 	ColorRules []ColorRule `yaml:"color_rules,omitempty"`
@@ -1309,6 +1311,9 @@ type Column struct {
 	// no rule matches the cell is rendered plain. See ColorRule for the
 	// `when:` syntax.
 	ColorRules []ColorRule `yaml:"color_rules,omitempty"`
+	// Bold renders the column's cells bold, outside any color rule's
+	// color, so the selected-row background still passes through.
+	Bold bool `yaml:"bold,omitempty"`
 	// Hidden opts the column out of rendering while keeping it in the
 	// row payload — it still participates in filter matching AND still
 	// shows up in Selected() / RowFocusedMsg cells. This is the
@@ -1455,6 +1460,11 @@ func (d *Distinct) UnmarshalYAML(node *yaml.Node) error {
 type ColorRule struct {
 	When  string `yaml:"when,omitempty"`
 	Color string `yaml:"color"`
+	// Path scopes a rule on an `auto: true` inspector to the fields at a
+	// dot-path from the record root ("status", "items.*.state"); "*"
+	// matches any one key or index. Empty matches every leaf. Not valid
+	// elsewhere: a column or a field already says where.
+	Path string `yaml:"path,omitempty"`
 }
 
 // TreeNode is a node in a tree component's root. Children may be empty
