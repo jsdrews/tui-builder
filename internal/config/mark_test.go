@@ -66,7 +66,7 @@ func TestMarkableRejectsWindowedTable(t *testing.T) {
 	c.Data.Sources["pods"] = NewEntry(&Source{
 		Type:   "http",
 		URL:    "https://example.com/pods",
-		Window: &WindowConfig{PageSize: 50, LimitParam: "limit", OffsetParam: "offset"},
+		Window: &WindowConfig{PageSize: 50, LimitParam: "limit", OffsetParam: "offset", TotalPath: "total"},
 	})
 	comp := c.TUI.Components["pods"]
 	comp.Markable = true

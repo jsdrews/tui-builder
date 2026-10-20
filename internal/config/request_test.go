@@ -31,8 +31,31 @@ func TestSubstituteURLEscapesByPosition(t *testing.T) {
 		{"https://h.test/plain", "https://h.test/plain"},
 	}
 	for _, c := range cases {
-		if got := substituteURL(c.in, fn); got != c.want {
+		if got := substituteURL(c.in, fn, nil); got != c.want {
 			t.Errorf("substituteURL(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// A segment: true parameter is one path segment: "/" is escaped too. In
+// the query string it's query-escaped as any value is.
+func TestSubstituteURLSegment(t *testing.T) {
+	fn := func(s string) string {
+		if s == "${params.id}" {
+			return "a/b c"
+		}
+		return s
+	}
+	seg := SegmentTokens("params", map[string]*Parameter{"id": {Segment: true}, "other": {}})
+	if len(seg) != 1 {
+		t.Fatalf("segments = %v", seg)
+	}
+	for in, want := range map[string]string{
+		"https://h.test/users/${params.id}/orders": "https://h.test/users/a%2Fb%20c/orders",
+		"https://h.test/s?id=${params.id}":         "https://h.test/s?id=a%2Fb+c",
+	} {
+		if got := substituteURL(in, fn, seg); got != want {
+			t.Errorf("substituteURL(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -134,7 +157,7 @@ sources:
   issues:
     type: http
     url: "https://h?q=tolkien&sort=title"
-    window: {offset_param: offset, limit_param: limit, search_param: q, sort_param: sort}`); err != nil {
+    window: {offset_param: offset, limit_param: limit, search_param: q, sort_param: sort, total_path: total}`); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -172,5 +195,16 @@ func TestSubstituteEnvUsesTheSameWalk(t *testing.T) {
 	}
 	if !reflect.DeepEqual(s.JSON, map[string]any{"q": "a b"}) {
 		t.Errorf("json = %#v", s.JSON)
+	}
+}
+
+func TestActionBodiesMutuallyExclusive(t *testing.T) {
+	err := validateActionDefs(map[string]*Action{"x": {Type: "http", URL: "http://h", Body: "{}", JSON: map[string]any{}}})
+	if err == nil || err.Error() != "actions.x: json and body are mutually exclusive" {
+		t.Errorf("err = %v", err)
+	}
+	err = validateActionDefs(map[string]*Action{"x": {Run: []string{"true"}, JSON: map[string]any{}}})
+	if err == nil || !strings.Contains(err.Error(), "not valid on an exec action") {
+		t.Errorf("exec with json: err = %v", err)
 	}
 }

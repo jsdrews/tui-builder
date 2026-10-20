@@ -67,7 +67,7 @@ var exactToken = regexp.MustCompile(`^\$\{[^}]*\}$`)
 //   - json: a value that is exactly one token and resolves empty drops
 //     its key (or list item).
 func (s *Source) rewriteTemplates(fn func(string) string) {
-	s.URL = substituteURL(s.URL, fn)
+	s.URL = substituteURL(s.URL, fn, SegmentTokens("params", s.Parameters))
 	s.Body = fn(s.Body)
 	s.Method = fn(s.Method)
 	s.Path = fn(s.Path)
@@ -181,11 +181,12 @@ func typeJSONParams(v any, decl map[string]*Parameter, resolved map[string]strin
 //   - before the path (a token that is the base, like ${env.API}):
 //     inserted as is
 //   - in the path: path-escaped, except "/" is kept, so a value like
-//     owner/repo still spans two segments
+//     owner/repo still spans two segments — unless the token is in
+//     segments (a `segment: true` parameter), which escapes "/" too
 //   - in the query string: query-escaped
 //
 // A token fn leaves unresolved stays for a later pass.
-func substituteURL(u string, fn func(string) string) string {
+func substituteURL(u string, fn func(string) string, segments map[string]bool) string {
 	if !strings.Contains(u, "${") {
 		return u
 	}
@@ -215,6 +216,8 @@ func substituteURL(u string, fn func(string) string) string {
 			b.WriteString(val)
 		case loc[0] > queryStart:
 			b.WriteString(neturl.QueryEscape(val))
+		case segments[tok]:
+			b.WriteString(neturl.PathEscape(val))
 		default:
 			b.WriteString(strings.ReplaceAll(neturl.PathEscape(val), "%2F", "/"))
 		}
@@ -222,6 +225,34 @@ func substituteURL(u string, fn func(string) string) string {
 	}
 	b.WriteString(u[last:])
 	return b.String()
+}
+
+// SubstituteURL is substituteURL for callers outside the package: http
+// actions template their url the way sources do.
+func SubstituteURL(u string, fn func(string) string, segments map[string]bool) string {
+	return substituteURL(u, fn, segments)
+}
+
+// SubstituteJSON is substituteJSON for callers outside the package.
+func SubstituteJSON(v any, fn func(string) string) any {
+	out, _ := substituteJSON(v, fn)
+	return out
+}
+
+// SegmentTokens is the set of tokens — ${ns.NAME} for each declared
+// `segment: true` parameter — that substituteURL escapes as one path
+// segment.
+func SegmentTokens(ns string, decl map[string]*Parameter) map[string]bool {
+	var out map[string]bool
+	for name, p := range decl {
+		if p != nil && p.Segment {
+			if out == nil {
+				out = map[string]bool{}
+			}
+			out["${"+ns+"."+name+"}"] = true
+		}
+	}
+	return out
 }
 
 // validateRequest checks the request fields: who may have them, at most
@@ -328,6 +359,7 @@ func (s *Source) ownedQueryKeys() map[string]string {
 	own(w.LimitParam, "limit_param")
 	if w.Cursor == "" {
 		own(w.OffsetParam, "offset_param")
+		own(w.PageParam, "page_param")
 	}
 	// Without a body, an Anchored window's patches go into the query
 	// string; with one, into the body.

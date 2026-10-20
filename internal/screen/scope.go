@@ -4,7 +4,8 @@ package screen
 //
 // tuilib's screen.Stack hands input to the top screen only, but every
 // other message — timers, fetch results, run outcomes — to every screen
-// on the stack, so a covered screen keeps its polls alive. A pushed
+// on the stack, so a covered screen's timers keep ticking (it skips
+// their fetches until it's shown again; see setCovered). A pushed
 // screen is another Model built from the same config, with the same
 // source and component names, so the messages this package invents
 // can't say whose they are by name alone. Left unscoped, a covered

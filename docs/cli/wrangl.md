@@ -61,8 +61,10 @@ A failed fetch goes to stderr and `wrangl` exits 1. An HTTP failure reads
 `fetch: HTTP 404 Not Found — <message>`, with the API's own message
 (see [Responses](../reference/sources.md#responses)) and any secret
 masked. Passing notices, such as a retry (`retrying 2/3 in 4s — HTTP
-503`) or a paginate walk stopped because a page repeated, go to stderr as
-`notice: …` lines and don't change the exit code.
+503`), a paginate walk stopped because a page repeated or at
+`max_pages` with more to come, or a page skipped by
+`on_page_error: skip`, go to stderr as `notice: …` lines and don't
+change the exit code.
 
 ## Output
 

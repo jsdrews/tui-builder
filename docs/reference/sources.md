@@ -27,7 +27,8 @@ params": it can only run once a caller passes arguments for them (a push binding
 | `parameters` | map | — | any kind | Typed inputs the source references as `${params.NAME}`. See [parameters](#parameters). |
 | `root` | string | — (whole value) | — | Dot-path selecting the iterable inside the response, e.g. `items` or `data.results`. |
 | `format` | string | `json` | — | `json` parses the response; `text` keeps it as a raw string (for logs and plain-text endpoints). |
-| `refresh` | duration | — (fetch once) | not with `follow` | Poll interval. |
+| `refresh` | duration | — (fetch once) | not with `follow` | Poll interval. A hidden tab or a screen under a push skips its polls and refetches when shown again. |
+| `poll_hidden` | bool | `false` | — | Keeps polling while the source's tab is hidden or its screen is covered by a push. TUI-only: `wrangl` ignores it. |
 | `timeout` | duration | `10s` | http, exec, websocket | Per-fetch limit. On websocket it bounds only the initial connect; ignored with `follow: true`. |
 | `cache` | map | — | sources with `parameters:` | Memoises fetches per parameter combination. See [`cache`](#cache). |
 | `pipe` | list | — | — | Transform stages applied to this source's output. See [pipelines.md](pipelines.md#pipe). |
@@ -46,6 +47,9 @@ one with `extends:` and inherits its fields, so ten sources against one
 API don't each repeat its base URL, headers and timeout. A preset
 produces nothing: a component can't bind to it and `wrangl` can't run
 it.
+
+http [actions](actions.md#extending-presets) can extend a preset too,
+taking its url, headers, query, auth and timeout.
 
 ```yaml
 data:
@@ -168,7 +172,11 @@ space, `?` or `&` can't break the request:
 |---|---|---|
 | before the path | none: it's the base | `${env.API_URL}/items` |
 | in the path | path-escaped, keeping `/` | `/repos/${params.full_name}` with `owner/my repo` → `/repos/owner/my%20repo` |
+| in the path, [`segment: true`](#parameters) | fully path-escaped | `/users/${params.id}` with `a/b` → `/users/a%2Fb` |
 | in the query string | query-escaped | `?q=${input.search}` with `a&b` → `?q=a%26b` |
+
+Some servers and proxies decode `%2F` back into a separator, or reject
+it; that's the server's behaviour, not something a config can change.
 
 **Bodies:** at most one of `json:`, `form:` and `body:`. `json:` is
 any YAML value, encoded as JSON. Its strings are templated *before*
@@ -502,6 +510,7 @@ expressions as `params.NAME` (see
 | `required` | bool | `false` | not with `default` | The source can't run until a caller supplies a value. |
 | `default` | string | — | not with `required` | Used when no caller supplies one. |
 | `description` | string | — | — | One-line summary, shown by `wrangl --describe`. |
+| `segment` | bool | `false` | — | The value is one URL path segment: in a `url:` path it's fully escaped, `/` included (`a/b` → `a%2Fb`). Without it `/` is kept, so `owner/repo` spans two segments. An OpenAPI `in: path` parameter. |
 
 The form fields (`label`, `placeholder`, `options`, `mask`, `order`) are
 accepted too but only matter where a parameter is rendered as a form
@@ -559,8 +568,8 @@ walk: some APIs send them mid-walk.
 | `more_when` | expression | — | — | Evaluated over each raw response; when it's false, the walk stops. `has_more`, `"!isLast"`, `"page + 1 < nbPages"`. |
 | `stop_on_short_page` | bool | `false` | — | Stop on a page with fewer than `page_size` items (Discord). |
 | `patch` | map | — | not `link`; not with `body` | Merged into every request: into the query string, or into `json:` / `form:` when there's a body. Its `${paginate.cursor}`, `${paginate.offset}`, `${paginate.page}` and `${paginate.limit}` tokens are the walk's position. A value that is exactly one token keeps its type (an Elasticsearch `search_after` stays an array) and is left out while empty, so the first request carries no cursor. |
-| `max_pages` | int | `20` | — | Caps the walk. `0` or unset means the default of 20; there is no unlimited setting (one runaway API could exhaust memory), so set a larger number if you need more pages. |
-| `on_page_error` | string | `fail` | — | `fail` returns the error; `skip` returns the pages fetched so far. |
+| `max_pages` | int | `20` | — | Caps the walk. `0` or unset means the default of 20; there is no unlimited setting (one runaway API could exhaust memory), so set a larger number if you need more pages. A walk that stops here with more to come posts one notice: `stopped at max_pages (20) — 2000 of 3500 rows; raise paginate.max_pages or use window:`. |
+| `on_page_error` | string | `fail` | — | `fail` returns the error; `skip` returns the pages fetched so far, and posts a notice naming the failed page. |
 
 Unknown keys under `paginate:` are a load error, with the nearest field
 suggested. `cursor_param`, `offset_param`, `page_param` and
@@ -621,10 +630,12 @@ Supported on `http` (the request goes in the query string) and `exec`
 |---|---|---|---|---|
 | `page_size` | int | `100` | — | Rows per request. |
 | `prefetch` | int | `0` | — | Extra pages fetched beyond the screen. `1` hides the placeholder flash at page boundaries, for one extra request. |
-| `total_path` | [locator](#locators) | — | — | Where the total match count is: a dot-path into the raw response (before `root:`), or a header such as `header:X-Total-Count`. Without it the table can't size its scrollbar, and treats the end of what has loaded as the end. |
-| `filters` | map of string | — | — | Maps a column **title** to where a scoped `title:value` filter term goes: a query parameter on http, a `${window.filters.NAME}` token name on exec. Terms on unmapped columns are treated as bare terms. |
-| `offset_param` | string | — | required on http; not on exec | Query parameter for the first row wanted (`offset`, `_start`, `skip`). |
-| `limit_param` | string | — | required on http; not on exec | Query parameter for the page size (`limit`, `per_page`). |
+| `total_path` | [locator](#locators) | — | required, except with `cursor` | Where the total match count is: a dot-path into the raw response (before `root:`), or a header such as `header:X-Total-Count`. Without a total the table never scrolls past its first window, so it's required; a response that lacks it posts one notice. |
+| `filters` | map of string | — | — | Maps a column **title** to where a scoped `title:value` filter term goes: a query parameter on http, a `${window.filters.NAME}` token name on exec. Terms on unmapped columns are treated as bare terms. Without `search_param` (or `${window.search}` on exec), bare terms aren't sent: the table says so and its placeholder shows the column syntax. |
+| `offset_param` | string | — | http: this or `page_param`; not on exec | Query parameter for the first row wanted (`offset`, `_start`, `skip`). |
+| `page_param` | string | — | http: this or `offset_param`; not on exec | Query parameter for a page number, for APIs that page by number (`?page=3&per_page=50`). A window that spans several pages is fetched a page at a time, in order, and trimmed. |
+| `page_start` | int | `1` | with `page_param` | The first page's number; `0` for zero-based APIs. |
+| `limit_param` | string | — | required on http; not on exec | Query parameter for the page size (`limit`, `per_page`). With `page_param` it always carries `page_size`, which must not exceed the API's maximum: a server that caps it posts a notice. |
 | `search_param` | string | — | http only | Query parameter for bare filter terms, joined with spaces. |
 | `sort_param` | string | — | http only | Query parameter for the sort field. |
 | `sorts` | map of string | — | http only; needs `sort_param` | Maps a column title to the sort field the API expects. Unlisted columns send their title. |
@@ -647,7 +658,7 @@ On exec, `command:` uses these tokens instead of the `*_param` fields:
 | `${window.search}` | Bare filter terms joined with spaces; empty when none. |
 | `${window.filters.NAME}` | A scoped term's value, where `NAME` is what `filters:` maps the column to. |
 | `${window.sort}` | The sort column's title; the command maps it itself. |
-| `${window.sort_dir}` | `asc` or `desc`; empty when unsorted. |
+| `${window.sort_dir}` | `asc` or `desc`; empty when unsorted. A sortable column needs `command:` to reference both this and `${window.sort}`. |
 | `${window.cursor}` | Anchored only: the edge item's cursor; empty on the first request. |
 | `${window.dir}` | Anchored only: `older` or `newer`. |
 
@@ -818,15 +829,22 @@ data:
   everything). `growing:` is eventlog-only, can't be combined with
   `refresh:`, and its `source:` must exist and its `while:` compile;
   `follow_every` needs `growing`.
-- http: `offset_param` and `limit_param` are required, and at least one
-  of `search_param` / `filters` (otherwise the filter bar has nowhere to
-  send input). An Anchored http window can instead carry the filter as
-  `${window.search}` in `body:`, `older:` or `newer:`. `sorts` and `sort_desc_prefix` need `sort_param`.
+- A seekable window (no `cursor:`) needs `total_path`.
+- http: `limit_param` and exactly one of `offset_param` / `page_param`
+  are required; `page_start` needs `page_param` and is not negative. `sorts` and
+  `sort_desc_prefix` need `sort_param`.
 - exec: the http-only fields are errors. `command:` must reference
-  `${window.offset}`, `${window.limit}` and at least one filter token;
-  every `filters:` entry must be referenced; `command[0]` can't use a
-  window token.
-- A `sortable` column on the bound table needs `sort_param` (http).
+  `${window.offset}` and `${window.limit}`; every `filters:` entry must
+  be referenced; `command[0]` can't use a window token.
+- A `filterable: true` table needs somewhere to send the filter: at
+  least one of `search_param` / `filters` on http, or `${window.search}`
+  / a declared filter token on exec. An Anchored http window can carry
+  it as `${window.search}` in `body:`, `older:` or `newer:`. A table
+  without `filterable` needs none, which is how to window an API that
+  can't filter.
+- A `sortable` column on the bound table needs `sort_param` (http), or
+  a `command:` that references both `${window.sort}` and
+  `${window.sort_dir}` (exec).
 - `page_size` and `prefetch` are not negative.
 - With `cursor:`: http needs both `older:` and `newer:`, which are
   http-only; exec must reference `${window.cursor}`, `${window.dir}` and

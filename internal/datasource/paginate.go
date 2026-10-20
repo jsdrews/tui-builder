@@ -12,6 +12,7 @@ package datasource
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	neturl "net/url"
 	"reflect"
@@ -44,6 +45,24 @@ type walkPos struct {
 // Response-level values (next_path, cursor_path, total_path, more_when)
 // read the raw response, before root:.
 func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
+	acc, cut, err := s.walkPages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// A walk cut short is said once, not on every refresh; a complete
+	// one clears it, so the next cut is said again.
+	if cut != "" {
+		s.notices.post("walk", s.label()+": "+cut)
+	} else {
+		s.notices.clear("walk")
+	}
+	return acc, nil
+}
+
+// walkPages does the walk. cut says why it stopped short of the end —
+// max_pages with more to come, or a page skipped on error — and is ""
+// when the walk ran to its stop signal.
+func (s *httpSource) walkPages(ctx context.Context) ([]any, string, error) {
 	p := s.paginate
 	max := p.MaxPages
 	if max == 0 {
@@ -54,7 +73,7 @@ func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
 	if p.MoreWhen != "" {
 		var err error
 		if more, err = expr.Compile(p.MoreWhen); err != nil {
-			return nil, fmt.Errorf("paginate.more_when: %w", err)
+			return nil, "", fmt.Errorf("paginate.more_when: %w", err)
 		}
 	}
 	pos := walkPos{limit: s.walkPageSize(), page: 1}
@@ -64,6 +83,7 @@ func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
 
 	var acc, prevItems []any
 	var prevNext string
+	lastLen, total := 0, -1
 	// A link walk's first page is the configured request; later ones
 	// follow the next URL exactly as the server sent it, without
 	// re-applying query:.
@@ -73,7 +93,7 @@ func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
 		if p.Strategy != "link" {
 			var err error
 			if url, body, err = s.pageRequest(pos); err != nil {
-				return nil, err
+				return nil, "", err
 			}
 		}
 		r, err := s.send(ctx, url, body)
@@ -85,9 +105,18 @@ func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
 			if skipOnErr && n > 0 {
 				// Return what we have; the caller sees a partial result
 				// rather than losing every page we already succeeded on.
-				return acc, nil
+				why := err.Error()
+				var he *HTTPError
+				if errors.As(err, &he) {
+					why = fmt.Sprintf("HTTP %d", he.Status)
+				}
+				kept := fmt.Sprintf("the first %d pages", n)
+				if n == 1 {
+					kept = "the first page"
+				}
+				return acc, fmt.Sprintf("page %d failed (%s) — kept %s (%d rows)", n+1, why, kept, len(acc)), nil
 			}
-			return nil, fmt.Errorf("page %d: %w", n+1, err)
+			return nil, "", fmt.Errorf("page %d: %w", n+1, err)
 		}
 		// Non-array pages pass through as one element — matches the
 		// non-paginated Fetch's behaviour on single-object responses.
@@ -98,23 +127,24 @@ func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
 		if p.Strategy == "offset" || p.Strategy == "page" {
 			if len(items) > 0 && reflect.DeepEqual(items, prevItems) {
 				notify("%s: page %d repeated page %d — stopped the walk there", s.label(), n+1, n)
-				return acc, nil
+				return acc, "", nil
 			}
 			prevItems = items
 		}
 		acc = append(acc, items...)
+		lastLen = len(items)
 
 		if more != nil {
 			ok, err := expr.EvalBool(more, parsed)
 			if err != nil {
-				return nil, fmt.Errorf("page %d: more_when: %w", n+1, err)
+				return nil, "", fmt.Errorf("page %d: more_when: %w", n+1, err)
 			}
 			if !ok {
-				return acc, nil
+				return acc, "", nil
 			}
 		}
 		if p.StopOnShortPage && len(items) < pos.limit {
-			return acc, nil
+			return acc, "", nil
 		}
 
 		switch p.Strategy {
@@ -124,12 +154,12 @@ func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
 			// URL resolves against the page that sent it.
 			nextURL, ok := s.locate(p.NextPath, parsed, r, items).(string)
 			if !ok || nextURL == "" {
-				return acc, nil
+				return acc, "", nil
 			}
 			next = resolveRef(r.url, nextURL)
 			if next == prevNext {
 				notify("%s: page %d named the same next URL as page %d — stopped the walk there", s.label(), n+1, n)
-				return acc, nil
+				return acc, "", nil
 			}
 			prevNext = next
 		case "cursor":
@@ -137,29 +167,41 @@ func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
 			// DynamoDB and Slack send them mid-walk); the cursor does.
 			c := s.locate(p.CursorPath, parsed, r, items)
 			if !present(c) {
-				return acc, nil
+				return acc, "", nil
 			}
 			if reflect.DeepEqual(c, pos.cursor) {
 				notify("%s: page %d gave the same cursor as page %d — stopped the walk there", s.label(), n+1, n)
-				return acc, nil
+				return acc, "", nil
 			}
 			pos.cursor = c
 		case "offset", "page":
 			if len(items) == 0 {
-				return acc, nil
+				return acc, "", nil
 			}
 			if p.TotalPath != "" {
-				if total, ok := toInt(s.locate(p.TotalPath, parsed, r, items)); ok && len(acc) >= total {
-					return acc, nil
+				if t, ok := toInt(s.locate(p.TotalPath, parsed, r, items)); ok {
+					if total = t; len(acc) >= total {
+						return acc, "", nil
+					}
 				}
 			}
 			pos.offset += len(items)
 			pos.page++
 		}
 	}
-	// Hit max_pages with more pages potentially available. Return what
-	// we have; the cap is a safety measure, not an error.
-	return acc, nil
+	// Hit max_pages. Every stop check ran on the last page, so more
+	// remains — unless an offset / page walk with no total ended on a
+	// short page, which is probably the end. The cap is a safety
+	// measure, not an error.
+	numbered := p.Strategy == "offset" || p.Strategy == "page"
+	if numbered && p.TotalPath == "" && lastLen < pos.limit {
+		return acc, "", nil
+	}
+	hint := "raise paginate.max_pages or use window:"
+	if total >= 0 {
+		return acc, fmt.Sprintf("stopped at max_pages (%d) — %d of %d rows; %s", max, len(acc), total, hint), nil
+	}
+	return acc, fmt.Sprintf("stopped at max_pages (%d) — %d rows, more remain; %s", max, len(acc), hint), nil
 }
 
 // walkPageSize is the walk's limit: page_size, or the window default.

@@ -8,7 +8,7 @@ import (
 func windowedTableConfig(debounce string, windowed bool) *Config {
 	src := &Source{Type: "http", URL: "http://example/books"}
 	if windowed {
-		src.Window = &WindowConfig{OffsetParam: "offset", LimitParam: "limit", SearchParam: "q"}
+		src.Window = &WindowConfig{OffsetParam: "offset", LimitParam: "limit", SearchParam: "q", TotalPath: "total"}
 	}
 	return &Config{
 		Data: DataBlock{Sources: map[string]*Source{"books": src}},

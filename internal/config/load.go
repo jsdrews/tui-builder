@@ -48,6 +48,9 @@ func Load(path string) (*Config, error) {
 	if err := hoistInlineActions(&c); err != nil {
 		return nil, fmt.Errorf("expand %s: %w", path, err)
 	}
+	if err := resolveActionPresets(&c); err != nil {
+		return nil, fmt.Errorf("validate %s: %w", path, err)
+	}
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("validate %s: %w", path, err)
 	}
@@ -56,6 +59,11 @@ func Load(path string) (*Config, error) {
 	for _, s := range c.Data.Sources {
 		if s != nil && s.Auth != nil {
 			s.Auth.captureTemplates()
+		}
+	}
+	for _, a := range c.Actions {
+		if a != nil && a.Auth != nil {
+			a.Auth.captureTemplates()
 		}
 	}
 	// Env-var check runs after Validate so schema errors surface
@@ -771,6 +779,9 @@ func (c *Component) validate(path string) error {
 	if c.Type == "tree" && c.Root == nil && c.Source == "" {
 		return fmt.Errorf("%s: tree needs root", path)
 	}
+	if err := c.validateRulePaths(path); err != nil {
+		return err
+	}
 	if c.Auto {
 		if c.Type != "inspector" {
 			return fmt.Errorf("%s: `auto: true` is only valid on inspector components (got %q)", path, c.Type)
@@ -843,6 +854,8 @@ func (col *Column) validateMetric(path, source string) error {
 		return fmt.Errorf("%s: not with `color_rules:` — the metric colors the cell itself", mp)
 	case col.Sortable:
 		return fmt.Errorf("%s: not with `sortable: true` — drawn glyphs don't sort meaningfully", mp)
+	case col.Bold:
+		return fmt.Errorf("%s: not with `bold: true` — drawn glyphs don't take text styles", mp)
 	}
 	return nil
 }
@@ -871,6 +884,43 @@ func validateFieldMetrics(fields []InspectorField, path, source string) error {
 		}
 	}
 	return nil
+}
+
+// validateRulePaths allows a color rule's `path:` only on an `auto:
+// true` inspector's own rules: columns and declared fields already say
+// where they apply.
+func (c *Component) validateRulePaths(path string) error {
+	const msg = "%s.color_rules[%d].path: only applies on an auto: true inspector — columns and fields already say where"
+	if !(c.Type == "inspector" && c.Auto) {
+		for j, r := range c.ColorRules {
+			if r.Path != "" {
+				return fmt.Errorf(msg, path, j)
+			}
+		}
+	}
+	for i, col := range c.Columns {
+		for j, r := range col.ColorRules {
+			if r.Path != "" {
+				return fmt.Errorf(msg, fmt.Sprintf("%s.columns[%d]", path, i), j)
+			}
+		}
+	}
+	var fields func(fs []InspectorField, p string) error
+	fields = func(fs []InspectorField, p string) error {
+		for i, f := range fs {
+			fp := fmt.Sprintf("%s.fields[%d]", p, i)
+			for j, r := range f.ColorRules {
+				if r.Path != "" {
+					return fmt.Errorf(msg, fp, j)
+				}
+			}
+			if err := fields(f.Children, fp); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return fields(c.Fields, path)
 }
 
 // validateKindOptions rejects options set on a kind that would ignore
@@ -1085,13 +1135,22 @@ func bindWindowed(name string, comp *Component, ref string, entry *Source) error
 		return fmt.Errorf("tui.components.%s: source %q declares `window.growing:`, which only an eventlog can follow", name, ref)
 	}
 	// Sorting is answered by the server under a window, so a sortable
-	// column with no `sort_param:` is a control that can't do anything.
-	if entry.Window.SortParam == "" {
+	// column the source can't carry is a control that can't do anything.
+	if ok, why := entry.windowSorts(); !ok {
 		for i, col := range comp.Columns {
 			if col.Sortable {
-				return fmt.Errorf("tui.components.%s: columns[%d] (%q) is sortable but source %q declares no `window.sort_param:` — a windowed table sorts remotely, so there's nowhere to send the request", name, i, col.Title, ref)
+				return fmt.Errorf("tui.components.%s: columns[%d] (%q) is sortable but source %q%s", name, i, col.Title, ref, why)
 			}
 		}
+	}
+	// A filterable windowed table filters remotely, so the filter needs
+	// somewhere to land. A table without a filter bar needs nothing.
+	if comp.Filterable && !entry.WindowSearches() && len(entry.Window.Filters) == 0 {
+		return fmt.Errorf("tui.components.%s: filterable: true, but source %q gives the filter nowhere to go — set window.search_param or window.filters (exec: reference ${window.search}), or drop filterable", name, ref)
+	}
+	// With only column filters, a bare term goes nowhere; say what does.
+	if comp.Filterable && comp.FilterPlaceholder == "" && !entry.WindowSearches() {
+		comp.FilterPlaceholder = ScopedFilterSyntax(entry.Window.Filters, " ")
 	}
 	comp.Windowed = true
 	return nil

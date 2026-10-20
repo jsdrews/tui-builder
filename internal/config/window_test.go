@@ -94,6 +94,25 @@ func TestWindowNeedsSomewhereToSendAFilter(t *testing.T) {
 	if !strings.Contains(err.Error(), "search_param") {
 		t.Errorf("error %q should point at search_param", err)
 	}
+
+	// A table without a filter bar needs nowhere to send one: an API
+	// with no server-side filter is a window bound to such a table.
+	c.TUI.Components["books"].Filterable = false
+	if err := c.Validate(); err != nil {
+		t.Errorf("Validate failed for a table with no filter bar: %v", err)
+	}
+}
+
+// Without a total the table never asks past its first window, so a
+// seekable window must say where the total is.
+func TestWindowRequiresTotal(t *testing.T) {
+	for name, c := range map[string]*Config{"http": windowedConfig(), "exec": execWindowedConfig()} {
+		c.Data.Sources["books"].Window.TotalPath = ""
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), "window.total_path: required") {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
 }
 
 func TestWindowRejectsNonTableBinding(t *testing.T) {
@@ -286,6 +305,24 @@ func TestExecWindowRequiresPagingTokens(t *testing.T) {
 	}
 }
 
+// An exec window sorts when its command carries the sort column and its
+// direction; with only the column, descending would sort as ascending.
+func TestExecWindowSortTokens(t *testing.T) {
+	for _, tc := range []struct{ tokens, wantErr string }{
+		{"", "never references ${window.sort}"},
+		{" --sort=${window.sort}", "but not ${window.sort_dir}"},
+		{" --sort=${window.sort} --dir=${window.sort_dir}", ""},
+	} {
+		c := execWindowedConfig()
+		c.Data.Sources["books"].Command[2] += tc.tokens
+		c.TUI.Components["books"].Columns[0].Sortable = true
+		err := c.Validate()
+		if tc.wantErr == "" && err != nil || tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+			t.Errorf("%q: err = %v, want %q", tc.tokens, err, tc.wantErr)
+		}
+	}
+}
+
 func TestExecWindowRequiresSomewhereToSendAFilter(t *testing.T) {
 	c := execWindowedConfig()
 	c.Data.Sources["books"].Command[2] = "q --offset=${window.offset} --limit=${window.limit}"
@@ -326,5 +363,46 @@ func TestExecWindowMutuallyExclusiveWithFollow(t *testing.T) {
 	c.Data.Sources["books"].Follow = true
 	if err := c.Validate(); err == nil {
 		t.Fatal("Validate accepted window: with follow: true on exec")
+	}
+}
+
+// With only column filters, the placeholder shows the syntax that works.
+func TestWindowFiltersOnlyDefaultsThePlaceholder(t *testing.T) {
+	c := windowedConfig()
+	c.Data.Sources["books"].Window.SearchParam = ""
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.TUI.Components["books"].FilterPlaceholder; got != "author:…" {
+		t.Errorf("placeholder = %q", got)
+	}
+	c = windowedConfig()
+	c.Data.Sources["books"].Window.SearchParam = ""
+	c.TUI.Components["books"].FilterPlaceholder = "mine"
+	if c.Validate(); c.TUI.Components["books"].FilterPlaceholder != "mine" {
+		t.Error("explicit filter_placeholder was replaced")
+	}
+}
+
+func TestWindowPageParam(t *testing.T) {
+	one := 1
+	neg := -1
+	for _, tc := range []struct {
+		name    string
+		mutate  func(w *WindowConfig)
+		wantErr string
+	}{
+		{"page instead of offset", func(w *WindowConfig) { w.OffsetParam, w.PageParam, w.PageStart = "", "page", &one }, ""},
+		{"both", func(w *WindowConfig) { w.PageParam = "page" }, "offset_param and page_param are mutually exclusive"},
+		{"neither", func(w *WindowConfig) { w.OffsetParam = "" }, "set offset_param (row offsets) or page_param (page numbers)"},
+		{"page_start alone", func(w *WindowConfig) { w.PageStart = &one }, "page_start: only with page_param"},
+		{"negative page_start", func(w *WindowConfig) { w.OffsetParam, w.PageParam, w.PageStart = "", "page", &neg }, "page_start: must be >= 0"},
+	} {
+		c := windowedConfig()
+		tc.mutate(c.Data.Sources["books"].Window)
+		err := c.Validate()
+		if tc.wantErr == "" && err != nil || tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+			t.Errorf("%s: err = %v, want %q", tc.name, err, tc.wantErr)
+		}
 	}
 }

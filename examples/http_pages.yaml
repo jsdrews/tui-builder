@@ -1,0 +1,174 @@
+# http_pages.yaml — a page-numbered API: lazy paging, writes, tabs.
+#
+# JSONPlaceholder is a fake REST API: `GET /posts?_page=N&_limit=M`
+# pages by number and reports the total in an `X-Total-Count` header,
+# `?userId=` filters, and POST / PATCH / DELETE answer as if they had
+# worked (nothing is stored). It's the shape a lot of generated configs
+# target: page numbers rather than row offsets, field filters but no
+# free-text search, bearer-style writes with JSON bodies.
+#
+# What it shows:
+#
+#   preset        one `placeholder` preset with the base url, extended
+#                 by every source AND every action
+#   page_param    a window addressed by page number; a window that spans
+#                 two pages is fetched as two requests, joined and trimmed
+#   filters only  no search_param: `user:3` filters, a bare term isn't
+#                 sent (the table says so), and the filter placeholder
+#                 shows the syntax that works
+#   json:         an edit that sends only the fields you filled in
+#   segment       an id that stays one path segment, `/` and all
+#   bold          a bold column
+#   auto + rules  an auto inspector colored by field path
+#   tabs          the Users tab polls every 30s, but only while shown
+#
+# What to try once it's up:
+#
+#   /  user:3  enter      filter by user (?userId=3)
+#   /  hello   enter      a bare term: "hello" not sent — this table
+#                         filters only by column: user:…
+#   G                     jump to the end; the pages fill in as you go
+#   e                     edit the focused post's title (PATCH, json:)
+#   d                     delete it (DELETE; the API pretends)
+#   shift+right           the Users tab; switch away and back and it
+#                         refetches only if a poll came due meanwhile
+#
+# Headless check (the first window, as JSON):
+#
+#   task wrangl -- examples/http_pages.yaml posts | jq 'length'
+
+app:
+  title: JSONPlaceholder
+
+data:
+  presets:
+    # Document-level settings, as an OpenAPI `servers:` entry would give
+    # them. A real API's `securitySchemes` would add
+    # `auth: {bearer: "${env.API_TOKEN}"}` here, and every source and
+    # action below would send it — and mask it in what they report.
+    placeholder:
+      type: http
+      url: https://jsonplaceholder.typicode.com
+      timeout: 15s
+
+  sources:
+    posts:
+      extends: placeholder
+      url: /posts                    # → https://jsonplaceholder.typicode.com/posts
+      window:
+        # Page numbers, not row offsets: ?_page=3&_limit=20. Pages count
+        # from 1 (`page_start: 0` for a zero-based API).
+        page_param: _page
+        limit_param: _limit
+        # _limit always carries page_size. It mustn't exceed what the
+        # API allows per page: a server that caps it posts a notice.
+        page_size: 20
+        # Required on a seekable window: without a total the table
+        # would never scroll past its first window.
+        total_path: header:X-Total-Count
+        # Field filters only — this API has no free-text search. A table
+        # without `filterable: true` would need neither.
+        filters:
+          User: userId
+
+    post:
+      extends: placeholder
+      parameters:
+        # `segment: true`: the value is one path segment, so an id with
+        # a "/" in it can't reach another endpoint (OpenAPI `in: path`).
+        id: {type: int, required: true, segment: true}
+      url: /posts/${params.id}
+
+    users:
+      extends: placeholder
+      url: /users
+      # Polls every 30s while its tab is shown. A hidden tab (or a
+      # screen under a push) skips the polls and refetches when it's
+      # shown again; `poll_hidden: true` would keep it polling anyway.
+      refresh: 30s
+
+actions:
+  edit_title:
+    description: Change a post's title
+    extends: placeholder             # url, headers, query, auth, timeout
+    method: PATCH
+    url: /posts/${inputs.id}
+    inputs:
+      id:    {type: int, required: true, segment: true}
+      title: {label: "New title", required: true}
+      # Left blank in the form, it's left out of the body.
+      body:  {label: "New body (blank keeps it)"}
+    # Templated before encoding, so quotes in a title can't break it.
+    json:
+      title: ${inputs.title}
+      body: ${inputs.body}
+    message: 'retitled post ${inputs.id}: "${body.title}"'
+
+  delete_post:
+    description: Delete a post
+    extends: placeholder
+    method: DELETE
+    url: /posts/${inputs.id}
+    inputs:
+      id: {type: int, required: true, segment: true}
+    message: "deleted post ${inputs.id} (pretend)"
+
+tui:
+  components:
+    posts_table:
+      type: table
+      title: Posts
+      source: posts
+      filterable: true               # placeholder defaults to "user:…"
+      columns:
+        - {title: ID,    width: 5,  value: id, align: right}
+        - {title: User,  width: 6,  value: userId, align: right}
+        - {title: Title, flex: 1,   value: title, bold: true}
+
+    post_detail:
+      type: inspector
+      title: Post ${cursor.ID}
+      source: post
+      auto: true
+      on_cursor:
+        source: posts_table
+        bind: {id: "${cursor.ID}"}
+      # On an auto inspector, a rule's `path:` says which fields it
+      # colors; `*` matches any one key or index.
+      color_rules:
+        - {path: userId, color: cyan}
+        - {path: title, when: "~^qui", color: yellow}
+
+    users_table:
+      type: table
+      title: Users
+      source: users
+      filterable: true
+      columns:
+        - {title: Name,    flex: 1,   value: name, bold: true}
+        - {title: Email,   width: 28, value: email}
+        - {title: Company, width: 22, value: company.name}
+
+  screen:
+    title: JSONPlaceholder
+    tabs:
+      - label: Posts
+        layout:
+          vstack:
+            - {flex: 2, component: posts_table}
+            - {flex: 1, component: post_detail}
+        actions:
+          - key: e
+            action: edit_title
+            label: edit title
+            from: posts_table
+            bind: {id: "${selection.ID}"}
+          - key: d
+            action: delete_post
+            label: delete
+            from: posts_table
+            confirm: "Delete post ${selection.ID}?"
+            bind: {id: "${selection.ID}"}
+      - label: Users
+        layout:
+          component: users_table

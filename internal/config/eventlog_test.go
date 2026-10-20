@@ -11,7 +11,7 @@ func eventlogConfig(mutate func(*Config)) *Config {
 	c := &Config{
 		Data: DataBlock{Sources: map[string]*Source{
 			"events": {Type: "http", URL: "http://example/events",
-				Window: &WindowConfig{OffsetParam: "offset", LimitParam: "limit", SearchParam: "q"}},
+				Window: &WindowConfig{OffsetParam: "offset", LimitParam: "limit", SearchParam: "q", TotalPath: "total"}},
 			"job": {Type: "http", URL: "http://example/job"},
 		}},
 		TUI: TUIBlock{

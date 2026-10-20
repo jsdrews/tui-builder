@@ -154,6 +154,14 @@ func (a *AuthSpec) visit(fn func(field string, v *string)) {
 	}
 }
 
+// Rewrite returns a copy of the spec with fn applied to every templated
+// field: an http action resolves its inputs into it at run time.
+func (a *AuthSpec) Rewrite(fn func(string) string) *AuthSpec {
+	out := a.Clone()
+	out.visit(func(_ string, v *string) { *v = fn(*v) })
+	return out
+}
+
 // Clone deep-copies the spec.
 func (a *AuthSpec) Clone() *AuthSpec {
 	if a == nil {

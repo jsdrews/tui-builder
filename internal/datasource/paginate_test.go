@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
@@ -225,5 +226,62 @@ func TestRenderWalkPatchTypes(t *testing.T) {
 	want := map[string]any{"search_after": []any{float64(5), "x"}, "from": 30, "label": "p4"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %#v", got)
+	}
+}
+
+// A walk stopped at max_pages says so once, with the total when known;
+// a short last page with no total is probably the end and says nothing.
+func TestPaginateMaxPagesNotice(t *testing.T) {
+	notices := captureNotices(t)
+	serve := func(total int, header bool) *pagesServer {
+		ps := newPages(t, nil)
+		ps.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+			if header {
+				w.Header().Set("X-Total-Count", strconv.Itoa(total))
+			}
+			io.WriteString(w, ids((page-1)*3, min(page*3, total)))
+		})
+		return ps
+	}
+	src := func(url, totalPath string) *cfg.Source {
+		return &cfg.Source{Type: "http", URL: url, Paginate: &cfg.PaginateConfig{
+			Strategy: "page", PageParam: "page", PageSize: 3, MaxPages: 2, TotalPath: totalPath,
+		}}
+	}
+	withTotal := src(serve(10, true).srv.URL, "header:X-Total-Count")
+	s, _ := newHTTP(withTotal)
+	for range 2 {
+		s.Fetch(t.Context())
+	}
+	if len(*notices) != 1 || !strings.HasSuffix((*notices)[0], "stopped at max_pages (2) — 6 of 10 rows; raise paginate.max_pages or use window:") {
+		t.Fatalf("notices = %q", *notices)
+	}
+	walk(t, src(serve(10, false).srv.URL, ""))
+	if len(*notices) != 2 || !strings.Contains((*notices)[1], "6 rows, more remain") {
+		t.Fatalf("notices = %q", *notices)
+	}
+	walk(t, src(serve(5, false).srv.URL, ""))
+	if len(*notices) != 2 {
+		t.Errorf("a short last page posted %q", (*notices)[2:])
+	}
+}
+
+// on_page_error: skip keeps what it has, and says what it dropped.
+func TestPaginateSkipNotice(t *testing.T) {
+	notices := captureNotices(t)
+	ps := newPages(t, nil)
+	ps.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "2" {
+			w.WriteHeader(500)
+			return
+		}
+		io.WriteString(w, ids(0, 3))
+	})
+	got := walk(t, &cfg.Source{Type: "http", URL: ps.srv.URL, Paginate: &cfg.PaginateConfig{
+		Strategy: "page", PageParam: "page", PageSize: 3, OnPageError: "skip",
+	}})
+	if len(got) != 3 || len(*notices) != 1 || !strings.HasSuffix((*notices)[0], "page 2 failed (HTTP 500) — kept the first page (3 rows)") {
+		t.Errorf("got %v, notices %q", got, *notices)
 	}
 }

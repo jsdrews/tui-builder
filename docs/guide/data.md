@@ -244,8 +244,25 @@ books:
     filters: {Author: author}
 ```
 
+An API that pages by number (`?page=3&per_page=50`) uses `page_param:`
+in place of `offset_param:`.
+
 `window:` works with `exec` too, with the request templated into the
 argv. See [Reference → `window`](../reference/sources.md#window).
+
+**Which to use:** sort and filter run where all the rows are.
+
+| | `paginate:` | `window:` |
+|---|---|---|
+| Rows held | every row, up to `max_pages` | the slice on screen |
+| Sort and filter | the table's, over everything it holds; the API needs neither | the server's: a column is sortable only if the API sorts, and `/` only filters if the API filters |
+| Size | up to a few thousand rows | any |
+| Needs | a way to the next page | a total in the response |
+
+A small list from an API with no sort or filter parameters is a
+`paginate:` source: the table sorts and filters it fully. A large one
+is a `window:` bound to a table without `filterable:` or sortable
+columns — it scrolls lazily, and that's all the API allows.
 
 ### Walking from an edge
 

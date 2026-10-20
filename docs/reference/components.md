@@ -26,7 +26,7 @@ These apply to every kind unless the column says otherwise.
 | `title` | template | — | — | Shown on the pane border. |
 | `source` | string | — | — | The `data.sources` entry that populates this component. When set, static content (`items`, `rows`, `lines`, `content`, `root`, `fields` values) is ignored. |
 | `colors` | map | — | — | Per-component color overrides. See [`colors`](#colors). |
-| `color_rules` | list | — | list, logview, eventlog | Colors each item or line by its value. Tables put rules on each column and inspectors on each field. See [color rules](#color-rules). |
+| `color_rules` | list | — | list, logview, eventlog, auto inspector (with `path:`) | Colors each item or line by its value; on an `auto: true` inspector, each leaf value, scoped by the rule's `path:`. Tables put rules on each column and declared inspectors on each field. See [color rules](#color-rules). |
 | `filterable` | bool | `false` | list, table, inspector, eventlog | `/` opens a filter that narrows the rows (`f` on an eventlog, where `/` is search). |
 | `searchable` | bool | `false` | logview, textview, tree, eventlog | `/` opens a search that highlights matches; `n` / `N` move between them. |
 | `filter_placeholder` | template | — | any filterable or searchable kind | Hint shown inside the empty filter or search input. |
@@ -131,7 +131,8 @@ rejects `sortable` columns, `initial_sort` and `sort_debounce`;
 | `hidden` | bool | `false` | — | Not drawn, but still in the row: it matches filters and resolves in `${selection.*}` / `${cursor.*}`. For identity columns a drilldown needs. |
 | `distinct` | list or map | — | windowed tables | The values this column's filter suggests and completes, which otherwise come only from the page that's loaded. A list (`[Running, Pending, Failed]`), or `{source: NAME}` for a source that returns a list of strings; it's fetched and polled alongside the table. The source can't be windowed. |
 | `color_rules` | list | — | — | Colors each cell by its value. See [color rules](#color-rules). |
-| `metric` | map | — | source-bound tables; not with `value`, `color_rules` or `sortable` | Draws the cell as a badge, ratio, progress bar or sparkline. See [metrics](#metrics). |
+| `bold` | bool | `false` | not with `metric` | Cells render bold; combines with `color_rules`, and the selected-row background passes through. The header keeps the theme's style. |
+| `metric` | map | — | source-bound tables; not with `value`, `color_rules`, `sortable` or `bold` | Draws the cell as a badge, ratio, progress bar or sparkline. See [metrics](#metrics). |
 
 ```yaml
 pods_table:
@@ -454,6 +455,7 @@ selected-row background passes through.
 |---|---|---|---|---|
 | `when` | string | — (always matches) | — | Exact text (case-insensitive), `~regex` (case-insensitive), or a numeric comparison: `> 5`, `<= 10`, `== 0`, `!= 0`, with an optional K/M/B/G/T suffix on the number. Empty matches everything, which makes a final default rule. |
 | `color` | color | — | required | See [color values](templating.md#color-values). |
+| `path` | string | — (every leaf) | an `auto: true` inspector's own `color_rules` | The fields the rule applies to: a dot-path from the record root (`status`, `spec.replicas`, `items.0.state`), where `*` matches any one key or index (`items.*.state`). Only leaf values are colored. |
 
 A `theme:` color in a rule is re-rendered when the theme cycles. On a
 windowed table or an eventlog, rows already loaded keep their colors

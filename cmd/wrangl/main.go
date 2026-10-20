@@ -378,6 +378,9 @@ func describeLeaf(w *os.File, name string, s *cfg.Source, extendedBy []string) {
 		}
 		fmt.Fprintf(w, "  Paginate:   %s (max %d pages)%s\n", p.Strategy, max, from("paginate"))
 	}
+	if win := s.Window; win != nil {
+		fmt.Fprintf(w, "  Window:     %s%s\n", windowKind(win), from("window"))
+	}
 	if preset {
 		by := strings.Join(extendedBy, ", ")
 		if by == "" {
@@ -472,6 +475,22 @@ func paramMode(p *cfg.Parameter) string {
 		return "default: " + strconv.Quote(p.Default)
 	}
 	return "optional"
+}
+
+// windowKind names how a window addresses rows: by cursor, by page
+// number, or by row offset.
+func windowKind(w *cfg.WindowConfig) string {
+	switch {
+	case w.Cursor != "":
+		return "anchored (cursor " + w.Cursor + ")"
+	case w.PageParam != "":
+		start := 1
+		if w.PageStart != nil {
+			start = *w.PageStart
+		}
+		return fmt.Sprintf("page (%s, from %d)", w.PageParam, start)
+	}
+	return "offset (" + w.OffsetParam + ")"
 }
 
 // inferLifecycle returns a one-line classification combining two

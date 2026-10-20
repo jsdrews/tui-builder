@@ -46,6 +46,12 @@ tui:
       initial_depth: 1     # show top-level keys, hide their subtrees until expanded
       source: repo
       auto: true           # walk the response; no `fields:` needed
+      # Rules on an auto inspector say which fields they color by
+      # `path:` from the record root; `*` matches any one key or index.
+      color_rules:
+        - {path: archived, when: "true", color: red}
+        - {path: license.spdx_id, color: cyan}
+        - {path: stargazers_count, when: ">= 10K", color: green}
 
   screen:
     title: Repo (auto)

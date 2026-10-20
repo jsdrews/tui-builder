@@ -59,7 +59,7 @@ func TestActivityValidation(t *testing.T) {
 		}, "only a table, list or tree"},
 		{"streaming source", func(c *Config) { c.Data.Sources["pods"].Follow = true; c.Data.Sources["pods"].Refresh = "" }, "not available on a streaming source"},
 		{"windowed source", func(c *Config) {
-			c.Data.Sources["pods"].Window = &WindowConfig{OffsetParam: "o", LimitParam: "l", SearchParam: "q"}
+			c.Data.Sources["pods"].Window = &WindowConfig{OffsetParam: "o", LimitParam: "l", SearchParam: "q", TotalPath: "total"}
 			c.Data.Sources["pods"].Refresh = ""
 		}, "not available on a windowed source"},
 		{"mark_key without markable is fine with activity", func(c *Config) { c.TUI.Components["pods"].Markable = false }, ""},

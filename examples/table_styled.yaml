@@ -20,7 +20,7 @@ tui:
       initial_sort: {column: When, desc: true}
       columns:
         - {title: ID,     width: 6,  sortable: true, sort: number, align: right}
-        - {title: Job,    width: 22, sortable: true}
+        - {title: Job,    width: 22, sortable: true, bold: true}
         - {title: Status, width: 12, sortable: true, align: center}
         - {title: When,   width: 12, sortable: true, sort: si, align: right}
         - {title: Link,   width: 14}

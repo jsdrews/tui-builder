@@ -241,7 +241,9 @@ data:
       url: /repos/${params.repo}/issues     # appended to the preset's url
 ```
 
-See [`docs/reference/sources.md`](docs/reference/sources.md#presets).
+http actions can `extends:` the same preset, so a write takes the same
+base URL and auth as the reads beside it. See
+[`docs/reference/sources.md`](docs/reference/sources.md#presets).
 
 ### Paging a remote API
 
@@ -266,7 +268,16 @@ paints the rest as `·` until you scroll there. Typing `author:tolkien`
 searches every row the server has, not the hundred that happen to be
 resident — which is the part `paginate:` can't do at any page count.
 Binding a table to a windowed source is what switches it into that mode;
-there's no second flag.
+there's no second flag. An API that pages by number uses
+`page_param: page` in place of `offset_param:`; an API with no server
+filter is windowed under a table without `filterable:`. Either way the
+response must carry a total.
+
+The rule of thumb: sort and filter run where all the rows are. Under a
+few thousand rows, `paginate:` holds them all and the table sorts and
+filters locally, whatever the API supports (a walk cut short at
+`max_pages` says so). Past that, `window:`, and the API's own sort and
+filter are all there is.
 
 `window:` works on `exec` too — there the request templates into the
 argv instead of a query string, via `${window.offset}`,
@@ -282,6 +293,7 @@ An element whose window tokens all resolve empty is dropped, so with no
 being passed empty.
 
 See [`examples/http_window.yaml`](examples/http_window.yaml),
+[`examples/http_pages.yaml`](examples/http_pages.yaml),
 [`examples/exec_window.yaml`](examples/exec_window.yaml), and
 [`window`](docs/reference/sources.md#window).
 

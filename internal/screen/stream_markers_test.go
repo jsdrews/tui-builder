@@ -62,7 +62,7 @@ func TestDistinctSourceIsFetchedForItsColumn(t *testing.T) {
 	c := cfg.Config{
 		Data: cfg.DataBlock{Sources: map[string]*cfg.Source{
 			"books": cfg.NewEntry(&cfg.Source{Type: "http", URL: "http://127.0.0.1:1/books",
-				Window: &cfg.WindowConfig{OffsetParam: "offset", LimitParam: "limit", SearchParam: "q"}}),
+				Window: &cfg.WindowConfig{OffsetParam: "offset", LimitParam: "limit", SearchParam: "q", TotalPath: "total"}}),
 			"genres": cfg.NewEntry(&cfg.Source{Type: "static", Data: []any{"fiction", "history"}}),
 		}},
 		TUI: cfg.TUIBlock{

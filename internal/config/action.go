@@ -79,6 +79,23 @@ type Action struct {
 
 	// --- type: http ---
 
+	// Extends names a preset under data.presets to take the request from:
+	// its url (a relative action url joins onto it), headers, query,
+	// auth and timeout. Its other fields are the source's business and
+	// ignored here. Implies type: http.
+	Extends string `yaml:"extends,omitempty"`
+	// Unset drops inherited fields: url, headers, query, auth, timeout.
+	Unset []string `yaml:"unset,omitempty"`
+	// ExtendsChain and Inherited record where the request came from, for
+	// --describe: the presets, nearest first, and each inherited field's.
+	ExtendsChain []string          `yaml:"-"`
+	Inherited    map[string]string `yaml:"-"`
+	// Auth authenticates the request, as on an http source.
+	Auth *AuthSpec `yaml:"auth,omitempty"`
+	// Query sets query parameters: a string or a list (repeated keys)
+	// per key, templated and escaped; empty values are dropped.
+	Query map[string]QueryValue `yaml:"query,omitempty"`
+
 	// Method defaults to POST for http actions. GET is legal but suspect:
 	// an action that doesn't change anything probably wants to be a
 	// source instead, where it gets caching and polling for free.
@@ -89,6 +106,13 @@ type Action struct {
 	Headers map[string]string `yaml:"headers,omitempty"`
 	// Body is the request body, sent verbatim after substitution.
 	Body string `yaml:"body,omitempty"`
+	// JSON is the body as any YAML value, encoded as JSON. Strings are
+	// templated before encoding; one that is exactly one input token
+	// takes the input's type, and drops its key when it resolves empty.
+	JSON any `yaml:"json,omitempty"`
+	// Form is the body as form fields, a string or a list per key;
+	// empty values are dropped.
+	Form map[string]QueryValue `yaml:"form,omitempty"`
 	// Timeout bounds the request. Go duration string; defaults to 30s.
 	Timeout string `yaml:"timeout,omitempty"`
 
@@ -159,6 +183,32 @@ func (a *Action) Templates() []string {
 	for _, v := range a.Headers {
 		out = append(out, v)
 	}
+	out = append(out, jsonStrings(a.JSON)...)
+	for _, vs := range a.Form {
+		out = append(out, vs...)
+	}
+	for _, vs := range a.Query {
+		out = append(out, vs...)
+	}
+	a.Auth.visit(func(_ string, v *string) { out = append(out, *v) })
+	return out
+}
+
+// jsonStrings lists every string in a decoded YAML / JSON value.
+func jsonStrings(v any) []string {
+	var out []string
+	switch x := v.(type) {
+	case string:
+		out = append(out, x)
+	case map[string]any:
+		for _, sub := range x {
+			out = append(out, jsonStrings(sub)...)
+		}
+	case []any:
+		for _, sub := range x {
+			out = append(out, jsonStrings(sub)...)
+		}
+	}
 	return out
 }
 
@@ -219,6 +269,9 @@ func (a *Action) Kind() string {
 	if a.Type != "" {
 		return a.Type
 	}
+	if a.Extends != "" || len(a.ExtendsChain) > 0 {
+		return "http"
+	}
 	// `push:` is unambiguous on its own — there is no other reason to
 	// name a screen — so it doesn't need `type: push` spelled out. That
 	// keeps a drilldown as short as it was under `on_key:`.
@@ -266,7 +319,7 @@ type ActionBinding struct {
 	// Any tea.KeyMsg.String() name. Reserved keys (reservedKeys) and the
 	// menu's own keys (menuKeys) are rejected at load — binding one would
 	// either never fire or silently shadow navigation.
-	Key string `yaml:"key"`
+	Key string `yaml:"key,omitempty"`
 	// Action names an entry in the top-level actions: map. Mutually
 	// exclusive with an inline declaration.
 	Action string `yaml:"action,omitempty"`

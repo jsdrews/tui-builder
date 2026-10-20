@@ -219,13 +219,21 @@ type WindowConfig struct {
 	Prefetch int `yaml:"prefetch,omitempty"`
 
 	// OffsetParam is the query parameter carrying the first row wanted
-	// (e.g. "offset", "_start", "skip"). Required on http; rejected on
-	// exec, which uses ${window.offset} in the argv instead.
-	OffsetParam string `yaml:"offset_param"`
+	// (e.g. "offset", "_start", "skip"). On http, this or PageParam;
+	// rejected on exec, which uses ${window.offset} in the argv instead.
+	OffsetParam string `yaml:"offset_param,omitempty"`
 	// LimitParam is the query parameter carrying the page size (e.g.
 	// "limit", "_limit", "per_page"). Required on http; rejected on
 	// exec, which uses ${window.limit} in the argv instead.
-	LimitParam string `yaml:"limit_param"`
+	LimitParam string `yaml:"limit_param,omitempty"`
+	// PageParam is the query parameter carrying a page number instead of
+	// a row offset (e.g. "page"), for APIs that page by number. Exactly
+	// one of OffsetParam / PageParam on a seekable http window. A window
+	// spanning several pages is fetched one page at a time.
+	PageParam string `yaml:"page_param,omitempty"`
+	// PageStart is the first page's number with PageParam: 1 unless set
+	// (0 for zero-based APIs).
+	PageStart *int `yaml:"page_start,omitempty"`
 	// TotalPath is the dot-path into the RAW response (pre-`root:`
 	// slicing) holding the total row count — "numFound", "count",
 	// "meta.total". Optional: without it the table can't show a
@@ -636,8 +644,9 @@ type Screen struct {
 
 	// Tabs makes this a tabbed screen: each tab is a small screen of its
 	// own (label, layout, actions), shown one at a time under a strip.
-	// Hidden tabs keep polling; keys go to the active one. The fields
-	// below configure the strip and only apply with Tabs.
+	// Hidden tabs pause their polling and refetch when shown (a source
+	// with poll_hidden: true keeps going); keys go to the active one.
+	// The fields below configure the strip and only apply with Tabs.
 	Tabs []Tab `yaml:"tabs,omitempty"`
 	// StripPos puts the tab strip at the "top" (default) or "bottom".
 	StripPos string `yaml:"strip_pos,omitempty"`
@@ -801,6 +810,10 @@ type Parameter struct {
 	// Description shows up in --list / --describe / --list-actions
 	// output. One-line summary.
 	Description string `yaml:"description,omitempty"`
+	// Segment marks the value as one URL path segment: in a url's path
+	// it's fully escaped, "/" included, rather than keeping "/" so that
+	// owner/repo spans two segments. An OpenAPI `in: path` parameter.
+	Segment bool `yaml:"segment,omitempty"`
 
 	// The remaining fields matter only when this parameter is rendered
 	// as a form field. They're inert for wrangl --param binding.
@@ -973,8 +986,10 @@ type Component struct {
 	Colors *Colors `yaml:"colors,omitempty"`
 
 	// ColorRules drive data-aware coloring for components with a single
-	// value stream — list items and logview lines. (For table, rules
-	// live per Column; for inspector, per InspectorField.) Rules
+	// value stream — list items and logview lines — and for an `auto:
+	// true` inspector's leaves, scoped by each rule's Path. (For table,
+	// rules live per Column; for a declared inspector, per
+	// InspectorField.) Rules
 	// evaluate in order, first match wraps the rendered text with
 	// ansi.CellColor.
 	ColorRules []ColorRule `yaml:"color_rules,omitempty"`
@@ -1297,6 +1312,9 @@ type Column struct {
 	// no rule matches the cell is rendered plain. See ColorRule for the
 	// `when:` syntax.
 	ColorRules []ColorRule `yaml:"color_rules,omitempty"`
+	// Bold renders the column's cells bold, outside any color rule's
+	// color, so the selected-row background still passes through.
+	Bold bool `yaml:"bold,omitempty"`
 	// Hidden opts the column out of rendering while keeping it in the
 	// row payload — it still participates in filter matching AND still
 	// shows up in Selected() / RowFocusedMsg cells. This is the
@@ -1443,6 +1461,11 @@ func (d *Distinct) UnmarshalYAML(node *yaml.Node) error {
 type ColorRule struct {
 	When  string `yaml:"when,omitempty"`
 	Color string `yaml:"color"`
+	// Path scopes a rule on an `auto: true` inspector to the fields at a
+	// dot-path from the record root ("status", "items.*.state"); "*"
+	// matches any one key or index. Empty matches every leaf. Not valid
+	// elsewhere: a column or a field already says where.
+	Path string `yaml:"path,omitempty"`
 }
 
 // TreeNode is a node in a tree component's root. Children may be empty

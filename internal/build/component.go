@@ -694,6 +694,9 @@ func staticTableRows(c *cfg.Component, th theme.Theme) []table.Row {
 			} else {
 				cells[j] = renderCell(v)
 			}
+			if j < len(c.Columns) {
+				cells[j] = bold(cells[j], c.Columns[j].Bold)
+			}
 		}
 		out[i] = table.Row(cells)
 	}
