@@ -77,6 +77,14 @@ _Avoid_: override, overlay
 A `${namespace.key}` placeholder in a templated field, resolved from its namespace (`params`, `env`, `window`, …) at a set moment.
 _Avoid_: variable, placeholder (in prose), template (that's the whole string)
 
+**Refusal**:
+A window query the source rejected as unsupported (an http 400 or 422), so asking again won't help. A refused sort makes its column unavailable for the life of the table.
+_Avoid_: using Refusal for a failure, which might work if tried again (timeouts, 5xx, auth)
+
+**Comparison**:
+What a scoped filter term asks of a column: contains (`name:tolk`), equals (`name=tolkien`), or an ordering such as `year>=1950`. A window says which param each comparison is sent as.
+_Avoid_: operator (that's a pipeline's), lookup
+
 ### Presentation layer
 
 **Component**:
@@ -102,3 +110,11 @@ _Avoid_: parameter (that's a source's). Not to be confused with an input field, 
 **Binding**:
 A screen's entry tying an action to a key and to a component's focused or marked rows, and filling the action's inputs from them.
 _Avoid_: using Binding for readiness, or for a component displaying its source
+
+**Action group**:
+The heading a binding sits under in the action menu: `read` or `write` by default, worked out from the action, or any name the binding gives. Groups appear only when a screen's menu has two or more.
+_Avoid_: category, section (a section is a screen or tab)
+
+**Menu**:
+A component listing screens to open, grouped, where picking an item pushes its screen. Not the action menu, which is the overlay listing a screen's bindings.
+_Avoid_: launcher, nav, using "menu" alone for the action menu

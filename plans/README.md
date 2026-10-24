@@ -36,3 +36,10 @@ section in the plan gets trimmed or deleted.
   [Map: HTTP source spec](https://github.com/jsdrews/tui-builder/issues/7);
   seven PRs, **all landed** (#81–#87). The API survey behind it is in
   [`research/http-survey.md`](research/http-survey.md).
+- [`generated-config-gaps.md`](generated-config-gaps.md) — the locked
+  spec for the tuilib table bugs and tui-builder gaps found running
+  generated configs: refused sorts, action groups, env from a file or
+  command, a menu component, filter comparisons and rules, sortable
+  fields on the source. Decided on
+  [Map: tuilib table bugs and tui-builder gaps from generated configs](https://github.com/jsdrews/tui-builder/issues/105);
+  six tuilib PRs and a release, then eight tui-builder PRs.
