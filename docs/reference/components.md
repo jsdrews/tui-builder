@@ -126,7 +126,7 @@ rejects `sortable` columns, `initial_sort` and `sort_debounce`;
 | `flex` | int | `0` | — | Share of leftover width. |
 | `max_width` | int | — | — | Caps a flex or auto column. |
 | `align` | string | `left` | — | `left`, `right` or `center`. |
-| `sortable` | bool | `false` | — | The column can be sorted from the keyboard. |
+| `sortable` | bool | `false`, or `true` when a windowed source's `sort_fields` lists the column | — | The column can be sorted from the keyboard. `false` opts out of `sort_fields`. |
 | `sort` | string | `string` | `sortable` | Comparator: `string` (case-insensitive), `number` (commas stripped), `si` (number with K/M/B/G/T suffix). |
 | `hidden` | bool | `false` | — | Not drawn, but still in the row: it matches filters and resolves in `${selection.*}` / `${cursor.*}`. For identity columns a drilldown needs. |
 | `distinct` | list or map | — | windowed tables | The values this column's filter suggests and completes, which otherwise come only from the page that's loaded. A list (`[Running, Pending, Failed]`), or `{source: NAME}` for a source that returns a list of strings; it's fetched and polled alongside the table. The source can't be windowed. |

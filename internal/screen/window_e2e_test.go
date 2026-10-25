@@ -119,7 +119,7 @@ func newWindowHarness(t *testing.T, srv *windowStub, pageSize int) *windowHarnes
 				"books": {
 					Type: "table", Title: "Books", Source: "books", Filterable: true,
 					Columns: []cfg.Column{
-						{Title: "Title", Width: 40, Value: cfg.Path{"title"}, Sortable: true},
+						{Title: "Title", Width: 40, Value: cfg.Path{"title"}, Sortable: yes()},
 						{Title: "Author", Width: 20, Value: cfg.Path{"author"}},
 					},
 				},

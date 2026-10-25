@@ -16,7 +16,7 @@ func helpModel(t *testing.T, bindings []cfg.ActionBinding) *Model {
 		"pods": {
 			Type: "table", Source: "pods", Filterable: true,
 			Markable: true, MarkKey: cfg.Path{"uid"},
-			Columns: []cfg.Column{{Title: "Name", Value: cfg.Path{"name"}, Sortable: true}},
+			Columns: []cfg.Column{{Title: "Name", Value: cfg.Path{"name"}, Sortable: yes()}},
 		},
 	}
 	sources := map[string]*cfg.Source{

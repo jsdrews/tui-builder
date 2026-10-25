@@ -24,6 +24,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // envTokenRe matches `${env.NAME}` occurrences in a templated
@@ -75,8 +76,10 @@ func checkEnv(c *Config) error {
 	}
 	// Collect required-but-unset. Sort for stable error output.
 	var missing []EnvSpec
+	// A `from:` var counts as provided here, like a prompt key: its
+	// value arrives in ResolveEnv, which also enforces its required:.
 	for _, spec := range c.App.Env {
-		if spec.Required && os.Getenv(spec.Name) == "" {
+		if spec.Required && spec.From == nil && os.Getenv(spec.Name) == "" {
 			missing = append(missing, spec)
 		}
 	}
@@ -144,6 +147,27 @@ func validateEnvSpecs(specs []EnvSpec) error {
 		seen[spec.Name] = true
 		if spec.Required && spec.Default != "" {
 			return fmt.Errorf("app.env[%d].%s: `required: true` and `default:` are mutually exclusive — defaults imply optional", i, spec.Name)
+		}
+		if f := spec.From; f != nil {
+			path := fmt.Sprintf("app.env[%d].%s.from", i, spec.Name)
+			if spec.Default != "" {
+				return fmt.Errorf("%s: not with `default:` — a fallback would hide a broken file or command", path)
+			}
+			hasFile, hasCmd := f.File != "", len(f.Command) > 0
+			if hasFile == hasCmd {
+				return fmt.Errorf("%s: set exactly one of `file:` or `command:`", path)
+			}
+			if hasCmd && strings.TrimSpace(f.Command[0]) == "" {
+				return fmt.Errorf("%s.command: the first element is the program to run and can't be empty", path)
+			}
+			if f.Timeout != "" {
+				if hasFile {
+					return fmt.Errorf("%s.timeout: only applies to `command:`", path)
+				}
+				if d, err := time.ParseDuration(f.Timeout); err != nil || d <= 0 {
+					return fmt.Errorf("%s.timeout: %q is not a positive duration (e.g. 90s)", path, f.Timeout)
+				}
+			}
 		}
 	}
 	return nil

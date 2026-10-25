@@ -297,3 +297,53 @@ func captureStdout(t *testing.T, fn func()) string {
 		return ""
 	}
 }
+
+// An app.env `from:` value is read when wrangl fetches, and not when it
+// only lists: a listing shouldn't run a password manager.
+func TestRunDumpResolvesEnvFromOnlyWhenFetching(t *testing.T) {
+	t.Setenv("WRANGL_TEST_FROM", "")
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "ran")
+	cfgPath := filepath.Join(dir, "from.yaml")
+	write(t, cfgPath, `
+app:
+  title: Env from
+  env:
+    - name: WRANGL_TEST_FROM
+      required: true
+      from: {command: [sh, -c, "touch `+marker+`; echo from-command"]}
+data:
+  sources:
+    who:
+      type: exec
+      command: [sh, -c, "printf '[{\"v\":\"%s\"}]' '${env.WRANGL_TEST_FROM}'"]
+tui:
+  components:
+    t:
+      type: table
+      source: who
+      columns:
+        - {title: V, width: 20, value: v}
+  screen:
+    layout:
+      component: t
+`)
+
+	captureStdout(t, func() {
+		if err := runDump([]string{cfgPath}, true, false, false, false, 0, 0, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("--list ran the from: command")
+	}
+
+	out := captureStdout(t, func() {
+		if err := runDump([]string{cfgPath, "who"}, false, false, false, false, 0, 0, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "from-command") {
+		t.Errorf("from: value never reached the command; got:\n%s", out)
+	}
+}

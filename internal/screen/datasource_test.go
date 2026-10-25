@@ -36,7 +36,7 @@ func TestDataSourceFetchApply(t *testing.T) {
 			Columns: []cfg.Column{
 				{Title: "Name", Width: 14, Value: cfg.Path{"name.common"}},
 				{Title: "Region", Width: 12, Value: cfg.Path{"region"}},
-				{Title: "Population", Width: 12, Value: cfg.Path{"population"}, Sort: "number", Align: "right", Sortable: true},
+				{Title: "Population", Width: 12, Value: cfg.Path{"population"}, Sort: "number", Align: "right", Sortable: yes()},
 			},
 		},
 	},
@@ -106,3 +106,6 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+// yes is a *bool true, for cfg.Column.Sortable.
+func yes() *bool { v := true; return &v }

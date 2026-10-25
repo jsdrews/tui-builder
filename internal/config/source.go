@@ -22,6 +22,7 @@ package config
 import (
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -475,6 +476,7 @@ func (s *Source) Clone() *Source {
 		// through the original's aliased header.
 		cp.Filters = maps.Clone(s.Window.Filters)
 		cp.Sorts = maps.Clone(s.Window.Sorts)
+		cp.SortFields = slices.Clone(s.Window.SortFields)
 		if s.Window.PageStart != nil {
 			n := *s.Window.PageStart
 			cp.PageStart = &n
@@ -635,7 +637,7 @@ func (w *WindowConfig) validateShared(path string) error {
 		for field, set := range map[string]bool{
 			"offset_param": w.OffsetParam != "", "total_path": w.TotalPath != "",
 			"page_param": w.PageParam != "", "page_start": w.PageStart != nil,
-			"sort_param": w.SortParam != "", "sorts": len(w.Sorts) > 0,
+			"sort_param": w.SortParam != "", "sorts": len(w.Sorts) > 0, "sort_fields": len(w.SortFields) > 0,
 			"sort_desc_prefix": w.SortDescPrefix != "", "prefetch": w.Prefetch != 0,
 		} {
 			if set {
@@ -660,6 +662,11 @@ func (w *WindowConfig) validateShared(path string) error {
 	for title, dest := range w.Filters {
 		if dest == "" {
 			return fmt.Errorf("%s.filters.%s: empty destination name", path, title)
+		}
+	}
+	for i, field := range w.SortFields {
+		if strings.TrimSpace(field) == "" {
+			return fmt.Errorf("%s.sort_fields[%d]: empty sort field name", path, i)
 		}
 	}
 	for title, field := range w.Sorts {
@@ -759,6 +766,9 @@ func (w *WindowConfig) validateHTTPWindow(path string) error {
 	if err := w.requireTotal(path); err != nil {
 		return err
 	}
+	if len(w.SortFields) > 0 && w.SortParam == "" {
+		return fmt.Errorf("%s.sort_fields: set without `sort_param:` — there's no query parameter to carry the sort", path)
+	}
 	if len(w.Sorts) > 0 && w.SortParam == "" {
 		return fmt.Errorf("%s.sorts: set without `sort_param:` — there's no query parameter to carry the mapped sort field", path)
 	}
@@ -791,6 +801,9 @@ func (w *WindowConfig) validateExecWindow(path string, argv []string) error {
 		if set {
 			return fmt.Errorf("%s.%s: http-only — an exec window templates the request into `command:` instead. Use ${window.offset}, ${window.limit}, ${window.search}, ${window.sort} / ${window.sort_dir}, and ${window.filters.<name>}", path, field)
 		}
+	}
+	if len(w.SortFields) > 0 && !strings.Contains(strings.Join(argv, " "), "${window.sort}") {
+		return fmt.Errorf("%s.sort_fields: the command never references ${window.sort}, so there's nowhere to send the sort", path)
 	}
 	if len(w.Sorts) > 0 {
 		return fmt.Errorf("%s.sorts: http-only — an exec command receives the column title as ${window.sort} and maps it itself", path)

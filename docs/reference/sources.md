@@ -639,6 +639,7 @@ Supported on `http` (the request goes in the query string) and `exec`
 | `search_param` | string | — | http only | Query parameter for bare filter terms, joined with spaces. |
 | `sort_param` | string | — | http only | Query parameter for the sort field. |
 | `sorts` | map of string | — | http only; needs `sort_param` | Maps a column title to the sort field the API expects. Unlisted columns send their title. |
+| `sort_fields` | list of string | — | http: needs `sort_param`; exec: `command:` references `${window.sort}`; not Anchored | The sort fields the API accepts, e.g. an `order_by` enum. A bound table's column whose `sorts:` entry, or else whose `value:` is one plain key, is listed becomes sortable without `sortable: true`, and on http sends that field. `sortable: false` opts a column out. On exec it only decides which columns sort; the command still gets the title. |
 | `sort_desc_prefix` | string | — | http only; needs `sort_param` | Prepended for a descending sort, e.g. `-` for Django REST (`ordering=-created`). Empty means both directions send the same value. |
 | `cursor` | string | — | eventlog and span-table sources | Makes the source **Anchored**: walked from an edge instead of paged by offset. The dot-path to each item's cursor, the value the next request walks from (ES `sort`, a timestamp, an id). See [Anchored windows](#anchored-windows). |
 | `older` | map | — | http, with `cursor` | What the request changes to walk towards older items, merged into `body:` or set as query parameters. |
@@ -845,6 +846,9 @@ data:
 - A `sortable` column on the bound table needs `sort_param` (http), or
   a `command:` that references both `${window.sort}` and
   `${window.sort_dir}` (exec).
+- With `sort_fields`, `sortable: true` on a column the list doesn't
+  match is an error: the API won't sort by it. A listed field no column
+  shows is fine. Fields can't be empty.
 - `page_size` and `prefetch` are not negative.
 - With `cursor:`: http needs both `older:` and `newer:`, which are
   http-only; exec must reference `${window.cursor}`, `${window.dir}` and
@@ -866,6 +870,23 @@ books:
     total_path: numFound
     search_param: q          # "hobbit"         → ?q=hobbit
     filters: {Author: author} # "author:tolkien" → ?author=tolkien
+```
+
+An API that lists what it can sort by, such as an `order_by` enum,
+says so once on the source instead of on every column:
+
+```yaml
+things:
+  type: http
+  url: https://api.example.com/things
+  root: entries
+  window:
+    page_param: page
+    limit_param: per_page
+    total_path: total
+    sort_param: order_by
+    sort_desc_prefix: "-"
+    sort_fields: [name, created_at]   # columns with value: name / created_at sort
 ```
 
 ## `resume`

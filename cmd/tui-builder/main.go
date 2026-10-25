@@ -66,6 +66,13 @@ func run() error {
 	user, _ := tconfig.Load()
 	initial := initialTheme(themes, os.Getenv(themeEnvVar), c.App.Theme, user.Theme)
 
+	// app.env values from a file or a command, before the prompts so a
+	// prompt with the same key starts with the resolved value. Commands
+	// still own the terminal here, so a password prompt works.
+	if err := c.ResolveEnv(); err != nil {
+		return err
+	}
+
 	// Pre-flight: if the config declares app-level prompts, collect
 	// them BEFORE building the screen so URL / argv / header
 	// substitutions resolve cleanly via ${env.*}. The prompts run as

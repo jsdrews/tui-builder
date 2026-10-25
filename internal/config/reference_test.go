@@ -25,6 +25,7 @@ var referencePages = map[string][]string{
 	"Borders":        {"app.md"},
 	"Prompt":         {"app.md"},
 	"EnvSpec":        {"app.md"},
+	"EnvFrom":        {"app.md"},
 	"OutputConfig":   {"app.md"},
 	"DataBlock":      {"app.md"},
 	"TUIBlock":       {"app.md"},

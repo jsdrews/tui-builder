@@ -291,7 +291,7 @@ func TestParamsBindEndToEnd(t *testing.T) {
 			},
 		},
 		Initial: "users"},
-		Actions: pushRegistry(),
+		Actions: pushRegistry("open_posts"),
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
@@ -430,7 +430,7 @@ func TestParamsBindFromListSelection(t *testing.T) {
 			},
 		},
 		Initial: "namespaces"},
-		Actions: pushRegistry(),
+		Actions: pushRegistry("open_pods"),
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
@@ -585,7 +585,7 @@ func TestParamsBindIgnoresUnusedSources(t *testing.T) {
 			},
 		},
 		Initial: "namespaces"},
-		Actions: pushRegistry(),
+		Actions: pushRegistry("open_pods"),
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
@@ -695,7 +695,7 @@ func TestParamsBindMissingRequired(t *testing.T) {
 			"posts": {Layout: cfg.Node{Component: "posts_table"}},
 		},
 		Initial: "users"},
-		Actions: pushRegistry(),
+		Actions: pushRegistry("open_posts"),
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
@@ -791,11 +791,18 @@ func stubKube(pods map[string]string) *httptest.Server {
 	}))
 }
 
-// pushRegistry declares every push action the multi-screen fixtures bind
-// to. Pushes are registry entries now, not their own on_key: block.
-func pushRegistry() map[string]*cfg.Action {
-	return map[string]*cfg.Action{
+// pushRegistry declares the named push actions the multi-screen
+// fixtures bind to. Pushes are registry entries now, not their own
+// on_key: block. Each fixture takes only the ones whose screen it
+// defines, since a push to a missing screen fails Validate.
+func pushRegistry(names ...string) map[string]*cfg.Action {
+	all := map[string]*cfg.Action{
 		"open_pods":  {Push: "pods"},
 		"open_posts": {Push: "posts"},
 	}
+	reg := map[string]*cfg.Action{}
+	for _, n := range names {
+		reg[n] = all[n]
+	}
+	return reg
 }

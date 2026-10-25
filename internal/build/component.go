@@ -388,7 +388,7 @@ func tableOptions(c *cfg.Component, th theme.Theme) table.Options {
 			Flex:     col.Flex,
 			MaxWidth: col.MaxWidth,
 			Align:    parseAlign(col.Align),
-			Sortable: col.Sortable,
+			Sortable: col.IsSortable(),
 			Less:     parseLess(col.Sort),
 			Hidden:   col.Hidden,
 		}
@@ -479,14 +479,14 @@ func distinctValues(data any) []string {
 func resolveSortColumn(ref string, cols []cfg.Column) (int, bool) {
 	if n, err := strconv.Atoi(strings.TrimSpace(ref)); err == nil {
 		i := n - 1
-		if i >= 0 && i < len(cols) && cols[i].Sortable {
+		if i >= 0 && i < len(cols) && cols[i].IsSortable() {
 			return i, true
 		}
 		return 0, false
 	}
 	q := strings.ToLower(strings.TrimSpace(ref))
 	for i, col := range cols {
-		if !col.Sortable {
+		if !col.IsSortable() {
 			continue
 		}
 		if strings.HasPrefix(strings.ToLower(col.Title), q) {

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -71,6 +72,10 @@ func Load(path string) (*Config, error) {
 	// warns on undeclared-and-unset references.
 	if err := checkEnv(&c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	c.dir = filepath.Dir(path)
+	if abs, err := filepath.Abs(c.dir); err == nil {
+		c.dir = abs
 	}
 	return &c, nil
 }
@@ -208,6 +213,9 @@ func (c *Config) Validate() error {
 	case !hasSingle && !hasMulti:
 		return fmt.Errorf("config: must set `tui.screen:` (single) or `tui.screens:` + `tui.initial:` (multi)")
 	}
+	if err := c.validatePushTargets(); err != nil {
+		return err
+	}
 
 	if hasSingle {
 		return c.validateScreen("tui.screen", &c.TUI.Screen)
@@ -227,6 +235,26 @@ func (c *Config) Validate() error {
 		if err := c.validateScreen("tui.screens."+name, s); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validatePushTargets checks that every push action names a screen in
+// tui.screens, bound or not, so a typo is caught at load rather than
+// the first time someone presses the key.
+func (c *Config) validatePushTargets() error {
+	for _, name := range sortedKeys(c.Actions) {
+		a := c.Actions[name]
+		if a == nil || a.Kind() != "push" || a.Push == "" {
+			continue
+		}
+		if _, ok := c.TUI.Screens[a.Push]; ok {
+			continue
+		}
+		if len(c.TUI.Screens) == 0 {
+			return fmt.Errorf("actions.%s: push: %q, but this config has a single `tui.screen:` — a push needs `tui.screens:` to open", name, a.Push)
+		}
+		return fmt.Errorf("actions.%s: push: screen %q not defined in tui.screens (have: %s)", name, a.Push, strings.Join(sortedKeys(c.TUI.Screens), ", "))
 	}
 	return nil
 }
@@ -852,7 +880,7 @@ func (col *Column) validateMetric(path, source string) error {
 		return fmt.Errorf("%s: not with `value:` — the metric reads its own paths", mp)
 	case len(col.ColorRules) > 0:
 		return fmt.Errorf("%s: not with `color_rules:` — the metric colors the cell itself", mp)
-	case col.Sortable:
+	case col.IsSortable():
 		return fmt.Errorf("%s: not with `sortable: true` — drawn glyphs don't sort meaningfully", mp)
 	case col.Bold:
 		return fmt.Errorf("%s: not with `bold: true` — drawn glyphs don't take text styles", mp)
@@ -1100,6 +1128,43 @@ func validateActivityBinding(name string, comp *Component, entry *Source) error 
 	return nil
 }
 
+// applySortFields makes the columns a windowed source's `sort_fields:`
+// lists sortable. A column matches by its `sorts:` entry, or else its
+// plain one-key `value:`; a match the column hasn't opted out of becomes
+// sortable and, on http, sends the listed field. `sortable: true` on a
+// column the list doesn't match is a sort the API won't answer.
+func applySortFields(name string, comp *Component, w *WindowConfig) error {
+	if comp.Type != "table" || len(w.SortFields) == 0 {
+		return nil
+	}
+	listed := map[string]bool{}
+	for _, f := range w.SortFields {
+		listed[f] = true
+	}
+	for i := range comp.Columns {
+		col := &comp.Columns[i]
+		field, mapped := w.Sorts[col.Title]
+		if !mapped && len(col.Value) == 1 && !strings.Contains(col.Value[0], ".") {
+			field = col.Value[0]
+		}
+		match := field != "" && listed[field]
+		switch {
+		case col.Sortable == nil && match:
+			on := true
+			col.Sortable = &on
+			if !mapped && w.SortParam != "" {
+				if w.Sorts == nil {
+					w.Sorts = map[string]string{}
+				}
+				w.Sorts[col.Title] = field
+			}
+		case col.IsSortable() && !match:
+			return fmt.Errorf("tui.components.%s: columns[%d] (%q) is sortable, but the source's window.sort_fields doesn't list its field (%s) — the API won't sort by it. Drop `sortable: true`, or map the column with window.sorts", name, i, col.Title, strings.Join(w.SortFields, ", "))
+		}
+	}
+	return nil
+}
+
 // bindWindowed marks a component as windowed when the entry it binds to
 // declares `window:`, rejecting the bindings that can't hold a sparse
 // window. Only tuilib's table has SetWindow — a list or inspector fed a
@@ -1119,7 +1184,7 @@ func bindWindowed(name string, comp *Component, ref string, entry *Source) error
 			return fmt.Errorf("tui.components.%s: a table over an Anchored source (`window.cursor:`) needs `mark_key:` — each row's identity, held with its cursor so rows that share a cursor stay apart", name)
 		}
 		for i, col := range comp.Columns {
-			if col.Sortable {
+			if col.IsSortable() {
 				return fmt.Errorf("tui.components.%s: columns[%d] (%q) is sortable, but a table over an Anchored source shows rows in the order it walks them", name, i, col.Title)
 			}
 		}
@@ -1134,11 +1199,14 @@ func bindWindowed(name string, comp *Component, ref string, entry *Source) error
 	if comp.Type == "table" && entry.Window.Growing != nil {
 		return fmt.Errorf("tui.components.%s: source %q declares `window.growing:`, which only an eventlog can follow", name, ref)
 	}
+	if err := applySortFields(name, comp, entry.Window); err != nil {
+		return err
+	}
 	// Sorting is answered by the server under a window, so a sortable
 	// column the source can't carry is a control that can't do anything.
 	if ok, why := entry.windowSorts(); !ok {
 		for i, col := range comp.Columns {
-			if col.Sortable {
+			if col.IsSortable() {
 				return fmt.Errorf("tui.components.%s: columns[%d] (%q) is sortable but source %q%s", name, i, col.Title, ref, why)
 			}
 		}

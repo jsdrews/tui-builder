@@ -74,7 +74,9 @@ reason. `enter` (or a double click) fires its binding directly.
   source rules, including that `headers:` can't also set the header it
   owns.
 - push needs `push:` and takes no `run:`, `url:`, `inputs:` or
-  `multi: true`.
+  `multi: true`. The screen it names must exist in `tui.screens`, whether
+  or not anything binds the action; a single-screen config has nothing
+  to push to.
 - Inputs follow the [input rules](#inputs).
 
 ```yaml

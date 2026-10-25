@@ -213,6 +213,7 @@ double-slash URL at first fetch. Applies to `wrangl` too.
 | `required` | bool | `false` | not with `default` | Load fails if the variable is unset. Every missing variable is reported in one message. |
 | `default` | string | — | not with `required` | Set into the environment when the variable is unset. |
 | `description` | string | — | — | Shown in the missing-variable error, so the user knows what to set. |
+| `from` | map | — | not with `default` | Reads the value from a file or a command when the variable is unset. See [values from a file or a command](#values-from-a-file-or-a-command). |
 
 A `${env.X}` that is referenced, unset and not declared (here or as a
 prompt `key`) prints a warning at load, not an error: an empty value is
@@ -223,6 +224,41 @@ app:
   env:
     - {name: AWX_HOST, required: true, description: "Tower base URL, e.g. https://awx.example.com"}
     - {name: DEBUG, default: "0"}
+```
+
+#### Values from a file or a command
+
+`from:` gives a variable a value without exporting it first: a token
+kept in a file, or one a password manager prints.
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `file` | string | — | not with `command` | A file whose contents are the value. `~` and `${env.X}` expand; a relative path is relative to the config file. |
+| `command` | list of string | — | not with `file` | A program and its arguments, run without a shell; what it prints is the value. It shares the terminal's input and error output, so it can ask for a password. |
+| `timeout` | duration | `60s` | `command` | How long the command may run. |
+
+- A value already in the environment wins, and its `from:` doesn't run.
+- Entries are read once, in list order, so a `file:` path can use an
+  earlier entry through `${env.X}`.
+- The value is trimmed. An empty value, a missing file, a failed command
+  or a timeout is a failure: with `required: true` the program stops
+  with an error naming the variable and the file or command; otherwise
+  it prints a warning and the variable stays unset. The value itself is
+  never printed.
+- `tui-builder` reads them before [`app.prompts`](#appprompts), so a
+  prompt with the same `key` starts with the value. `wrangl` reads them
+  only when it fetches a target, not for `--list`, `--describe` or the
+  action listings. Loading a config on its own never runs a command.
+
+**Validation:** exactly one of `file` / `command`; not with `default`
+(`required` is fine); `command` needs a program; `timeout` is a positive
+duration and only applies to `command`.
+
+```yaml
+app:
+  env:
+    - {name: API_TOKEN, required: true, from: {file: ~/.config/myapi/token}}
+    - {name: DB_PASS, from: {command: [pass, show, db], timeout: 90s}}
 ```
 
 ## `tui`

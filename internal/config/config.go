@@ -43,6 +43,10 @@ type Config struct {
 	// second call is a no-op rather than a second pass over values that
 	// are now data rather than templates. See SubstituteEnv.
 	envSubstituted bool
+	// envResolved records that ResolveEnv has already run.
+	envResolved bool
+	// dir is the directory of the config file, for relative paths.
+	dir string
 }
 
 // DataBlock holds the data-layer definitions. Every entry under
@@ -268,6 +272,11 @@ type WindowConfig struct {
 	// for APIs whose sort tokens aren't the column titles ("Year" →
 	// "first_publish_year"). Unlisted columns send their title as-is.
 	Sorts map[string]string `yaml:"sorts,omitempty"`
+	// SortFields lists the API's sort fields. A bound table's column
+	// whose `sorts:` entry, or else plain one-key `value:`, is listed
+	// becomes sortable without `sortable: true`, and sends that field.
+	// The restriction belongs to the API, not to each table.
+	SortFields []string `yaml:"sort_fields,omitempty"`
 	// SortDescPrefix is prepended to the sort field for a descending
 	// sort — "-" covers Django REST (`ordering=-created`) and most of
 	// what follows it. Empty means the API has no descending form, so
@@ -626,6 +635,23 @@ type EnvSpec struct {
 	// recommended — a good description turns a cryptic failure into
 	// a self-serve fix.
 	Description string `yaml:"description,omitempty"`
+	// From reads the value from a file or a command when the var is
+	// unset. Resolved by ResolveEnv at the entry points, never by
+	// Load. Not with Default.
+	From *EnvFrom `yaml:"from,omitempty"`
+}
+
+// EnvFrom is where an app.env var's value comes from: exactly one of
+// File or Command.
+type EnvFrom struct {
+	// File is read whole and trimmed. `~` and ${env.X} expand; a
+	// relative path is relative to the config file's directory.
+	File string `yaml:"file,omitempty"`
+	// Command runs as argv, no shell; its trimmed stdout is the value.
+	// stdin and stderr are the terminal's, so a password prompt works.
+	Command []string `yaml:"command,omitempty"`
+	// Timeout bounds Command, as a Go duration. Default 60s.
+	Timeout string `yaml:"timeout,omitempty"`
 }
 
 // Screen describes one screen — its breadcrumb title, its layout tree,
@@ -1291,7 +1317,10 @@ type Column struct {
 	Flex     int    `yaml:"flex,omitempty"`
 	MaxWidth int    `yaml:"max_width,omitempty"`
 	Align    string `yaml:"align,omitempty"` // left | right | center
-	Sortable bool   `yaml:"sortable,omitempty"`
+	// Sortable makes the column sortable. Unset, a windowed source's
+	// `sort_fields:` decides; an explicit false opts a listed column
+	// out. See IsSortable.
+	Sortable *bool `yaml:"sortable,omitempty"`
 	// Sort picks the comparator when Sortable is true.
 	//   "" / "string"  case-insensitive lex on the ANSI-stripped cell (default)
 	//   "number"       strconv.ParseFloat after stripping commas
@@ -1330,6 +1359,10 @@ type Column struct {
 	// this column, which otherwise come only from the page that's loaded.
 	Distinct *Distinct `yaml:"distinct,omitempty"`
 }
+
+// IsSortable reports whether the column sorts: `sortable:` as written,
+// or as a windowed source's `sort_fields:` set it at load.
+func (c Column) IsSortable() bool { return c.Sortable != nil && *c.Sortable }
 
 // Metric is `metric:` on a table column or an inspector field: an inline
 // summary drawn by tuilib's pkg/metrics. Exactly one kind key is set, and
