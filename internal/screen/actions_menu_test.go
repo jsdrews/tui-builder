@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	taction "github.com/jsdrews/tuilib/pkg/action"
+	"github.com/jsdrews/tuilib/pkg/app"
 	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
@@ -570,5 +571,18 @@ func TestMenuActionGroupOrder(t *testing.T) {
 	}
 	if want := "d a e c b"; strings.Join(got, " ") != want {
 		t.Errorf("order = %v, want %s", got, want)
+	}
+}
+
+// app.glyphs reach a screen through the shell now: it puts them on the
+// theme it composes and hands the root, and on every swap after.
+func TestShellHandsScreensTheAppGlyphs(t *testing.T) {
+	m := menuModel(t, nil, nil)
+	app.New(app.Options{
+		Root: m, Palettes: []palette.Palette{palette.Nord(), palette.Dark()}, SkipConfig: true,
+		Glyphs: build.Glyphs(&cfg.App{Glyphs: cfg.Glyphs{Cursor: "→"}}),
+	})
+	if m.th.Glyphs.Cursor != "→" {
+		t.Errorf("root screen's theme cursor = %q, want → from app.glyphs", m.th.Glyphs.Cursor)
 	}
 }

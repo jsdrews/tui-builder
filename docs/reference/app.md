@@ -77,7 +77,7 @@ actions:
 
 ### `app.glyphs`
 
-Every field is optional; an unset one keeps tuilib's default.
+Every field is optional; an unset one keeps tuilib's default. They apply everywhere, including the key overlay, the action menu and the output console, and stay the same as palettes and surfaces cycle.
 
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|

@@ -1252,7 +1252,6 @@ func componentHelpSections(c *build.Component) []help.Section {
 // SetTheme rebuilds each component against the new palette; each one
 // carries its data and view state across via State / Restore.
 func (m *Model) SetTheme(t theme.Theme) {
-	t = build.WithGlyphs(t)
 	m.th = t
 	for _, c := range m.tree.All() {
 		c.Rebuild(t)

@@ -20,7 +20,9 @@ func chromeTheme(t *testing.T, p palette.Palette, a *cfg.App) theme.Theme {
 	t.Helper()
 	withAppChrome(t, a)
 	caps := surface.Caps{Profile: lipgloss.ColorProfile(), BlockGlyphs: true}
-	return WithGlyphs(theme.Compose(p, ChromeSurface(surface.Outlined, a), caps))
+	th := theme.Compose(p, ChromeSurface(surface.Outlined, a), caps)
+	th.Glyphs = Glyphs(a)
+	return th
 }
 
 // sameLines compares the eight glyphs a lined surface keeps of a
@@ -264,5 +266,24 @@ func TestSurfacesStartFirstWithChrome(t *testing.T) {
 	}
 	if Surfaces(a, "")[0].Name != "outlined" {
 		t.Error("no start should begin on outlined")
+	}
+}
+
+// The write heading takes the palette's warning colour, every other one
+// its muted colour, for each palette the shell can swap to.
+func TestActionGroupStyle(t *testing.T) {
+	for _, p := range palette.All() {
+		th := theme.New(p)
+		if th.Warning == nil {
+			t.Fatalf("%s: no warning colour", p.Name)
+		}
+		if got := ActionGroupStyle("write", th).GetForeground(); got != th.Warning {
+			t.Errorf("%s: write heading = %v, want the warning colour %v", p.Name, got, th.Warning)
+		}
+		for _, g := range []string{"read", "other", "tools"} {
+			if got := ActionGroupStyle(g, th).GetForeground(); got != th.Muted {
+				t.Errorf("%s: %s heading = %v, want muted %v", p.Name, g, got, th.Muted)
+			}
+		}
 	}
 }

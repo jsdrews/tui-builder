@@ -82,14 +82,20 @@ func ChromeSurface(base surface.Surface, a *cfg.App) surface.Surface {
 	return s
 }
 
-// WithGlyphs is t with the config's `app.glyphs` on it. The app shell
-// composes each theme from a palette and a surface, and a palette
-// carries no glyphs, so every screen puts them back when it's handed a
-// theme: a palette is a choice of colour, glyphs a choice of
-// vocabulary, and cycling palettes (`t`) mustn't change the cursor.
-func WithGlyphs(t theme.Theme) theme.Theme {
-	t.Glyphs = overrideGlyphs(t.Glyphs, &appChrome.glyphs)
-	return t
+// Glyphs is the config's `app.glyphs` as a glyph set, for the app shell,
+// which puts it on every theme it composes — the screens' and its own
+// overlays' alike. Unset fields stay empty and fall back to glyph.Default.
+func Glyphs(a *cfg.App) glyph.Set { return overrideGlyphs(glyph.Set{}, &a.Glyphs) }
+
+// ActionGroupStyle styles the action menu's group headings: `write` in
+// the palette's warning colour, so the headings over verbs that change
+// things stand out, and every other group muted. The shell calls it
+// again on every palette swap.
+func ActionGroupStyle(group string, t theme.Theme) lipgloss.Style {
+	if group == "write" {
+		return lipgloss.NewStyle().Bold(true).Foreground(t.Warning)
+	}
+	return lipgloss.NewStyle().Bold(true).Foreground(t.Muted)
 }
 
 // overrideGlyphs copies the non-empty fields of o over base. Empty

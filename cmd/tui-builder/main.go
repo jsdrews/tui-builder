@@ -78,7 +78,9 @@ func run() error {
 	palettes := palette.All()
 	caps := termCaps(user.BlockGlyphs)
 	start := initialPalette(palettes, os.Getenv(themeEnvVar), c.App.Theme, userPalette(user))
-	initial := build.WithGlyphs(theme.Compose(start, surfaces[0], caps))
+	glyphs := build.Glyphs(&c.App)
+	initial := theme.Compose(start, surfaces[0], caps)
+	initial.Glyphs = glyphs
 
 	// app.env values from a file or a command, before the prompts so a
 	// prompt with the same key starts with the resolved value. Commands
@@ -126,6 +128,9 @@ func run() error {
 		Root:     root,
 		Palettes: palettes,
 		Surfaces: surfaces,
+		// app.glyphs, on every theme the shell composes: the screens get
+		// them through SetTheme, and the shell's own overlays draw them too.
+		Glyphs: glyphs,
 		// Surface cycling; app.surface_key: "-" pins the surface.
 		SurfaceKey: keyBinding(c.App.SurfaceCycleKey(), "surface"),
 		// The same capabilities the first screens were built against.
@@ -161,6 +166,8 @@ func run() error {
 		// this is bound. The screen supplies verbs by implementing
 		// action.Provider.
 		ActionsKey: keyBinding(c.App.ActionMenuKey(), "actions"),
+		// The menu's group headings: write in the warning colour.
+		ActionGroupStyle: build.ActionGroupStyle,
 		// Every component we build (list / table / tree / logview /
 		// inspector / textview) hit-tests mouse events against its
 		// own rect, so clicking is uniformly useful. The cost is the

@@ -24,7 +24,6 @@ var appChrome struct {
 	keys        map[string]cfg.KeyList
 	formSpacing int
 	mask        rune
-	glyphs      cfg.Glyphs
 	groups      []string
 }
 
@@ -33,7 +32,6 @@ var appChrome struct {
 func SetAppChrome(a *cfg.App) {
 	appChrome.keys = a.Keys
 	appChrome.formSpacing = a.FormSpacing
-	appChrome.glyphs = a.Glyphs
 	appChrome.groups = a.ActionGroups
 	appChrome.mask = 0
 	if a.Glyphs.Mask != "" {
