@@ -3,6 +3,7 @@ package build
 import (
 	"testing"
 
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
@@ -20,7 +21,7 @@ func markableTable(t *testing.T) *Component {
 			{Title: "Name", Value: cfg.Path{"name"}},
 			{Title: "Status", Value: cfg.Path{"status"}},
 		},
-	}, theme.Nord())
+	}, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatalf("NewComponent: %v", err)
 	}
@@ -39,7 +40,7 @@ func pods(entries ...[3]string) []any {
 // must not slide the selection onto whatever now occupies that index.
 func TestMarksSurviveRowReorder(t *testing.T) {
 	c := markableTable(t)
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	ApplyData(c, pods(
 		[3]string{"u1", "web", "Running"},
 		[3]string{"u2", "api", "Running"},
@@ -82,7 +83,7 @@ func TestMarksSurviveFilter(t *testing.T) {
 	ApplyData(c, pods(
 		[3]string{"u1", "web", "Running"},
 		[3]string{"u2", "api", "Running"},
-	), theme.Nord())
+	), theme.New(palette.Nord()))
 
 	c.Table.SetCursor(1)
 	c.Table.ToggleMark()
@@ -104,11 +105,11 @@ func TestMarksSurviveThemeRebuild(t *testing.T) {
 	ApplyData(c, pods(
 		[3]string{"u1", "web", "Running"},
 		[3]string{"u2", "api", "Running"},
-	), theme.Nord())
+	), theme.New(palette.Nord()))
 	c.Table.SetCursor(0)
 	c.Table.ToggleMark()
 
-	c.Rebuild(theme.Dark())
+	c.Rebuild(theme.New(palette.Dark()))
 
 	if got := c.Table.MarkCount(); got != 1 {
 		t.Fatalf("MarkCount after rebuild = %d, want 1 — the key set was dropped", got)
@@ -119,15 +120,15 @@ func TestMarksSurviveThemeRebuild(t *testing.T) {
 // next fetch reinstalls the keys they name.
 func TestMarksReattachAfterRebuildAndRefetch(t *testing.T) {
 	c := markableTable(t)
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	ApplyData(c, pods([3]string{"u1", "web", "Running"}), th)
 	c.Table.ToggleMark()
 
-	c.Rebuild(theme.Dark())
+	c.Rebuild(theme.New(palette.Dark()))
 	ApplyData(c, pods(
 		[3]string{"u0", "cache", "Running"},
 		[3]string{"u1", "web", "Running"},
-	), theme.Dark())
+	), theme.New(palette.Dark()))
 
 	sels := MarkedSelections(c)
 	if len(sels) != 1 || sels[0].String != "web" {
@@ -143,7 +144,7 @@ func TestMarkedSelectionsFallsBackToCursor(t *testing.T) {
 	ApplyData(c, pods(
 		[3]string{"u1", "web", "Running"},
 		[3]string{"u2", "api", "Running"},
-	), theme.Nord())
+	), theme.New(palette.Nord()))
 
 	c.Table.SetCursor(1)
 	sels := MarkedSelections(c)
@@ -176,11 +177,11 @@ func TestMarkedSelectionsStripAnsi(t *testing.T) {
 			Title: "Status", Value: cfg.Path{"status"},
 			ColorRules: []cfg.ColorRule{{When: `value == "Running"`, Color: "green"}},
 		}},
-	}, theme.Nord())
+	}, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatalf("NewComponent: %v", err)
 	}
-	ApplyData(c, pods([3]string{"u1", "web", "Running"}), theme.Nord())
+	ApplyData(c, pods([3]string{"u1", "web", "Running"}), theme.New(palette.Nord()))
 
 	sels := MarkedSelections(c)
 	if len(sels) != 1 {
@@ -196,11 +197,11 @@ func TestNonMarkableTableKeepsPlainRows(t *testing.T) {
 	c, err := NewComponent(&cfg.Component{
 		Type: "table", Source: "pods",
 		Columns: []cfg.Column{{Title: "Name", Value: cfg.Path{"name"}}},
-	}, theme.Nord())
+	}, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatalf("NewComponent: %v", err)
 	}
-	ApplyData(c, pods([3]string{"u1", "web", "Running"}), theme.Nord())
+	ApplyData(c, pods([3]string{"u1", "web", "Running"}), theme.New(palette.Nord()))
 
 	if c.RowsByKey != nil {
 		t.Error("a non-markable table should not build a key map")
@@ -222,7 +223,7 @@ func TestStaticListIsMarkable(t *testing.T) {
 	c, err := NewComponent(&cfg.Component{
 		Type: "list", Markable: true,
 		Items: []string{"alpha", "beta", "gamma"},
-	}, theme.Nord())
+	}, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatalf("NewComponent: %v", err)
 	}
@@ -244,7 +245,7 @@ func TestStaticTableIsMarkable(t *testing.T) {
 		Type: "table", Markable: true,
 		Columns: []cfg.Column{{Title: "Name"}},
 		Rows:    [][]any{{"alpha"}, {"beta"}},
-	}, theme.Nord())
+	}, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatalf("NewComponent: %v", err)
 	}
@@ -260,14 +261,14 @@ func TestStaticTableIsMarkable(t *testing.T) {
 func TestSourceListIsMarkable(t *testing.T) {
 	c, err := NewComponent(&cfg.Component{
 		Type: "list", Source: "pods", Item: "name", Markable: true,
-	}, theme.Nord())
+	}, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatalf("NewComponent: %v", err)
 	}
 	ApplyData(c, pods(
 		[3]string{"u1", "web", "Running"},
 		[3]string{"u2", "api", "Running"},
-	), theme.Nord())
+	), theme.New(palette.Nord()))
 
 	c.List.SetCursor(1)
 	c.List.ToggleMark()
@@ -275,7 +276,7 @@ func TestSourceListIsMarkable(t *testing.T) {
 	ApplyData(c, pods(
 		[3]string{"u2", "api", "Running"},
 		[3]string{"u1", "web", "Running"},
-	), theme.Nord())
+	), theme.New(palette.Nord()))
 	if got := c.List.Marks(); len(got) != 1 || got[0] != "api" {
 		t.Fatalf("list marks after reorder = %v, want [api]", got)
 	}
@@ -289,7 +290,7 @@ func TestTreeIsMarkable(t *testing.T) {
 		Root: &cfg.TreeNode{Label: "root", Children: []*cfg.TreeNode{
 			{Label: "a"}, {Label: "b"},
 		}},
-	}, theme.Nord())
+	}, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatalf("NewComponent: %v", err)
 	}
@@ -302,7 +303,7 @@ func TestTreeIsMarkable(t *testing.T) {
 		t.Fatalf("tree marks = %v, want one", got)
 	}
 	marks := c.Tree.Marks()
-	c.Rebuild(theme.Dark())
+	c.Rebuild(theme.New(palette.Dark()))
 	if got := c.Tree.Marks(); len(got) != len(marks) {
 		t.Errorf("tree marks lost across rebuild: %v -> %v", marks, got)
 	}

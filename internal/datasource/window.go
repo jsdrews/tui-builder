@@ -48,11 +48,22 @@ type WindowQuery struct {
 	// table's columns before they get here, so an implementation can
 	// look them up directly.
 	Filters map[string]string
+	// Compares are scoped terms that compare rather than match — "year>=1950"
+	// — each sent as the param `window.filter_ops` or a `filters:` map
+	// entry names for that column and comparison. http only.
+	Compares []Comparison
 
 	// Sort is the title of the column to order by, "" when unsorted.
 	Sort string
 	// Desc reverses the order.
 	Desc bool
+}
+
+// Comparison is one comparing term: a column title, a comparison from
+// config.FilterOpNames other than contains ("eq", "gte", …), and the
+// value as typed.
+type Comparison struct {
+	Title, Op, Value string
 }
 
 // WindowPage is what one FetchWindow returned.

@@ -118,3 +118,11 @@ _Avoid_: category, section (a section is a screen or tab)
 **Menu**:
 A component listing screens to open, grouped, where picking an item pushes its screen. Not the action menu, which is the overlay listing a screen's bindings.
 _Avoid_: launcher, nav, using "menu" alone for the action menu
+
+**Palette**:
+The colours a screen is drawn in, picked by name (`app.theme`) and cycled with `t`.
+_Avoid_: using "theme" for the palette alone (tuilib's theme is a palette, a surface and glyphs together)
+
+**Surface**:
+How every pane's edge and body are drawn: lines, a filled card, a band, a shadow or a side bar. Chosen independently of the palette (`app.surface`) and cycled with `T`.
+_Avoid_: border style, skin

@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/poll"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
@@ -26,7 +27,7 @@ func polledModel(t *testing.T) *Model {
 	sc := &cfg.Screen{Layout: cfg.Node{VStack: []cfg.Item{
 		{Node: cfg.Node{Component: "la"}}, {Node: cfg.Node{Component: "lb"}}, {Node: cfg.Node{Component: "lc"}},
 	}}}
-	m, err := New(sc, comps, sources, nil, theme.Nord())
+	m, err := New(sc, comps, sources, nil, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}

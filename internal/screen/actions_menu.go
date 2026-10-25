@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -52,7 +53,41 @@ func (m *Model) Actions() taction.Set {
 		}
 		out = append(out, m.menuAction(b, def, cur, focused))
 	}
+	orderGroups(out, build.ActionGroupOrder())
 	return taction.Set{Target: target, Count: count, Targets: targets, Actions: out}
+}
+
+// orderGroups puts the actions' groups in app.action_groups order. tuilib
+// draws groups in the order it first sees them, so a stable sort by each
+// group's rank is all it takes: listed groups first, in the listed
+// order, then the rest as the bindings first name them, with binding
+// order kept inside each group. Ungrouped actions go last either way.
+func orderGroups(actions []taction.Action, order []string) {
+	if len(order) == 0 {
+		return
+	}
+	rank := map[string]int{}
+	for i, g := range order {
+		rank[g] = i
+	}
+	for _, a := range actions {
+		if _, ok := rank[a.Group]; !ok && a.Group != "" {
+			rank[a.Group] = len(rank)
+		}
+	}
+	slices.SortStableFunc(actions, func(x, y taction.Action) int {
+		rx, okx := rank[x.Group]
+		ry, oky := rank[y.Group]
+		switch {
+		case !okx && !oky:
+			return 0
+		case !okx:
+			return 1
+		case !oky:
+			return -1
+		}
+		return rx - ry
+	})
 }
 
 // selectionTarget names what the verbs will act on, and how many.
@@ -116,6 +151,9 @@ func (m *Model) menuAction(b cfg.ActionBinding, def *cfg.Action, cur *build.Comp
 		// differently still share its "exclusive" check, and two
 		// actions that share a label don't.
 		ID: b.Action,
+		// read / write by default (see cfg.ActionBinding.MenuGroup);
+		// tuilib draws headings once the menu holds two or more.
+		Group: b.MenuGroup(def),
 	}
 	// Any key but enter is a shortcut inside the menu: tuilib draws it in
 	// the right-hand column and runs it while the menu is open. enter

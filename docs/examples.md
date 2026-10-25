@@ -658,6 +658,20 @@ task example NAME=push_actions
     --8<-- "examples/push_actions.yaml"
     ```
 
+### menu
+
+A `type: menu` home screen: grouped sections, `/` to filter, `enter` to open, and `bind:` filling a shared screen's parameters.
+
+```sh
+task example NAME=menu
+```
+
+??? example "menu.yaml"
+
+    ```yaml
+    --8<-- "examples/menu.yaml"
+    ```
+
 ### on_cursor
 
 `on_cursor:`: a repos table drives a detail inspector below it.

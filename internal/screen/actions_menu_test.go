@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	taction "github.com/jsdrews/tuilib/pkg/action"
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	"github.com/jsdrews/tui-builder/internal/build"
@@ -35,7 +36,7 @@ func menuModel(t *testing.T, bindings []cfg.ActionBinding, reg map[string]*cfg.A
 		}},
 		Actions: bindings,
 	}
-	m, err := New(sc, comps, sources, reg, theme.Nord())
+	m, err := New(sc, comps, sources, reg, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -172,7 +173,7 @@ func TestSetTargetNamesTheSelection(t *testing.T) {
 	build.ApplyData(m.tree.All()[0], []any{
 		map[string]any{"name": "web"},
 		map[string]any{"name": "api"},
-	}, theme.Nord())
+	}, theme.New(palette.Nord()))
 
 	set := m.Actions()
 	if set.Count != 1 {
@@ -225,7 +226,7 @@ func markableModel(t *testing.T, bindings []cfg.ActionBinding, reg map[string]*c
 		"items": cfg.NewEntry(&cfg.Source{Type: "static", Data: []any{}}),
 	}
 	sc := &cfg.Screen{Title: "Pods", Layout: cfg.Node{Component: "pods"}, Actions: bindings}
-	m, err := New(sc, comps, sources, reg, theme.Nord())
+	m, err := New(sc, comps, sources, reg, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -233,7 +234,7 @@ func markableModel(t *testing.T, bindings []cfg.ActionBinding, reg map[string]*c
 		map[string]any{"name": "web"},
 		map[string]any{"name": "api"},
 		map[string]any{"name": "db"},
-	}, theme.Nord())
+	}, theme.New(palette.Nord()))
 	return m
 }
 
@@ -482,7 +483,7 @@ func TestBindingKeyIsAMenuShortcut(t *testing.T) {
 		}
 	}
 
-	opts := theme.Nord().Actions()
+	opts := theme.New(palette.Nord()).Actions()
 	opts.Set = set
 	menu := taction.New(opts)
 	_, cmd := menu.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
@@ -515,10 +516,59 @@ func TestActionsCarryIDAndTargets(t *testing.T) {
 
 	m = menuModel(t, bindings, reg)
 	m.tree.Components["pods"].Cfg.Markable = true
-	m.tree.Components["pods"].Rebuild(theme.Nord())
+	m.tree.Components["pods"].Rebuild(theme.New(palette.Nord()))
 	runToQuiescence(t, m, drainCmd(m.OnEnter(nil))...)
 	set = m.Actions()
 	if len(set.Targets) != 1 || set.Targets[0] != "web" {
 		t.Errorf("keyed rows: Targets = %v, want [web]", set.Targets)
+	}
+}
+
+// Groups come from the action unless the binding names one: a push or
+// GET reads, other http writes, exec has none.
+func TestMenuActionGroups(t *testing.T) {
+	m := menuModel(t,
+		[]cfg.ActionBinding{
+			{Key: "o", Action: "open", Label: "open", From: "pods"},
+			{Key: "g", Action: "get", Label: "get"},
+			{Key: "d", Action: "del", Label: "delete"},
+			{Key: "x", Action: "shell", Label: "shell"},
+			{Key: "y", Action: "shell", Label: "copy", Group: "tools"},
+		},
+		map[string]*cfg.Action{
+			"open":  {Push: "detail"},
+			"get":   {Type: "http", URL: "http://h/x", Method: "get"},
+			"del":   {Type: "http", URL: "http://h/x", Method: "DELETE"},
+			"shell": {Run: []string{"true"}},
+		})
+	for label, want := range map[string]string{"open": "read", "get": "read", "delete": "write", "shell": "", "copy": "tools"} {
+		a, ok := find(m.Actions(), label)
+		if !ok {
+			t.Fatalf("%s missing from the menu", label)
+		}
+		if a.Group != want {
+			t.Errorf("%s: group = %q, want %q", label, a.Group, want)
+		}
+	}
+}
+
+// app.action_groups puts its groups first, in its order; the rest follow
+// as the bindings name them, binding order kept inside each group, and
+// ungrouped actions last.
+func TestMenuActionGroupOrder(t *testing.T) {
+	actions := []taction.Action{
+		{Label: "a", Group: "read"},
+		{Label: "b"},
+		{Label: "c", Group: "tools"},
+		{Label: "d", Group: "write"},
+		{Label: "e", Group: "read"},
+	}
+	orderGroups(actions, []string{"write", "read"})
+	var got []string
+	for _, a := range actions {
+		got = append(got, a.Label)
+	}
+	if want := "d a e c b"; strings.Join(got, " ") != want {
+		t.Errorf("order = %v, want %s", got, want)
 	}
 }

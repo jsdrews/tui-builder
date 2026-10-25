@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/jsdrews/tuilib/pkg/inspector"
 	"github.com/jsdrews/tuilib/pkg/list"
 	"github.com/jsdrews/tuilib/pkg/logview"
+	"github.com/jsdrews/tuilib/pkg/menu"
 	"github.com/jsdrews/tuilib/pkg/remote"
 	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/textview"
@@ -43,6 +46,7 @@ const (
 	KEventlog
 	KInput
 	KToggle
+	KMenu
 )
 
 // Component is a live, themed component pointer plus the originating config
@@ -61,6 +65,7 @@ type Component struct {
 	Eventlog  *eventlog.Model
 	Input     *input.Model
 	Toggle    *toggle.Model
+	Menu      *menu.Model
 
 	// Remote is set on a table bound to a windowed source, which tuilib's
 	// pkg/remote drives; Table then points at its embedded table. Every
@@ -125,6 +130,9 @@ func NewComponent(c *cfg.Component, th theme.Theme) (*Component, error) {
 	case "toggle":
 		m := buildToggle(c, th)
 		return &Component{Cfg: c, Kind: KToggle, Toggle: &m}, nil
+	case "menu":
+		m := buildMenu(c, th)
+		return &Component{Cfg: c, Kind: KMenu, Menu: &m}, nil
 	case "eventlog":
 		// A stand-in until the screen binds it to its source with
 		// NewRemoteEventlog; it draws an empty pane meanwhile.
@@ -193,6 +201,10 @@ func (c *Component) Rebuild(th theme.Theme) {
 		st := c.Toggle.State()
 		*c.Toggle = buildToggle(c.Cfg, th)
 		c.Toggle.Restore(st)
+	case KMenu:
+		st := c.Menu.State()
+		*c.Menu = buildMenu(c.Cfg, th)
+		c.Menu.Restore(st)
 	}
 	c.recolor(th)
 }
@@ -1066,6 +1078,44 @@ func buildToggle(c *cfg.Component, th theme.Theme) toggle.Model {
 	opts.NoLabel = c.NoLabel
 	applyPaneColors(&opts.ActiveColor, &opts.InactiveColor, nil, c.Colors, th)
 	return toggle.New(opts)
+}
+
+// buildMenu is a menu of the config's items. Each item's ID is its
+// index, which is how the screen finds the item a ChosenMsg names; the
+// filter is always on, since a menu long enough to need groups is long
+// enough to want `/`.
+func buildMenu(c *cfg.Component, th theme.Theme) menu.Model {
+	opts := th.Menu()
+	opts.Title = c.Title
+	opts.Filterable = true
+	opts.Items = make([]menu.Item, len(c.MenuItems))
+	for i, it := range c.MenuItems {
+		opts.Items[i] = menu.Item{
+			ID:          strconv.Itoa(i),
+			Label:       it.Label,
+			Group:       it.Group,
+			Description: it.Description,
+		}
+	}
+	applyPaneColors(&opts.ActiveColor, &opts.InactiveColor, nil, c.Colors, th)
+	return menu.New(opts)
+}
+
+// MenuItemFor is the config item a menu's ChosenMsg names, if msg is
+// that menu's.
+func MenuItemFor(c *Component, msg tea.Msg) (cfg.MenuItem, bool) {
+	if c.Kind != KMenu {
+		return cfg.MenuItem{}, false
+	}
+	it, ok := c.Menu.Chosen(msg)
+	if !ok {
+		return cfg.MenuItem{}, false
+	}
+	i, err := strconv.Atoi(it.ID)
+	if err != nil || i < 0 || i >= len(c.Cfg.MenuItems) {
+		return cfg.MenuItem{}, false
+	}
+	return c.Cfg.MenuItems[i], true
 }
 
 // InputValue is an input's or toggle's current value, as ${input.NAME}

@@ -106,3 +106,19 @@ func TestNoFormWhenEveryInputIsBoundOrDefaulted(t *testing.T) {
 		t.Errorf("defaults not substituted into the confirm:\n%s", plain)
 	}
 }
+
+// The input form is framed with the binding's label, so the modal says
+// which action it's asking for.
+func TestInputFormTitledWithActionLabel(t *testing.T) {
+	c := orderConfig()
+	c.TUI.Screen.Actions[0].Label = "Place order"
+	m := deleteScreen(t, c)
+	runToQuiescence(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.formModal == nil {
+		t.Fatal("expected the input form to open for the unbound inputs")
+	}
+	plain := xansi.Strip(m.Layout().Render(geom.New(0, 0, 100, 40)))
+	if !strings.Contains(plain, "Place order") {
+		t.Errorf("input form isn't titled with the action label:\n%s", plain)
+	}
+}

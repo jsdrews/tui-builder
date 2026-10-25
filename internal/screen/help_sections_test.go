@@ -3,6 +3,7 @@ package screen
 import (
 	"testing"
 
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
@@ -27,7 +28,7 @@ func helpModel(t *testing.T, bindings []cfg.ActionBinding) *Model {
 		registry[b.Action] = &cfg.Action{Run: []string{"echo", b.Action}}
 	}
 	sc := &cfg.Screen{Title: "Pods", Layout: cfg.Node{Component: "pods"}, Actions: bindings}
-	m, err := New(sc, comps, sources, registry, theme.Nord())
+	m, err := New(sc, comps, sources, registry, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -82,7 +83,7 @@ func TestHelpSectionsOmitUnconfiguredGroups(t *testing.T) {
 	sources := map[string]*cfg.Source{
 		"pods": cfg.NewEntry(&cfg.Source{Type: "static", Data: []any{}}),
 	}
-	m, err := New(&cfg.Screen{Title: "Pods", Layout: cfg.Node{Component: "pods"}}, comps, sources, nil, theme.Nord())
+	m, err := New(&cfg.Screen{Title: "Pods", Layout: cfg.Node{Component: "pods"}}, comps, sources, nil, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

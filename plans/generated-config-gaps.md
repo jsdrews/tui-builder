@@ -11,7 +11,7 @@ refuses with a 400.
 It's locked: every decision was made on the map
 [Map: tuilib table bugs and tui-builder gaps from generated configs](https://github.com/jsdrews/tui-builder/issues/105).
 Each section links the ticket that holds its detail and reasoning.
-Six tuilib PRs and a release come first, then eight tui-builder PRs, in
+Six tuilib PRs and a release come first, then nine tui-builder PRs, in
 the [order at the bottom](#implementation-order).
 
 Terms follow [`CONTEXT.md`](../CONTEXT.md), which gains **Refusal**,
@@ -236,7 +236,30 @@ window:
 - It travels with a preset's `window:`. It's allowed on http and exec;
   on exec it only decides which columns are sortable.
 
-## 9. Validation
+## 9. Surfaces
+
+Added after the map closed, with the tuilib v0.40.0 bump (B4), which
+replaced border shapes with surfaces.
+
+- `app.surface:` picks the starting surface by built-in name
+  (`outlined`, `filled`, `banded`, `elevated`, `accented`); an unknown
+  name is a load error. The start is the `TUI_BUILDER_SURFACE` env var,
+  then `app.surface`, then the user's tuilib `surface:`, then
+  `outlined`.
+- `app.surface_key` (default `T`, `-` pins it) cycles all five, starting
+  from the chosen one. It's a shell key like `theme_key`.
+- `app.borders.active` / `overlay` shape the `outlined` surface wherever
+  it's drawn; `slot_brackets` and `glyphs.rule` apply to every surface.
+  `app.borders.inactive` is a load error: a surface draws the same lines
+  focused or not.
+- `app.colors: auto | truecolor | 256 | 16` (default `auto`) forces the
+  colour depth, for terminals that support more than they say (tmux
+  often hides `COLORTERM`). `TUI_BUILDER_COLORS` overrides it for one
+  run. It's set before anything is drawn, so surfaces resolve against
+  it too. An unknown value is a load error.
+- Not here: a per-component `surface:`.
+
+## 10. Validation
 
 Each PR adds its own rows. All are load errors unless marked.
 
@@ -253,6 +276,10 @@ Each PR adds its own rows. All are load errors unless marked.
 | `window.filter_ops` (expanded) | the same title with different `value:` keys across bound tables; a rule covering no column |
 | `window.sort_fields` | without `sort_param` (exec: without `${window.sort}`); on an Anchored window; an empty field |
 | `columns[].sortable` | `true` on a column `sort_fields` doesn't match |
+| `app.surface` | not a built-in surface name |
+| `app.colors` | not one of `auto`, `truecolor`, `256`, `16` |
+| `app.surface_key` | collides with another shell key |
+| `app.borders.inactive` | set at all |
 
 ## Implementation order
 
@@ -276,6 +303,7 @@ tuilib is at v0.39.0; tui-builder is pinned to v0.35.0.
 | B6 | tui-builder | **Action groups**: `group:`, defaults, `app.action_groups`, theme colours | 3 | B4 |
 | B7 | tui-builder | **Menu component** | 5 | B1, B6 |
 | B8 | tui-builder | **Filter rule**: `filter_ops`, `filter_except`, per-op `filters:`, the unsupported-op notice | 7 | B4 |
+| B9 | tui-builder | **Surfaces**: `app.surface`, `app.surface_key`, `app.colors`, chrome on every surface | 9 | B4 |
 
 B1, B2 and B3 don't need the release and can start at once, alongside
 the tuilib PRs. B4 does nothing but the bump and the form title, so that

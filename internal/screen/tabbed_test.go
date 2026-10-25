@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jsdrews/tuilib/pkg/palette"
 	tscreen "github.com/jsdrews/tuilib/pkg/screen"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
@@ -36,7 +37,7 @@ func tabsExample(t *testing.T, set func(*cfg.Screen)) *Tabbed {
 	if set != nil {
 		set(&c.TUI.Screen)
 	}
-	s, err := Build(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	s, err := Build(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +118,7 @@ func TestTabbedSwitchKeys(t *testing.T) {
 func TestTabbedThemeSwapKeepsTheActiveTab(t *testing.T) {
 	h := tabsExample(t, nil)
 	pump(t, h, shiftRight)
-	h.SetTheme(theme.Dark())
+	h.SetTheme(theme.New(palette.Dark()))
 	if h.tabs.ActiveLabel() != "Services" {
 		t.Errorf("after a theme swap, active = %q", h.tabs.ActiveLabel())
 	}
@@ -142,7 +143,7 @@ func TestBuildMultiBuildsATabbedScreen(t *testing.T) {
 		},
 		Sources: map[string]*cfg.Source{},
 	}
-	s, err := BuildMulti("detail", multi, build.Selection{String: "web"}, nil, theme.Nord())
+	s, err := BuildMulti("detail", multi, build.Selection{String: "web"}, nil, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}

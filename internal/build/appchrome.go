@@ -24,6 +24,8 @@ var appChrome struct {
 	keys        map[string]cfg.KeyList
 	formSpacing int
 	mask        rune
+	glyphs      cfg.Glyphs
+	groups      []string
 }
 
 // SetAppChrome records the app-wide component and form settings. Call it
@@ -31,6 +33,8 @@ var appChrome struct {
 func SetAppChrome(a *cfg.App) {
 	appChrome.keys = a.Keys
 	appChrome.formSpacing = a.FormSpacing
+	appChrome.glyphs = a.Glyphs
+	appChrome.groups = a.ActionGroups
 	appChrome.mask = 0
 	if a.Glyphs.Mask != "" {
 		appChrome.mask = []rune(a.Glyphs.Mask)[0]
@@ -47,6 +51,10 @@ func FormOptions(th theme.Theme) form.Options {
 	}
 	return opts
 }
+
+// ActionGroupOrder is app.action_groups: the order the action menu's
+// group headings come in, ahead of any group it doesn't list.
+func ActionGroupOrder() []string { return appChrome.groups }
 
 // MaskChar is the character a masked field draws per typed character;
 // 0 keeps tuilib's default.

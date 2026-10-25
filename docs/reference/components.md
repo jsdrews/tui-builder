@@ -15,6 +15,7 @@ is either **static**, holding content declared in the YAML, or
 | [`tree`](#tree) | a hierarchy, expandable | `root:` | `label:` + `children:` or `group_by:` |
 | [`inspector`](#inspector) | label/value pairs, nested | `fields:` | each field's `path:`, or `auto:` |
 | [`eventlog`](#eventlog) | a timeline of paged events or lines | — | `key:` + `text:` (windowed sources only) |
+| [`menu`](#menu) | screens to open, grouped, filterable | `items:` | — (static only) |
 
 ## Common fields
 
@@ -397,6 +398,41 @@ pods_table:
 **Validation:** neither takes `source:`; `initial` on a toggle is `true` or
 `false`; `char_limit` can't be negative; their fields are errors on other
 kinds.
+
+## `menu`
+
+A list of screens to open, for a config with more sections than tabs can
+hold: put a menu on a home screen and give each section a screen of its
+own. `enter` or a double click opens the focused item (pushing its
+screen; `esc` comes back), `/` filters on label and group, and `[` / `]`
+jump between groups. A menu can sit next to other components on any
+screen or tab.
+
+Its `items:` are maps, not strings:
+
+| Field | Type | Default | Valid on/with | What it does |
+|---|---|---|---|---|
+| `label` | string | — | required | The item's text. The filter matches it, and the group. |
+| `screen` | string | — | required | The screen in `tui.screens` the item opens. |
+| `group` | string | — | — | The heading the item sits under. Headings appear once the items name two or more groups; items with no group go last, under `other`. |
+| `description` | string | — | — | Drawn dimmed beside the label, cut off when space runs out. Not searched. |
+| `bind` | map of template | — | — | Fills the destination's source `parameters:`, as a push binding's `bind:` does. Literals or `${env.*}` only: a menu has no selection. |
+
+```yaml
+home_menu:
+  type: menu
+  title: Sections
+  items:
+    - {group: database, label: "postgres › instance", screen: db_pg_instance, description: "GET /…/instance"}
+    - {group: database, label: "mysql › instance",    screen: generic_instance, bind: {engine: mysql}}
+```
+
+**Validation:** a menu takes no `source:` and needs at least one item;
+each item needs `label` and a `screen` that exists in `tui.screens` (so
+a single-`screen:` config can't have one); `bind:` values can't use
+`${selection.*}`, `${input.*}` or any token but `${env.*}`. A menu owns
+`enter`, so it can't be an action binding's `from:`, and a screen-wide
+`enter` binding doesn't fire while a menu has focus.
 
 ## `activity`
 

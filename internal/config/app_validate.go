@@ -30,6 +30,7 @@ func (a *App) shellKeys() []shellKey {
 	add(a.HelpKeyName(), "opens the key overlay (app.help_key)", "pick another, or move app.help_key")
 	add(a.OutputConsoleKey(), "opens the output console (app.output_key)", "pick another, or set app.output_key to \"-\" to disable the console")
 	add(a.ThemeCycleKey(), "cycles the theme (app.theme_key)", "pick another, or set app.theme_key to \"-\" to pin the palette")
+	add(a.SurfaceCycleKey(), "cycles the surface (app.surface_key)", "pick another, or set app.surface_key to \"-\" to pin the surface")
 	add(a.ActionMenuKey(), "opens the action menu (app.actions_key)", "pick another, or set app.actions_key to \"-\" to turn the menu off")
 	return out
 }
@@ -39,6 +40,12 @@ func (a *App) shellKeys() []shellKey {
 func validateShell(a *App) error {
 	if a.QuitKey == "-" {
 		return fmt.Errorf("app.quit_key: can't be turned off — rebind it instead (ctrl+c also quits)")
+	}
+	if a.Colors != "" && !slices.Contains(ColorNames, a.Colors) {
+		return fmt.Errorf("app.colors: unknown value %q (want %s)", a.Colors, strings.Join(ColorNames, "|"))
+	}
+	if a.Surface != "" && !slices.Contains(SurfaceNames, a.Surface) {
+		return fmt.Errorf("app.surface: unknown surface %q (want %s)", a.Surface, strings.Join(SurfaceNames, "|"))
 	}
 	if a.HelpKey == "-" {
 		return fmt.Errorf("app.help_key: can't be turned off — rebind it instead (the overlay is where every binding is listed)")

@@ -146,3 +146,33 @@ func TestPushFromSingleScreenFailsLoad(t *testing.T) {
 		t.Fatalf("expected a single-screen error, got: %v", err)
 	}
 }
+
+func TestActionGroupsValidation(t *testing.T) {
+	reg := func() map[string]*Action {
+		return map[string]*Action{"open": {Push: "b"}, "del": {Type: "http", URL: "http://h", Method: "DELETE"}}
+	}
+	bindings := []ActionBinding{
+		{Key: "enter", Action: "open", From: "tbl"},
+		{Key: "x", Action: "del", Group: "danger"},
+	}
+	ok := pushConfig(bindings, reg())
+	ok.App.ActionGroups = []string{"danger", "read"}
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("listed groups are all used: %v", err)
+	}
+	for _, tc := range []struct {
+		groups []string
+		want   string
+	}{
+		{[]string{"read", "wirte"}, `app.action_groups[1]: no binding is in group "wirte"`},
+		{[]string{"read", "read"}, `"read" is listed twice`},
+		{[]string{"write"}, `no binding is in group "write"`}, // del names its own group
+	} {
+		c := pushConfig(bindings, reg())
+		c.App.ActionGroups = tc.groups
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("groups %v: want %q, got %v", tc.groups, tc.want, err)
+		}
+	}
+}

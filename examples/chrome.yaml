@@ -51,10 +51,8 @@ app:
 
   borders:
     active:   rounded       # normal | rounded | thick | double | hidden | block | ascii
-    inactive: rounded       # same shape as active on purpose: focus is
-                            # signalled by border *color*, and a pane that
-                            # changed weight on focus would move your eye
-                            # for a reason you didn't ask about
+                            # every pane, focused or not: focus is
+                            # signalled by border *color*
     overlay:  double        # the key overlay (`?`), confirm + alert dialogs,
                             # and the action menu — what is drawn *over* a
                             # screen rather than inside it. A heavier line

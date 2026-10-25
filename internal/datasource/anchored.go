@@ -31,8 +31,9 @@ type EdgeQuery struct {
 	Newer  bool
 	Limit  int
 	// Search and Filters mean what they do on WindowQuery.
-	Search  string
-	Filters map[string]string
+	Search   string
+	Filters  map[string]string
+	Compares []Comparison
 }
 
 // EdgePage is one edge request's answer.

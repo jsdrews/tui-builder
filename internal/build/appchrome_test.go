@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
@@ -23,7 +24,7 @@ func TestAppKeysRemapEveryListTableAndTree(t *testing.T) {
 		"filter":   {"F"},
 		"sort_dir": {"S"},
 	}})
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 
 	tbl := tableOptions(&cfg.Component{Type: "table"}, th)
 	if got := tbl.Keys.Filter.Keys(); len(got) != 1 || got[0] != "F" {
@@ -63,7 +64,7 @@ func hasKey(bindings []key.Binding, k string) bool {
 }
 
 func TestFormOptionsAndMaskFollowTheApp(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	if FormOptions(th).FieldSpacing != nil || MaskChar() != 0 {
 		t.Fatal("unset app settings should leave tuilib's defaults")
 	}
@@ -77,13 +78,11 @@ func TestFormOptionsAndMaskFollowTheApp(t *testing.T) {
 }
 
 func TestActivityGlyphsReachEveryTheme(t *testing.T) {
-	themes := ApplyChrome(theme.All(), &cfg.App{Glyphs: cfg.Glyphs{
-		ActivityOK: "+", ActivityFail: "!", ActivityChanged: "~",
-	}})
-	for _, th := range themes {
-		g := th.Glyphs
+	a := &cfg.App{Glyphs: cfg.Glyphs{ActivityOK: "+", ActivityFail: "!", ActivityChanged: "~"}}
+	for _, p := range palette.All() {
+		g := chromeTheme(t, p, a).Glyphs
 		if g.ActivityOK != "+" || g.ActivityFail != "!" || g.ActivityChanged != "~" {
-			t.Errorf("%s: activity glyphs = %q %q %q", th.Name, g.ActivityOK, g.ActivityFail, g.ActivityChanged)
+			t.Errorf("%s: activity glyphs = %q %q %q", p.Name, g.ActivityOK, g.ActivityFail, g.ActivityChanged)
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jsdrews/tuilib/pkg/geom"
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 	"github.com/jsdrews/tuilib/pkg/tree"
 
@@ -16,7 +17,7 @@ import (
 // `auto: true`, the inspector accepts whatever the source returns and
 // derives labeled fields from the map keys. No declared shape needed.
 func TestDeriveInspectorFieldsAutoWalksAnyShape(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	comp := &cfg.Component{Type: "inspector", Auto: true}
 	data := map[string]any{
 		"name":    "widget",
@@ -47,7 +48,7 @@ func TestDeriveInspectorFieldsAutoWalksAnyShape(t *testing.T) {
 // nested map under a key should expand into Children, not stringify as
 // "map[...]" under a scalar Value. Same for []any.
 func TestDeriveInspectorFieldsAutoNestsSubStructures(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	comp := &cfg.Component{Type: "inspector", Auto: true}
 	data := map[string]any{
 		"metadata": map[string]any{
@@ -89,7 +90,7 @@ func TestDeriveInspectorFieldsAutoNestsSubStructures(t *testing.T) {
 // pre-expansion carry across SetRoot).
 func treeComponent(t *testing.T, cfgComp *cfg.Component) *Component {
 	t.Helper()
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	c, err := NewComponent(cfgComp, th)
 	if err != nil {
 		t.Fatalf("build tree component: %v", err)
@@ -123,7 +124,7 @@ func visibleLabels(m *tree.Model) []string {
 // TestApplyTreeFlatBindsItemsAsChildren covers the ungrouped path:
 // items become direct children of the root, labeled via Cfg.Label.
 func TestApplyTreeFlatBindsItemsAsChildren(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	c := treeComponent(t, &cfg.Component{
 		Type:         "tree",
 		Title:        "Resources",
@@ -152,7 +153,7 @@ func TestApplyTreeFlatBindsItemsAsChildren(t *testing.T) {
 // a flat list gets bucketed under parent nodes named for the GroupBy
 // value; leaves land under their bucket.
 func TestApplyTreeGroupByBucketsItems(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	c := treeComponent(t, &cfg.Component{
 		Type:         "tree",
 		Title:        "Namespace",
@@ -205,7 +206,7 @@ func TestSourceTreeRootLabelFallbacks(t *testing.T) {
 // buildTree seeds a placeholder root with the same label the apply path
 // uses, and tuilib.tree.SetRoot preserves reachable expanded entries.
 func TestApplyTreePreservesRootExpansionAcrossRefresh(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	c := treeComponent(t, &cfg.Component{
 		Type:         "tree",
 		Title:        "Resources",
@@ -233,7 +234,7 @@ func TestApplyTreePreservesRootExpansionAcrossRefresh(t *testing.T) {
 // path — a raw string (kubectl describe, help page, markdown blob)
 // lands as the textview's content untouched.
 func TestApplyTextviewStringSetsContent(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	c, err := NewComponent(&cfg.Component{Type: "textview", Source: "src"}, th)
 	if err != nil {
 		t.Fatalf("build textview: %v", err)
@@ -248,7 +249,7 @@ func TestApplyTextviewStringSetsContent(t *testing.T) {
 // TestApplyTextviewJoinsStringSlice covers the []any-of-strings shape
 // (matches logview's convention so a source can back either component).
 func TestApplyTextviewJoinsStringSlice(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	c, err := NewComponent(&cfg.Component{Type: "textview", Source: "src"}, th)
 	if err != nil {
 		t.Fatalf("build textview: %v", err)
@@ -264,7 +265,7 @@ func TestApplyTextviewJoinsStringSlice(t *testing.T) {
 // + Wrap fields feed into the constructed model, so static-content mode
 // works without a source.
 func TestBuildTextviewReadsWrapAndContent(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	c, err := NewComponent(&cfg.Component{
 		Type:    "textview",
 		Content: "hello",
@@ -287,7 +288,7 @@ func TestBuildTextviewReadsWrapAndContent(t *testing.T) {
 // trees, k8s owner-reference graphs, org charts, anything where the
 // source already carries the hierarchy.
 func TestApplyTreeChildrenWalksNestedStructure(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	c := treeComponent(t, &cfg.Component{
 		Type:         "tree",
 		Title:        "Files",
@@ -329,7 +330,7 @@ func TestApplyTreeChildrenWalksNestedStructure(t *testing.T) {
 // with Auto=false, we take the declared Fields path unchanged. This
 // pins that adding the Auto branch doesn't disturb the existing wire.
 func TestDeriveInspectorFieldsDeclaredModeIgnoresAuto(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	comp := &cfg.Component{
 		Type: "inspector",
 		Fields: []cfg.InspectorField{

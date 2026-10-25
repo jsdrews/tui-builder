@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
@@ -11,7 +12,7 @@ import (
 )
 
 func TestTableOptionsCarryWorkstream4Fields(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	opts := tableOptions(&cfg.Component{
 		Type: "table", LoadingLabel: "loading pods…",
 		Activity: &cfg.Activity{Status: cfg.Path{"phase"}, Busy: []string{"Pending"}, Revision: cfg.Path{"meta.rev"}},
@@ -39,7 +40,7 @@ func TestTableOptionsCarryWorkstream4Fields(t *testing.T) {
 }
 
 func TestEventlogOptionsCarryWorkstream4Fields(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	no := false
 	opts := eventlogOptions(&cfg.Component{Type: "eventlog", Gutter: &no, NewFor: "5s",
 		Colors: &cfg.Colors{New: "green", Gutter: "blue", Cell: "white", SelectedBG: "red"}}, th)

@@ -477,6 +477,10 @@ func (s *Source) Clone() *Source {
 		cp.Filters = maps.Clone(s.Window.Filters)
 		cp.Sorts = maps.Clone(s.Window.Sorts)
 		cp.SortFields = slices.Clone(s.Window.SortFields)
+		cp.FilterOps = maps.Clone(s.Window.FilterOps)
+		cp.FilterExcept = slices.Clone(s.Window.FilterExcept)
+		cp.FilterColumnOps = cloneOps(s.Window.FilterColumnOps)
+		cp.FilterParams = cloneOps(s.Window.FilterParams)
 		if s.Window.PageStart != nil {
 			n := *s.Window.PageStart
 			cp.PageStart = &n
@@ -664,6 +668,9 @@ func (w *WindowConfig) validateShared(path string) error {
 			return fmt.Errorf("%s.filters.%s: empty destination name", path, title)
 		}
 	}
+	if err := w.validateFilterOps(path); err != nil {
+		return err
+	}
 	for i, field := range w.SortFields {
 		if strings.TrimSpace(field) == "" {
 			return fmt.Errorf("%s.sort_fields[%d]: empty sort field name", path, i)
@@ -697,7 +704,7 @@ func (s *Source) WindowSearches() bool {
 
 // ScopedFilterSyntax lists a window's filterable columns the way the
 // user types them, "author:…" — lowercased, sorted, joined by sep.
-func ScopedFilterSyntax(filters map[string]string, sep string) string {
+func ScopedFilterSyntax[V any](filters map[string]V, sep string) string {
 	cols := make([]string, 0, len(filters))
 	for title := range filters {
 		cols = append(cols, strings.ToLower(title)+":…")
@@ -804,6 +811,12 @@ func (w *WindowConfig) validateExecWindow(path string, argv []string) error {
 	}
 	if len(w.SortFields) > 0 && !strings.Contains(strings.Join(argv, " "), "${window.sort}") {
 		return fmt.Errorf("%s.sort_fields: the command never references ${window.sort}, so there's nowhere to send the sort", path)
+	}
+	if len(w.FilterOps) > 0 {
+		return fmt.Errorf("%s.filter_ops: http-only — an exec command gets a scoped term's value as ${window.filters.NAME}, and only for `name:value` (contains)", path)
+	}
+	for title := range w.FilterColumnOps {
+		return fmt.Errorf("%s.filters.%s: a map of comparisons is http-only — on exec a `filters:` entry names the ${window.filters.NAME} token, for `name:value` (contains)", path, title)
 	}
 	if len(w.Sorts) > 0 {
 		return fmt.Errorf("%s.sorts: http-only — an exec command receives the column title as ${window.sort} and maps it itself", path)
@@ -1183,6 +1196,48 @@ func (s *Source) validateCache(path string) error {
 	}
 	if _, err := time.ParseDuration(s.TTL); err != nil {
 		return fmt.Errorf("%s.cache: invalid ttl %q: %w", path, s.TTL, err)
+	}
+	return nil
+}
+
+// cloneOps deep-copies a title → op → param table.
+func cloneOps(in map[string]map[string]string) map[string]map[string]string {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]map[string]string, len(in))
+	for k, v := range in {
+		out[k] = maps.Clone(v)
+	}
+	return out
+}
+
+// validateFilterOps checks the filter rule and any `filters:` map entries
+// on their own: known comparisons, a template that uses the column's
+// value, no empty params. Whether the rule covers anything is checked
+// against the bound tables (applyFilterRule, validateFilterRules).
+func (w *WindowConfig) validateFilterOps(path string) error {
+	for _, op := range sortedKeys(w.FilterOps) {
+		tpl := w.FilterOps[op]
+		if !slices.Contains(FilterOpNames, op) {
+			return fmt.Errorf("%s.filter_ops.%s: unknown comparison (want %s)", path, op, strings.Join(FilterOpNames, "|"))
+		}
+		if !strings.Contains(tpl, "${column.value}") {
+			return fmt.Errorf("%s.filter_ops.%s: %q doesn't use ${column.value} — the template is the param for every column, so it needs the column's field in it", path, op, tpl)
+		}
+	}
+	for _, title := range sortedKeys(w.FilterColumnOps) {
+		for _, op := range sortedKeys(w.FilterColumnOps[title]) {
+			if !slices.Contains(FilterOpNames, op) {
+				return fmt.Errorf("%s.filters.%s.%s: unknown comparison (want %s)", path, title, op, strings.Join(FilterOpNames, "|"))
+			}
+			if w.FilterColumnOps[title][op] == "" {
+				return fmt.Errorf("%s.filters.%s.%s: empty destination name", path, title, op)
+			}
+		}
+	}
+	if len(w.FilterExcept) > 0 && len(w.FilterOps) == 0 {
+		return fmt.Errorf("%s.filter_except: set without `filter_ops:` — there's no rule to except columns from", path)
 	}
 	return nil
 }

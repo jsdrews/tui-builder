@@ -371,6 +371,7 @@ func (s *httpSource) FetchEdge(ctx context.Context, q EdgeQuery) (EdgePage, erro
 				params.Set(param, val)
 			}
 		}
+		s.setCompares(params, q.Compares)
 	}
 	body := s.body
 	if s.bodyKind == "" {
@@ -430,6 +431,7 @@ func (s *httpSource) windowURL(q WindowQuery, page int) (string, error) {
 		// A scoped term whose column has no mapping was already folded
 		// into Search by the caller, so there's nothing to do here.
 	}
+	s.setCompares(vals, q.Compares)
 	if q.Sort != "" && w.SortParam != "" {
 		field := q.Sort
 		if mapped, ok := w.Sorts[field]; ok {
@@ -688,4 +690,16 @@ func (s *httpSource) edgeBody(patch map[string]any, q EdgeQuery, vals map[string
 		return out.Encode(), nil
 	}
 	return renderEdgeBody(s.body, patch, q, vals)
+}
+
+// setCompares sets each comparing term's param, as worked out at load
+// from filter_ops and `filters:` (WindowConfig.FilterParams). The screen
+// only passes comparisons the column has a param for, so a miss here
+// means nothing to send.
+func (s *httpSource) setCompares(vals neturl.Values, compares []Comparison) {
+	for _, c := range compares {
+		if param, ok := s.window.FilterParams[c.Title][c.Op]; ok {
+			vals.Set(param, c.Value)
+		}
+	}
 }

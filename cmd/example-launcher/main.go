@@ -19,6 +19,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jsdrews/tuilib/pkg/app"
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 )
 
@@ -44,17 +45,17 @@ func run() error {
 		return fmt.Errorf("no examples found — pass -dir <path> to point at a configs directory")
 	}
 
-	themes := theme.All()
-	initial := themes[0]
-
-	root := NewLauncher(paths, initial)
+	palettes := palette.All()
+	// The shell picks the starting palette and hands the root its
+	// composed theme straight away; this one only lasts until then.
+	root := NewLauncher(paths, theme.New(palettes[0]))
 
 	prog := tea.NewProgram(
 		app.New(app.Options{
-			Root:   root,
-			Themes: themes,
+			Root:     root,
+			Palettes: palettes,
 			// Same default as tui-builder: `t` cycles the palette.
-			// Without a binding the Themes list above is inert.
+			// Without a binding the Palettes list above is inert.
 			ThemeKey: key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "theme")),
 			// Match tui-builder: the launcher pushes the same screens, so
 			// mouse must be on here too or clicking would work only for

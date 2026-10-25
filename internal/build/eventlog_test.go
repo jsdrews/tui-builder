@@ -3,6 +3,7 @@ package build
 import (
 	"testing"
 
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
@@ -15,7 +16,7 @@ func TestEventlogItems(t *testing.T) {
 	items := EventlogItems(c, []any{
 		map[string]any{"id": 7, "stdout": "TASK [install] ***\nok: [web1]\n", "created": "10:00:01"},
 		map[string]any{"id": 8, "stdout": "", "event": "playbook_on_start"},
-	}, theme.Nord())
+	}, theme.New(palette.Nord()))
 
 	if len(items) != 2 {
 		t.Fatalf("got %d items, want 2", len(items))

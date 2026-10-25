@@ -50,10 +50,13 @@ actions:
 | `title` | string | — | — | The terminal window's title, set when the app starts. The breadcrumb shows each screen's own `title:`. |
 | `version` | string | — | — | Shown on the right of the statusbar. |
 | `theme` | string | first built-in | — | The starting palette. The `TUI_BUILDER_THEME` environment variable overrides it for one run; when neither is set, the `theme:` in your own `$XDG_CONFIG_HOME/tuilib/config.yaml` is used. An unknown name falls through to the next of those, then to the first theme. Names: `dark`, `accent`, `light`, `solarized`, `nord`, `dracula`, `gruvbox`, `catppuccin-mocha`, `catppuccin-latte`, `tokyo-night`, `rose-pine`, `rose-pine-dawn`, `one-dark`, `monokai`, `everforest-dark`, `base16-ocean`, `base16-eighties`, `base16-railscasts`, `base16-tomorrow-night`. |
+| `surface` | string | `outlined` | — | The starting surface: how every pane's edge and body are drawn, independent of the palette. `outlined` (line borders, no fill), `filled` (solid cards), `banded` (a card under a coloured header band), `elevated` (a card with a drop shadow) or `accented` (a bar down the left edge). The `TUI_BUILDER_SURFACE` environment variable overrides it for one run; when neither is set, the `surface:` in your tuilib config file is used. Filled surfaces need 256 colours (and `filled` / `elevated` block glyphs) and fall back toward `outlined` on a terminal without them. |
+| `colors` | string | `auto` | — | The colour depth: `auto` detects it from `TERM` and `COLORTERM`; `truecolor`, `256` or `16` forces it. For a terminal that supports more than it says, which is common inside tmux when `COLORTERM` isn't passed through. Forcing more than the terminal can show draws wrong colours. The `TUI_BUILDER_COLORS` environment variable overrides it for one run. It also decides whether `filled`, `banded` and `elevated` surfaces fall back. |
 | `glyphs` | map | — | — | Overrides the single-character marks components draw. See [`app.glyphs`](#appglyphs). |
 | `borders` | map | — | — | Border shapes and how a pane title meets its border. See [`app.borders`](#appborders). |
 | `actions_key` | string | `a` | — | Opens the action menu. `-` turns the menu off, which also turns off right-click targeting and menu shortcuts. No action may bind this key. |
 | `theme_key` | string | `t` | — | Cycles through every built-in palette, live. `-` pins the app to `theme:`. No action may bind this key. |
+| `surface_key` | string | `T` | — | Cycles through every built-in surface, live, starting from `surface:`. `-` pins the app to `surface:`. No action may bind this key. |
 | `output_key` | string | `o` | — | Opens the output console: every statusbar message and everything a subprocess streams, with a badge counting events and a picker for killing running work. `-` disables it. No action may bind this key. |
 | `quit_key` | string | `q` | — | Quits from the root screen. `ctrl+c` always quits too. Can be rebound but not turned off. |
 | `suspend_key` | string | `ctrl+z` | — | Suspends the app to the shell. `-` turns suspending off. |
@@ -63,6 +66,7 @@ actions:
 | `esc_pops` | bool | `true` | — | `esc` goes back one screen. `false` leaves going back to actions. |
 | `output` | map | — | — | The output console's scrollback cap and export directory. See [`app.output`](#appoutput). |
 | `actions_title` | string | `Actions` | — | The action menu's title. |
+| `action_groups` | list of string | — | — | The order of the action menu's group headings, e.g. `[read, write]`. Groups it doesn't list follow in the order a screen's bindings name them. Each name must be a group some binding falls under (its `group:`, or `read` / `write` by default); a name no binding uses, or one listed twice, is a load error. |
 | `form_spacing` | int | `0` | — | Blank lines between fields in action-input forms and boot prompts. |
 | `keys` | map | — | — | Remaps navigation keys in every list, table and tree. See [`app.keys`](#appkeys). |
 | `prompts` | list | — | — | A form shown at boot, before any screen renders. See [`app.prompts`](#appprompts). |
@@ -100,21 +104,23 @@ shifts every row it's drawn on, so it's rejected.
 
 ### `app.borders`
 
+The line shapes are the `outlined` surface's: they apply whenever it is drawn, whether chosen, cycled to, or fallen back to from another surface. `slot_brackets` applies on every surface.
+
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
-| `active` | string | `normal` | — | Border shape of the focused component. |
-| `inactive` | string | `normal` | — | Border shape of unfocused components. Focus is signalled by color, so set this differently from `active` only if you want panes to change weight on focus. |
+| `active` | string | `normal` | — | Border shape of every component, focused or not; focus is shown by colour. |
+| `inactive` | — | — | — | No longer supported, and a load error: every pane is drawn with the same lines. Set `active`. |
 | `overlay` | string | `thick` | — | Border shape of what floats over a screen: the key overlay, confirm and alert dialogs, the action menu. |
 | `slot_brackets` | string | `none` | — | How a pane's title meets the border line: `none` (`── title ──`), `corners` (`┐ title ┌`, reads as a tab), `tees` (`─┤ title ├─`). |
 
 **Validation:** shapes are one of `normal`, `rounded`, `thick`,
 `double`, `hidden`, `block`, `ascii`; `slot_brackets` is one of `none`,
-`corners`, `tees`.
+`corners`, `tees`; `inactive` can't be set.
 
 ```yaml
 app:
   glyphs: {cursor: ">", mark: "*"}
-  borders: {active: rounded, inactive: rounded, overlay: double, slot_brackets: corners}
+  borders: {active: rounded, overlay: double, slot_brackets: corners}
 ```
 
 ### `app.output`

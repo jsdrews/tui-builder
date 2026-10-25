@@ -293,6 +293,16 @@ func walkTemplates(c *Config, fn func(*string)) {
 		fn(&comp.InitialQuery)
 		fn(&comp.RootLabel)
 		visitSlice(comp.Items)
+		for i := range comp.MenuItems {
+			it := &comp.MenuItems[i]
+			fn(&it.Label)
+			fn(&it.Description)
+			for k, v := range it.Bind {
+				str := v
+				fn(&str)
+				it.Bind[k] = str
+			}
+		}
 		visitSlice(comp.Lines)
 		for i := range comp.Columns {
 			fn(&comp.Columns[i].Title)
