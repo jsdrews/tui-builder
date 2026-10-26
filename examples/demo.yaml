@@ -1,4 +1,5 @@
 app:
+  surface: filled
   title: TUIQuery Demo
   version: v0.1.0
   theme: nord

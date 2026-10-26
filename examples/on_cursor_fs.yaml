@@ -32,6 +32,7 @@
 #
 # Scroll with j/k, expand with space. The right pane updates continuously.
 app:
+  surface: filled
   title: Filesystem browser
   theme: nord
 

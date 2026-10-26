@@ -152,6 +152,8 @@ func componentNode(c *Component) layout.Node {
 		return layout.Sized(c.Input)
 	case KToggle:
 		return layout.Sized(c.Toggle)
+	case KMenu:
+		return layout.Sized(c.Menu)
 	}
 	return layout.RenderFunc(func(geom.Rect) string { return "" })
 }

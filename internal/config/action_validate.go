@@ -113,6 +113,44 @@ func hoistInlineActions(c *Config) error {
 	return nil
 }
 
+// validateActionGroups checks app.action_groups against the groups the
+// bindings use, explicit or worked out: a name listed twice, or one no
+// binding anywhere falls under, is a mistake rather than a preference.
+func validateActionGroups(c *Config) error {
+	if len(c.App.ActionGroups) == 0 {
+		return nil
+	}
+	used := map[string]bool{}
+	visit := func(s *Screen) {
+		for _, list := range s.Bindings("") {
+			for _, b := range *list {
+				if g := b.MenuGroup(c.Actions[b.Action]); g != "" {
+					used[g] = true
+				}
+			}
+		}
+	}
+	visit(&c.TUI.Screen)
+	for _, s := range c.TUI.Screens {
+		if s != nil {
+			visit(s)
+		}
+	}
+	seen := map[string]bool{}
+	for i, g := range c.App.ActionGroups {
+		switch {
+		case strings.TrimSpace(g) == "":
+			return fmt.Errorf("app.action_groups[%d]: empty group name", i)
+		case seen[g]:
+			return fmt.Errorf("app.action_groups[%d]: %q is listed twice", i, g)
+		case !used[g]:
+			return fmt.Errorf("app.action_groups[%d]: no binding is in group %q — check the spelling against the bindings' `group:` (or read / write, which push and http actions get by default)", i, g)
+		}
+		seen[g] = true
+	}
+	return nil
+}
+
 // validateActionDefs checks every entry in the top-level actions: map.
 // Runs after hoisting, so it covers inline declarations too.
 func validateActionDefs(actions map[string]*Action) error {
@@ -315,6 +353,8 @@ func validateActionBindings(bindings []ActionBinding, refs map[string]int, compo
 			}
 			switch components[b.From].Type {
 			case "list", "table", "tree", "eventlog":
+			case "menu":
+				return fmt.Errorf("%s: from %q is a menu, which owns enter and opens its items' screens itself — bind actions to another pane", bp, b.From)
 			default:
 				return fmt.Errorf("%s: from %q must be a list, table, tree or eventlog (got %s) — nothing else has a selected row", bp, b.From, components[b.From].Type)
 			}

@@ -1,4 +1,5 @@
 app:
+  surface: filled
   title: Kubernetes
   theme: nord
 data:

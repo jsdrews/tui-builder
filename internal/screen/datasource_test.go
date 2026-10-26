@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jsdrews/tuilib/pkg/app"
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
@@ -36,7 +37,7 @@ func TestDataSourceFetchApply(t *testing.T) {
 			Columns: []cfg.Column{
 				{Title: "Name", Width: 14, Value: cfg.Path{"name.common"}},
 				{Title: "Region", Width: 12, Value: cfg.Path{"region"}},
-				{Title: "Population", Width: 12, Value: cfg.Path{"population"}, Sort: "number", Align: "right", Sortable: true},
+				{Title: "Population", Width: 12, Value: cfg.Path{"population"}, Sort: "number", Align: "right", Sortable: yes()},
 			},
 		},
 	},
@@ -49,13 +50,13 @@ func TestDataSourceFetchApply(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var m tea.Model = app.New(app.Options{
 		Root:       root,
-		Themes:     []theme.Theme{theme.Nord()},
+		Palettes:   []palette.Palette{palette.Nord()},
 		SkipConfig: true,
 	})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
@@ -106,3 +107,6 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+// yes is a *bool true, for cfg.Column.Sortable.
+func yes() *bool { v := true; return &v }

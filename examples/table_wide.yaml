@@ -10,6 +10,7 @@
 # The thin bottom row inside the pane is the horizontal scrollbar
 # (theme.Table() enables it by default).
 app:
+  surface: filled
   title: Wide Table
   theme: nord
 

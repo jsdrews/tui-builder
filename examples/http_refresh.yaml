@@ -17,6 +17,7 @@
 #   - filter / sort / cursor all survive across refreshes (tuilib's
 #     SetRows update is in-place)
 app:
+  surface: filled
   title: Crypto prices (live)
   theme: nord
 

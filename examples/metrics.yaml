@@ -15,6 +15,7 @@
 # a row and press `a` → "scale": the confirm shows the ready count read
 # from the Ready column, ${selection.Ready}.
 app:
+  surface: filled
   title: Metrics
   theme: nord
 
@@ -68,6 +69,7 @@ tui:
         - {flex: 1, component: cluster}
     actions:
       - action: scale
+        group: write
         label: scale
         from: deployments
         bind: {name: "${selection.Name}", ready: "${selection.Ready}"}

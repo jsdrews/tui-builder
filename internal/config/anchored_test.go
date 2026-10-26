@@ -56,7 +56,7 @@ func TestAnchoredWindowValidation(t *testing.T) {
 		}, ""},
 		{"span table can't sort", func(c *Config) {
 			c.TUI.Components["events"] = &Component{Type: "table", Source: "events", MarkKey: Path{"_id"},
-				Columns: []Column{{Title: "T", Value: Path{"t"}, Sortable: true}}}
+				Columns: []Column{{Title: "T", Value: Path{"t"}, Sortable: yes()}}}
 		}, "order it walks them"},
 		{"span table has no initial sort", func(c *Config) {
 			c.TUI.Components["events"] = &Component{Type: "table", Source: "events", MarkKey: Path{"_id"},

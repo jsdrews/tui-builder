@@ -185,6 +185,14 @@ func runDump(args []string, listOnly, pretty, raw, all bool, limit int, maxDurat
 	// under `tui-builder` would fetch a literal "${env.HOST}/api" here —
 	// the same config behaving differently depending on which binary
 	// opened it.
+	//
+	// app.env `from:` values are read first, but only when something is
+	// fetched: a listing shouldn't run a password manager.
+	if !listOnly && len(args) >= 2 {
+		if err := c.ResolveEnv(); err != nil {
+			return err
+		}
+	}
 	c.SubstituteEnv()
 
 	// Route --param: if the target is a PIPELINE with its own

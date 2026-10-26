@@ -33,6 +33,7 @@ package screen
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -205,11 +206,11 @@ func (m *Model) initWindows() {
 // Rows are rendered with the theme current when the table was built; a
 // theme swap restyles the table but not the cells already fetched, the
 // same as for an ordinary table.
-func windowPage(src ds.WindowedSource, c *build.Component, mapped map[string]string, th theme.Theme) func(context.Context, remote.Window) ([]table.KeyedRow, int, error) {
+func windowPage(src ds.WindowedSource, c *build.Component, routes *cfg.WindowConfig, th theme.Theme) func(context.Context, remote.Window) ([]table.KeyedRow, int, error) {
 	return func(ctx context.Context, w remote.Window) ([]table.KeyedRow, int, error) {
-		page, err := src.FetchWindow(ctx, translateWindowQuery(w, mapped))
+		page, err := src.FetchWindow(ctx, translateWindowQuery(w, routes))
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, refusedOr(err)
 		}
 		rows := build.TableRows(c, page.Items, th)
 		out := make([]table.KeyedRow, len(rows))
@@ -220,11 +221,23 @@ func windowPage(src ds.WindowedSource, c *build.Component, mapped map[string]str
 	}
 }
 
+// refusedOr marks err for tuilib as a refusal when the server rejected
+// the request as unsupported (an http 400 or 422), so a refused sort is
+// reverted and its column taken out of the cycle rather than the table
+// failing. Anything else, and every exec error, stays a failure.
+func refusedOr(err error) error {
+	var he *ds.HTTPError
+	if errors.As(err, &he) && he.Refusal() {
+		return remote.Refused(err)
+	}
+	return err
+}
+
 // eventlogPage is windowPage for an eventlog: the same FetchWindow, with
 // each item turned into lines instead of cells.
-func eventlogPage(src ds.WindowedSource, c *build.Component, mapped map[string]string, th theme.Theme) func(context.Context, remote.Window) ([]eventlog.Item, int, error) {
+func eventlogPage(src ds.WindowedSource, c *build.Component, routes *cfg.WindowConfig, th theme.Theme) func(context.Context, remote.Window) ([]eventlog.Item, int, error) {
 	return func(ctx context.Context, w remote.Window) ([]eventlog.Item, int, error) {
-		page, err := src.FetchWindow(ctx, translateWindowQuery(w, mapped))
+		page, err := src.FetchWindow(ctx, translateWindowQuery(w, routes))
 		if err != nil {
 			return nil, 0, err
 		}
@@ -296,26 +309,26 @@ func viewportDelay(def *cfg.WindowConfig) time.Duration {
 // seekableFind is a paged view's search past what's loaded: the source's
 // `find:` request, answered with the match's position. nil (search what's
 // loaded) when the source declares no find.
-func seekableFind(src ds.Source, def *cfg.WindowConfig, mapped map[string]string) func(context.Context, remote.Find) (int, bool, error) {
+func seekableFind(src ds.Source, def *cfg.WindowConfig, routes *cfg.WindowConfig) func(context.Context, remote.Find) (int, bool, error) {
 	fs, ok := src.(ds.FindingSource)
 	if !ok || def == nil || def.Find == nil {
 		return nil
 	}
 	return func(ctx context.Context, f remote.Find) (int, bool, error) {
-		res, err := fs.FindItem(ctx, findQuery(f, mapped))
+		res, err := fs.FindItem(ctx, findQuery(f, routes))
 		return res.Position, res.Found, err
 	}
 }
 
 // anchoredFind is an Anchored view's search: the match's cursor, keyed
 // the way the view keys its items, so it re-anchors on that item.
-func anchoredFind(src ds.Source, def *cfg.WindowConfig, c *build.Component, mapped map[string]string) func(context.Context, remote.Find) (string, bool, error) {
+func anchoredFind(src ds.Source, def *cfg.WindowConfig, c *build.Component, routes *cfg.WindowConfig) func(context.Context, remote.Find) (string, bool, error) {
 	fs, ok := src.(ds.FindingSource)
 	if !ok || def == nil || def.Find == nil {
 		return nil
 	}
 	return func(ctx context.Context, f remote.Find) (string, bool, error) {
-		res, err := fs.FindItem(ctx, findQuery(f, mapped))
+		res, err := fs.FindItem(ctx, findQuery(f, routes))
 		if err != nil || !res.Found {
 			return "", false, err
 		}
@@ -327,12 +340,12 @@ func anchoredFind(src ds.Source, def *cfg.WindowConfig, c *build.Component, mapp
 	}
 }
 
-func findQuery(f remote.Find, mapped map[string]string) ds.FindQuery {
+func findQuery(f remote.Find, routes *cfg.WindowConfig) ds.FindQuery {
 	cursor, _ := build.SplitAnchoredKey(f.Cursor)
-	wq := translateWindowQuery(remote.Window{Filter: f.Filter}, mapped)
+	wq := translateWindowQuery(remote.Window{Filter: f.Filter}, routes)
 	return ds.FindQuery{
 		Term: f.Term, Newer: f.Newer, From: f.From, Cursor: cursor,
-		Search: wq.Search, Filters: wq.Filters,
+		Search: wq.Search, Filters: wq.Filters, Compares: wq.Compares,
 	}
 }
 
@@ -358,13 +371,13 @@ func growthOf(def *cfg.WindowConfig) (*cfg.Growing, *expr.Program, time.Duration
 
 // eventlogEdge is an Anchored eventlog's fetch: one FetchEdge from the
 // edge item's cursor, which tuilib hands back as that item's key.
-func eventlogEdge(src ds.AnchoredSource, c *build.Component, mapped map[string]string, th theme.Theme) func(context.Context, remote.Edge) ([]eventlog.Item, bool, error) {
+func eventlogEdge(src ds.AnchoredSource, c *build.Component, routes *cfg.WindowConfig, th theme.Theme) func(context.Context, remote.Edge) ([]eventlog.Item, bool, error) {
 	return func(ctx context.Context, e remote.Edge) ([]eventlog.Item, bool, error) {
 		cursor, _ := build.SplitAnchoredKey(e.Cursor)
-		wq := translateWindowQuery(remote.Window{Filter: e.Filter}, mapped)
+		wq := translateWindowQuery(remote.Window{Filter: e.Filter}, routes)
 		page, err := src.FetchEdge(ctx, ds.EdgeQuery{
 			Cursor: cursor, Newer: e.Newer, Limit: e.Limit,
-			Search: wq.Search, Filters: wq.Filters,
+			Search: wq.Search, Filters: wq.Filters, Compares: wq.Compares,
 		})
 		if err != nil {
 			return nil, false, err
@@ -380,13 +393,13 @@ func eventlogEdge(src ds.AnchoredSource, c *build.Component, mapped map[string]s
 // tableEdge is a span table's fetch: one FetchEdge from the edge row's
 // cursor, with each row keyed by its cursor and mark_key and carrying the
 // raw item.
-func tableEdge(src ds.AnchoredSource, c *build.Component, mapped map[string]string, th theme.Theme) func(context.Context, remote.Edge) ([]table.KeyedRow, bool, error) {
+func tableEdge(src ds.AnchoredSource, c *build.Component, routes *cfg.WindowConfig, th theme.Theme) func(context.Context, remote.Edge) ([]table.KeyedRow, bool, error) {
 	return func(ctx context.Context, e remote.Edge) ([]table.KeyedRow, bool, error) {
 		cursor, _ := build.SplitAnchoredKey(e.Cursor)
-		wq := translateWindowQuery(remote.Window{Filter: e.Filter}, mapped)
+		wq := translateWindowQuery(remote.Window{Filter: e.Filter}, routes)
 		page, err := src.FetchEdge(ctx, ds.EdgeQuery{
 			Cursor: cursor, Newer: e.Newer, Limit: e.Limit,
-			Search: wq.Search, Filters: wq.Filters,
+			Search: wq.Search, Filters: wq.Filters, Compares: wq.Compares,
 		})
 		if err != nil {
 			return nil, false, err
@@ -500,8 +513,17 @@ func (m *Model) handleWindowQuery(msg windowQueryMsg) tea.Cmd {
 	}
 	cmd := tagCursorFocused(rt.Update(msg.msg), msg.component)
 	if q, ok := msg.msg.(table.QueryChangedMsg); ok {
+		var notices []string
 		if notice := m.unsentTerms(msg.component, q.Terms); notice != "" {
-			return tea.Batch(cmd, app.Info(notice))
+			notices = append(notices, notice)
+		}
+		if w := m.windows[msg.component]; w != nil {
+			if notice := unsupportedComparisons(m.windowFilters(w.source), q.Terms); notice != "" {
+				notices = append(notices, notice)
+			}
+		}
+		if len(notices) > 0 {
+			return tea.Batch(cmd, app.Info(strings.Join(notices, "; ")))
 		}
 	}
 	return cmd
@@ -515,17 +537,73 @@ func (m *Model) unsentTerms(component string, terms []query.Term) string {
 	if w == nil || m.windowSearches[w.source] {
 		return ""
 	}
-	mapped := m.windowFilters(w.source)
+	routes := m.windowFilters(w.source)
+	if routes == nil {
+		return ""
+	}
 	var unsent []string
 	for _, t := range terms {
-		if _, ok := mapped[t.Title]; t.Title == "" || !ok {
+		if _, ok := comparison(t); ok {
+			continue // unsupportedComparisons reports these
+		}
+		if _, ok := routes.Filters[t.Title]; t.Title == "" || !ok {
 			unsent = append(unsent, fmt.Sprintf("%q", t.Raw))
 		}
 	}
 	if len(unsent) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%s not sent — this table filters only by column: %s", strings.Join(unsent, ", "), cfg.ScopedFilterSyntax(mapped, ", "))
+	syntax := cfg.ScopedFilterSyntax(routes.Filters, ", ")
+	if len(routes.FilterParams) > 0 {
+		syntax = cfg.ScopedFilterSyntax(routes.FilterParams, ", ")
+	}
+	return fmt.Sprintf("%s not sent — this table filters only by column: %s", strings.Join(unsent, ", "), syntax)
+}
+
+// unsupportedComparisons names the comparing terms ("year>=1950") whose
+// column has no param for that comparison, which translateWindowQuery
+// leaves out of the request rather than search for ">=1950" as text.
+// "" when there are none.
+func unsupportedComparisons(routes *cfg.WindowConfig, terms []query.Term) string {
+	if routes == nil {
+		return ""
+	}
+	var out []string
+	for _, t := range terms {
+		op, ok := comparison(t)
+		if !ok {
+			continue
+		}
+		if _, has := routes.FilterParams[t.Title][op]; !has {
+			out = append(out, fmt.Sprintf("`%s` isn't supported on %s", t.Op, t.Title))
+		}
+	}
+	return strings.Join(out, "; ")
+}
+
+// comparison is the config name of a term's comparison ("gte" for
+// year>=1950), for a scoped term that compares rather than matches.
+// Contains and regex terms aren't comparisons: they go where they did
+// before filter_ops existed.
+func comparison(t query.Term) (string, bool) {
+	if t.Title == "" {
+		return "", false
+	}
+	switch t.Op {
+	case query.OpEq:
+		return "eq", true
+	case query.OpNe:
+		return "ne", true
+	case query.OpGt:
+		return "gt", true
+	case query.OpGe:
+		return "gte", true
+	case query.OpLt:
+		return "lt", true
+	case query.OpLe:
+		return "lte", true
+	}
+	return "", false
 }
 
 // handleWindowTick re-requests the window on screen and re-arms the
@@ -568,6 +646,9 @@ func (m *Model) refreshWindows() []tea.Cmd {
 // ds.WindowQuery is data-side, and the data layer never imports tuilib.
 //
 // Term routing:
+//   - a comparing term ("year>=1950") becomes a Compare when the column
+//     has a param for that comparison (filter_ops, or a `filters:` map
+//     entry), and is left out otherwise — unsupportedComparisons says so
 //   - a scoped term ("author:tolkien") whose column the source maps in
 //     `window.filters:` becomes Filters[Title]
 //   - everything else — bare terms, and scoped terms on unmapped columns
@@ -578,7 +659,10 @@ func (m *Model) refreshWindows() []tea.Cmd {
 // as their literal text minus the tilde. The server answers a substring
 // search over it, which is narrower than the user asked for but is a
 // strict subset rather than a wrong answer.
-func translateWindowQuery(q remote.Window, mapped map[string]string) ds.WindowQuery {
+func translateWindowQuery(q remote.Window, routes *cfg.WindowConfig) ds.WindowQuery {
+	if routes == nil {
+		routes = &cfg.WindowConfig{}
+	}
 	out := ds.WindowQuery{
 		Offset: q.Offset,
 		Limit:  q.Limit,
@@ -587,9 +671,17 @@ func translateWindowQuery(q remote.Window, mapped map[string]string) ds.WindowQu
 	}
 	var bare []string
 	for _, t := range q.Terms {
+		if op, ok := comparison(t); ok {
+			// Sent as its own param, or not at all: searching for the
+			// text ">=1950" is never what the user meant.
+			if _, has := routes.FilterParams[t.Title][op]; has {
+				out.Compares = append(out.Compares, ds.Comparison{Title: t.Title, Op: op, Value: t.Text})
+			}
+			continue
+		}
 		val := termValue(t)
 		if t.Title != "" {
-			if _, ok := mapped[t.Title]; ok {
+			if _, ok := routes.Filters[t.Title]; ok {
 				if out.Filters == nil {
 					out.Filters = map[string]string{}
 				}
@@ -630,11 +722,8 @@ func (m *Model) windowedSource(name string) bool {
 // windowFilters returns a source's column-title → query-parameter map,
 // or nil when it declares none (in which case every term is bare and
 // lands in Search).
-func (m *Model) windowFilters(source string) map[string]string {
-	if def, ok := m.windowDefs[source]; ok && def != nil {
-		return def.Filters
-	}
-	return nil
+func (m *Model) windowFilters(source string) *cfg.WindowConfig {
+	return m.windowDefs[source]
 }
 
 // translateWindowMsg tags the two table messages a windowed source needs.
@@ -652,4 +741,17 @@ func translateWindowMsg(msg tea.Msg, name string) tea.Msg {
 		return windowQueryMsg{component: name, msg: x}
 	}
 	return nil
+}
+
+// sortRefused tells the user a sort the server refused. tuilib has
+// already put the sort back and taken the column out of the cycle, and
+// it only refuses a column once, so this is said once per column. The
+// request and the server's answer go to the console under it.
+func sortRefused(msg table.SortRefusedMsg) tea.Cmd {
+	var detail string
+	var d interface{ Detail() string }
+	if errors.As(msg.Err, &d) {
+		detail = d.Detail()
+	}
+	return app.InfoDetail(fmt.Sprintf("can't sort by %s: %v", msg.Title, msg.Err), detail)
 }

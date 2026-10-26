@@ -18,6 +18,7 @@
 #   - /user/starred needs auth to know whose stars to return.
 #   - You can swap to /user/repos to include private repos.
 app:
+  surface: filled
   title: GitHub (auth)
   theme: nord
   env:

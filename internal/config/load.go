@@ -2,7 +2,10 @@ package config
 
 import (
 	"fmt"
+	"io"
+	"maps"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -14,8 +17,15 @@ import (
 	"github.com/jsdrews/tui-builder/internal/expr"
 )
 
-// Load reads a YAML file at path and returns a validated Config.
-func Load(path string) (*Config, error) {
+// Load reads a YAML file at path and returns a validated Config. Load-time
+// warnings (an env var referenced but unset and undeclared) go to stderr,
+// which is right before a TUI has the screen and wrong after: see LoadTo.
+func Load(path string) (*Config, error) { return LoadTo(path, stderr) }
+
+// LoadTo is Load with its warnings written to warn instead of stderr —
+// for a caller that loads while a TUI owns the terminal, where a stray
+// stderr line paints over the screen. The example launcher is one.
+func LoadTo(path string, warn io.Writer) (*Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
@@ -69,8 +79,12 @@ func Load(path string) (*Config, error) {
 	// Env-var check runs after Validate so schema errors surface
 	// first. Applies defaults, errors on missing required vars,
 	// warns on undeclared-and-unset references.
-	if err := checkEnv(&c); err != nil {
+	if err := checkEnvTo(&c, warn); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	c.dir = filepath.Dir(path)
+	if abs, err := filepath.Abs(c.dir); err == nil {
+		c.dir = abs
 	}
 	return &c, nil
 }
@@ -208,6 +222,18 @@ func (c *Config) Validate() error {
 	case !hasSingle && !hasMulti:
 		return fmt.Errorf("config: must set `tui.screen:` (single) or `tui.screens:` + `tui.initial:` (multi)")
 	}
+	if err := c.validatePushTargets(); err != nil {
+		return err
+	}
+	if err := c.validateMenuTargets(); err != nil {
+		return err
+	}
+	if err := validateActionGroups(c); err != nil {
+		return err
+	}
+	if err := validateFilterRules(c.Data.Sources); err != nil {
+		return err
+	}
 
 	if hasSingle {
 		return c.validateScreen("tui.screen", &c.TUI.Screen)
@@ -227,6 +253,48 @@ func (c *Config) Validate() error {
 		if err := c.validateScreen("tui.screens."+name, s); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validateMenuTargets checks that every menu item opens a screen in
+// tui.screens, with the same messages as a push action.
+func (c *Config) validateMenuTargets() error {
+	for _, name := range sortedKeys(c.TUI.Components) {
+		comp := c.TUI.Components[name]
+		if comp == nil || comp.Type != "menu" {
+			continue
+		}
+		for i, it := range comp.MenuItems {
+			if _, ok := c.TUI.Screens[it.Screen]; ok {
+				continue
+			}
+			path := fmt.Sprintf("tui.components.%s.items[%d]", name, i)
+			if len(c.TUI.Screens) == 0 {
+				return fmt.Errorf("%s: screen %q, but this config has a single `tui.screen:` — a menu needs `tui.screens:` to open", path, it.Screen)
+			}
+			return fmt.Errorf("%s: screen %q not defined in tui.screens (have: %s)", path, it.Screen, strings.Join(sortedKeys(c.TUI.Screens), ", "))
+		}
+	}
+	return nil
+}
+
+// validatePushTargets checks that every push action names a screen in
+// tui.screens, bound or not, so a typo is caught at load rather than
+// the first time someone presses the key.
+func (c *Config) validatePushTargets() error {
+	for _, name := range sortedKeys(c.Actions) {
+		a := c.Actions[name]
+		if a == nil || a.Kind() != "push" || a.Push == "" {
+			continue
+		}
+		if _, ok := c.TUI.Screens[a.Push]; ok {
+			continue
+		}
+		if len(c.TUI.Screens) == 0 {
+			return fmt.Errorf("actions.%s: push: %q, but this config has a single `tui.screen:` — a push needs `tui.screens:` to open", name, a.Push)
+		}
+		return fmt.Errorf("actions.%s: push: screen %q not defined in tui.screens (have: %s)", name, a.Push, strings.Join(sortedKeys(c.TUI.Screens), ", "))
 	}
 	return nil
 }
@@ -568,9 +636,11 @@ func validateChrome(a *App) error {
 			return fmt.Errorf("app.glyphs.%s: %q must be a single character (it is drawn in a one-cell slot)", g.field, g.value)
 		}
 	}
+	if a.Borders.Inactive != "" {
+		return fmt.Errorf("app.borders.inactive: no longer supported — every pane is drawn with the same lines, and focus is shown by colour. Set app.borders.active for the shape of every pane")
+	}
 	for _, b := range []struct{ field, value string }{
 		{"active", a.Borders.Active},
-		{"inactive", a.Borders.Inactive},
 		{"overlay", a.Borders.Overlay},
 	} {
 		if b.value == "" {
@@ -709,7 +779,7 @@ func (n *Node) validate(path string, components map[string]*Component, refs map[
 
 // ComponentKinds is every `type:` a component may have, in the order the
 // reference documents them. The docs coverage test reads it too.
-var ComponentKinds = []string{"list", "table", "logview", "tree", "inspector", "textview", "eventlog", "input", "toggle"}
+var ComponentKinds = []string{"list", "table", "logview", "tree", "inspector", "textview", "eventlog", "input", "toggle", "menu"}
 
 func (c *Component) validate(path string) error {
 	switch {
@@ -740,6 +810,11 @@ func (c *Component) validate(path string) error {
 	}
 	if err := c.validateKindOptions(path); err != nil {
 		return err
+	}
+	if c.Type == "menu" {
+		if err := c.validateMenu(path); err != nil {
+			return err
+		}
 	}
 	if c.Type == "table" {
 		if len(c.Columns) == 0 {
@@ -852,7 +927,7 @@ func (col *Column) validateMetric(path, source string) error {
 		return fmt.Errorf("%s: not with `value:` — the metric reads its own paths", mp)
 	case len(col.ColorRules) > 0:
 		return fmt.Errorf("%s: not with `color_rules:` — the metric colors the cell itself", mp)
-	case col.Sortable:
+	case col.IsSortable():
 		return fmt.Errorf("%s: not with `sortable: true` — drawn glyphs don't sort meaningfully", mp)
 	case col.Bold:
 		return fmt.Errorf("%s: not with `bold: true` — drawn glyphs don't take text styles", mp)
@@ -925,6 +1000,39 @@ func (c *Component) validateRulePaths(path string) error {
 
 // validateKindOptions rejects options set on a kind that would ignore
 // them, and checks their values.
+// menuBindRe matches a token in a menu item's bind: value. Only ${env.*}
+// is allowed: a menu has no selection, input or row for anything else to
+// read.
+var menuBindRe = regexp.MustCompile(`\$\{([a-z_]+)[.}]`)
+
+// validateMenu checks a menu's own shape. That its screens exist is a
+// config-level check (validateMenuTargets), since it needs tui.screens.
+func (c *Component) validateMenu(path string) error {
+	if c.Source != "" {
+		return fmt.Errorf("%s: a menu lists screens to open from `items:`; it doesn't display a source", path)
+	}
+	if len(c.MenuItems) == 0 {
+		return fmt.Errorf("%s: a menu needs `items:` — each a {label, screen}", path)
+	}
+	for i, it := range c.MenuItems {
+		ip := fmt.Sprintf("%s.items[%d]", path, i)
+		if it.Label == "" {
+			return fmt.Errorf("%s: `label:` is required", ip)
+		}
+		if it.Screen == "" {
+			return fmt.Errorf("%s: `screen:` is required — the screen in tui.screens it opens", ip)
+		}
+		for k, v := range it.Bind {
+			for _, m := range menuBindRe.FindAllStringSubmatch(v, -1) {
+				if m[1] != "env" {
+					return fmt.Errorf("%s.bind.%s: ${%s…} isn't available in a menu — use a literal or ${env.*}; there's no selection to read", ip, k, m[1])
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (c *Component) validateKindOptions(path string) error {
 	onlyOn := []struct {
 		field string
@@ -1100,6 +1208,132 @@ func validateActivityBinding(name string, comp *Component, entry *Source) error 
 	return nil
 }
 
+// applyFilterRule works out where each comparison on each of a bound
+// table's columns is sent (WindowConfig.FilterParams): a `filters:`
+// string entry is that column's `contains` param, a map entry its params
+// per comparison, and the rule (`filter_ops`) fills in every other
+// visible column whose value is one plain key, minus filter_except. A
+// `contains` param also lands in Filters, which the exec tokens, the
+// edge and find paths, and the placeholder already read.
+func applyFilterRule(name string, comp *Component, w *WindowConfig) error {
+	if w.FilterParams == nil {
+		w.FilterParams = map[string]map[string]string{}
+	}
+	for title, param := range w.Filters {
+		if _, ok := w.FilterParams[title]; !ok {
+			w.FilterParams[title] = map[string]string{"contains": param}
+		}
+	}
+	for title, ops := range w.FilterColumnOps {
+		w.FilterParams[title] = maps.Clone(ops)
+		if p, ok := ops["contains"]; ok {
+			if w.Filters == nil {
+				w.Filters = map[string]string{}
+			}
+			w.Filters[title] = p
+		}
+	}
+	if len(w.FilterOps) == 0 || comp.Type != "table" {
+		return nil
+	}
+	if w.ruleKeys == nil {
+		w.ruleKeys, w.ruleSeen = map[string]string{}, map[string]bool{}
+	}
+	for i, col := range comp.Columns {
+		w.ruleSeen[col.Title] = true
+		if col.Hidden || slices.Contains(w.FilterExcept, col.Title) {
+			continue
+		}
+		if _, explicit := w.FilterColumnOps[col.Title]; explicit {
+			continue
+		}
+		if _, ruled := w.ruleKeys[col.Title]; !ruled {
+			if _, explicit := w.Filters[col.Title]; explicit {
+				continue
+			}
+		}
+		if len(col.Value) != 1 || col.Value[0] == "" || strings.Contains(col.Value[0], ".") {
+			continue
+		}
+		key := col.Value[0]
+		if prev, ok := w.ruleKeys[col.Title]; ok && prev != key {
+			return fmt.Errorf("tui.components.%s: columns[%d] (%q) reads %q, but another table bound to the same source reads %q under that title — the filter rule can't send both. Rename one column, or add the title to filter_except", name, i, col.Title, key, prev)
+		}
+		w.ruleKeys[col.Title] = key
+		params := make(map[string]string, len(w.FilterOps))
+		for op, tpl := range w.FilterOps {
+			params[op] = strings.ReplaceAll(tpl, "${column.value}", key)
+		}
+		w.FilterParams[col.Title] = params
+		if p, ok := params["contains"]; ok {
+			if w.Filters == nil {
+				w.Filters = map[string]string{}
+			}
+			w.Filters[col.Title] = p
+		}
+	}
+	return nil
+}
+
+// validateFilterRules checks each windowed source's rule against the
+// tables bound to it, once every table has been seen: filter_except names
+// only columns they have, and the rule covers at least one column.
+func validateFilterRules(sources map[string]*Source) error {
+	for _, name := range sortedKeys(sources) {
+		s := sources[name]
+		if s == nil || s.Window == nil || len(s.Window.FilterOps) == 0 || s.Window.ruleSeen == nil {
+			continue
+		}
+		w, path := s.Window, "data.sources."+name+".window"
+		for _, title := range w.FilterExcept {
+			if !w.ruleSeen[title] {
+				return fmt.Errorf("%s.filter_except: no bound table has a column titled %q", path, title)
+			}
+		}
+		if len(w.ruleKeys) == 0 {
+			return fmt.Errorf("%s.filter_ops: covers no column — the rule applies to visible columns whose `value:` is one plain key (not nested, not a fallback list), not in filter_except or `filters:`", path)
+		}
+	}
+	return nil
+}
+
+// applySortFields makes the columns a windowed source's `sort_fields:`
+// lists sortable. A column matches by its `sorts:` entry, or else its
+// plain one-key `value:`; a match the column hasn't opted out of becomes
+// sortable and, on http, sends the listed field. `sortable: true` on a
+// column the list doesn't match is a sort the API won't answer.
+func applySortFields(name string, comp *Component, w *WindowConfig) error {
+	if comp.Type != "table" || len(w.SortFields) == 0 {
+		return nil
+	}
+	listed := map[string]bool{}
+	for _, f := range w.SortFields {
+		listed[f] = true
+	}
+	for i := range comp.Columns {
+		col := &comp.Columns[i]
+		field, mapped := w.Sorts[col.Title]
+		if !mapped && len(col.Value) == 1 && !strings.Contains(col.Value[0], ".") {
+			field = col.Value[0]
+		}
+		match := field != "" && listed[field]
+		switch {
+		case col.Sortable == nil && match:
+			on := true
+			col.Sortable = &on
+			if !mapped && w.SortParam != "" {
+				if w.Sorts == nil {
+					w.Sorts = map[string]string{}
+				}
+				w.Sorts[col.Title] = field
+			}
+		case col.IsSortable() && !match:
+			return fmt.Errorf("tui.components.%s: columns[%d] (%q) is sortable, but the source's window.sort_fields doesn't list its field (%s) — the API won't sort by it. Drop `sortable: true`, or map the column with window.sorts", name, i, col.Title, strings.Join(w.SortFields, ", "))
+		}
+	}
+	return nil
+}
+
 // bindWindowed marks a component as windowed when the entry it binds to
 // declares `window:`, rejecting the bindings that can't hold a sparse
 // window. Only tuilib's table has SetWindow — a list or inspector fed a
@@ -1119,7 +1353,7 @@ func bindWindowed(name string, comp *Component, ref string, entry *Source) error
 			return fmt.Errorf("tui.components.%s: a table over an Anchored source (`window.cursor:`) needs `mark_key:` — each row's identity, held with its cursor so rows that share a cursor stay apart", name)
 		}
 		for i, col := range comp.Columns {
-			if col.Sortable {
+			if col.IsSortable() {
 				return fmt.Errorf("tui.components.%s: columns[%d] (%q) is sortable, but a table over an Anchored source shows rows in the order it walks them", name, i, col.Title)
 			}
 		}
@@ -1134,23 +1368,31 @@ func bindWindowed(name string, comp *Component, ref string, entry *Source) error
 	if comp.Type == "table" && entry.Window.Growing != nil {
 		return fmt.Errorf("tui.components.%s: source %q declares `window.growing:`, which only an eventlog can follow", name, ref)
 	}
+	if err := applySortFields(name, comp, entry.Window); err != nil {
+		return err
+	}
+	if err := applyFilterRule(name, comp, entry.Window); err != nil {
+		return err
+	}
 	// Sorting is answered by the server under a window, so a sortable
 	// column the source can't carry is a control that can't do anything.
 	if ok, why := entry.windowSorts(); !ok {
 		for i, col := range comp.Columns {
-			if col.Sortable {
+			if col.IsSortable() {
 				return fmt.Errorf("tui.components.%s: columns[%d] (%q) is sortable but source %q%s", name, i, col.Title, ref, why)
 			}
 		}
 	}
 	// A filterable windowed table filters remotely, so the filter needs
 	// somewhere to land. A table without a filter bar needs nothing.
-	if comp.Filterable && !entry.WindowSearches() && len(entry.Window.Filters) == 0 {
+	// A rule that covers nothing is reported by validateFilterRules, which
+	// says why; this message would only say "nowhere to go".
+	if comp.Filterable && !entry.WindowSearches() && len(entry.Window.FilterParams) == 0 && len(entry.Window.FilterOps) == 0 {
 		return fmt.Errorf("tui.components.%s: filterable: true, but source %q gives the filter nowhere to go — set window.search_param or window.filters (exec: reference ${window.search}), or drop filterable", name, ref)
 	}
 	// With only column filters, a bare term goes nowhere; say what does.
 	if comp.Filterable && comp.FilterPlaceholder == "" && !entry.WindowSearches() {
-		comp.FilterPlaceholder = ScopedFilterSyntax(entry.Window.Filters, " ")
+		comp.FilterPlaceholder = ScopedFilterSyntax(entry.Window.FilterParams, " ")
 	}
 	comp.Windowed = true
 	return nil

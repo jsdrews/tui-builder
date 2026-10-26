@@ -27,6 +27,7 @@
 #       older: {sort: [{"@timestamp": desc}, {_id: desc}], search_after: "${window.cursor}"}
 #       newer: {sort: [{"@timestamp": asc},  {_id: asc}],  search_after: "${window.cursor}"}
 app:
+  surface: filled
   title: App log
   theme: nord
 data:

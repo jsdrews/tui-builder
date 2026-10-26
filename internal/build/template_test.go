@@ -18,7 +18,7 @@ func TestResolveSelectionExactBeatsPrefix(t *testing.T) {
 	cases := []struct {
 		key, want string
 	}{
-		{"Name", "nginx-xyz"},      // exact match — must NOT hit Namespace
+		{"Name", "nginx-xyz"}, // exact match — must NOT hit Namespace
 		{"Namespace", "default"},
 		{"Cluster", "prod"},
 		{"ClusterURL", "http://localhost:8001"},

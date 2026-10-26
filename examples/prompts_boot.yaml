@@ -18,6 +18,7 @@
 #
 # Cancelling (esc) aborts the program.
 app:
+  surface: filled
   title: GitHub by user
   theme: nord
   # Boot prompts share the Parameter vocabulary with action inputs, so

@@ -1,6 +1,10 @@
 package config
 
-import "gopkg.in/yaml.v3"
+import (
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
 
 // This file owns the `actions:` schema — the write side of the config.
 //
@@ -345,6 +349,10 @@ type ActionBinding struct {
 	Bind map[string]string `yaml:"bind,omitempty"`
 	// Label appears in the help strip. Defaults to the action name.
 	Label string `yaml:"label,omitempty"`
+	// Group files the binding under a heading in the action menu. Unset,
+	// it comes from the action (see MenuGroup). Headings appear only when
+	// a screen's menu has two or more groups.
+	Group string `yaml:"group,omitempty"`
 	// Confirm, when non-empty, shows a yes/no modal before dispatch.
 	// Substituted the same way Bind templates are, plus ${inputs.*} so
 	// the message can preview values the form just collected.
@@ -382,4 +390,29 @@ func (b *ActionBinding) IsInteractive() bool {
 // rather than referencing one by name.
 func (b *ActionBinding) IsInline() bool {
 	return b.Action == ""
+}
+
+// MenuGroup is the action-menu group the binding sits under: its own
+// `group:`, else one worked out from the action — a push or an http
+// GET / HEAD reads, any other http method writes (an unset method is
+// POST, and a templated one can't be known, so it writes too), and an
+// exec, which could do either, has none and lands under "other".
+func (b ActionBinding) MenuGroup(a *Action) string {
+	if b.Group != "" {
+		return b.Group
+	}
+	if a == nil {
+		return ""
+	}
+	switch a.Kind() {
+	case "push":
+		return "read"
+	case "http":
+		switch strings.ToUpper(strings.TrimSpace(a.Method)) {
+		case "GET", "HEAD":
+			return "read"
+		}
+		return "write"
+	}
+	return ""
 }

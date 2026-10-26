@@ -1,0 +1,74 @@
+# menu.yaml — a home screen that lists the app's sections.
+#
+#   home (menu)  ──enter──▶  services | volumes | engine (×2, via bind:)
+#
+# enter or a double click opens an item; esc comes back. / filters on
+# label and group; [ and ] jump between groups. Headings appear because
+# the items name more than one group; items with no group go last, under
+# "other". Each item's bind: fills the destination's source parameters,
+# with literals or ${env.*} — a menu has no selection to read.
+app:
+  surface: filled
+  title: Sections
+
+data:
+  sources:
+    services:
+      type: static
+      data:
+        - {name: api, state: running}
+        - {name: web, state: running}
+        - {name: worker, state: stopped}
+    volumes:
+      type: static
+      data:
+        - {name: data, size: 20G}
+        - {name: logs, size: 4G}
+    engine:
+      type: exec
+      parameters:
+        engine: {type: string, required: true}
+      command: [sh, -c, "printf '[{\"engine\":\"%s\",\"status\":\"up\"}]' '${params.engine}'"]
+
+tui:
+  components:
+    home_menu:
+      type: menu
+      title: Sections
+      items:
+        - {group: compute, label: Services, screen: services, description: "what's running"}
+        - {group: storage, label: Volumes,  screen: volumes,  description: "disks and their sizes"}
+        - {group: database, label: "postgres › instance", screen: engine, bind: {engine: postgres}}
+        - {group: database, label: "mysql › instance",    screen: engine, bind: {engine: mysql}}
+        - {label: About, screen: about}
+    services_table:
+      type: table
+      title: Services
+      source: services
+      columns:
+        - {title: Name, value: name}
+        - {title: State, value: state}
+    volumes_table:
+      type: table
+      title: Volumes
+      source: volumes
+      columns:
+        - {title: Name, value: name}
+        - {title: Size, value: size}
+    engine_info:
+      type: inspector
+      title: Instance
+      source: engine
+      auto: true
+    about_text:
+      type: textview
+      title: About
+      content: "A menu is a home screen for a config with more sections than tabs can hold."
+
+  screens:
+    home:     {title: Home, layout: {component: home_menu}}
+    services: {title: Services, layout: {component: services_table}}
+    volumes:  {title: Volumes, layout: {component: volumes_table}}
+    engine:   {title: Instance, layout: {component: engine_info}}
+    about:    {title: About, layout: {component: about_text}}
+  initial: home

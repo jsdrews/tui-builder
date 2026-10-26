@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jsdrews/tuilib/pkg/app"
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	"github.com/jsdrews/tui-builder/internal/build"
@@ -102,11 +103,11 @@ func newAnchoredHarness(t *testing.T, srv *logStub, anchor ...string) *windowHar
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var m tea.Model = app.New(app.Options{Root: root, Themes: []theme.Theme{theme.Nord()}, SkipConfig: true})
+	var m tea.Model = app.New(app.Options{Root: root, Palettes: []palette.Palette{palette.Nord()}, SkipConfig: true})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	return &windowHarness{t: t, model: m, root: root}
 }
@@ -190,11 +191,11 @@ func TestAnchoredExampleWalksOlder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var m tea.Model = app.New(app.Options{Root: root, Themes: []theme.Theme{theme.Nord()}, SkipConfig: true})
+	var m tea.Model = app.New(app.Options{Root: root, Palettes: []palette.Palette{palette.Nord()}, SkipConfig: true})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	h := &windowHarness{t: t, model: m, root: root}
 	h.drain(h.model.Init())
@@ -261,11 +262,11 @@ func newSpanHarness(t *testing.T, srv *logStub) *windowHarness {
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var m tea.Model = app.New(app.Options{Root: root, Themes: []theme.Theme{theme.Nord()}, SkipConfig: true})
+	var m tea.Model = app.New(app.Options{Root: root, Palettes: []palette.Palette{palette.Nord()}, SkipConfig: true})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	return &windowHarness{t: t, model: m, root: root}
 }
@@ -338,11 +339,11 @@ func TestSpanTableExampleRenders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var m tea.Model = app.New(app.Options{Root: root, Themes: []theme.Theme{theme.Nord()}, SkipConfig: true})
+	var m tea.Model = app.New(app.Options{Root: root, Palettes: []palette.Palette{palette.Nord()}, SkipConfig: true})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	h := &windowHarness{t: t, model: m, root: root}
 	h.drain(h.model.Init())

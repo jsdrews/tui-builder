@@ -43,6 +43,10 @@ type Config struct {
 	// second call is a no-op rather than a second pass over values that
 	// are now data rather than templates. See SubstituteEnv.
 	envSubstituted bool
+	// envResolved records that ResolveEnv has already run.
+	envResolved bool
+	// dir is the directory of the config file, for relative paths.
+	dir string
 }
 
 // DataBlock holds the data-layer definitions. Every entry under
@@ -259,6 +263,31 @@ type WindowConfig struct {
 	// term (and so lands in SearchParam), which is what the user meant
 	// often enough to beat dropping it.
 	Filters map[string]string `yaml:"filters,omitempty"`
+	// FilterColumnOps is a `filters:` entry written as a map — a column's
+	// param per comparison ({gte: year_from, lte: year_to}) rather than
+	// one param for `contains`. It shares the `filters:` key, so it is
+	// split out when the window is decoded (UnmarshalYAML). http only.
+	FilterColumnOps map[string]map[string]string `yaml:"-"`
+	// FilterOps is the window's one filter rule: a param template per
+	// comparison, each using ${column.value} for the column's plain
+	// `value:` key — {contains: "${column.value}__icontains", gte:
+	// "${column.value}__gte"}. It covers every visible column of a bound
+	// table whose value is one plain key, except FilterExcept and those
+	// `filters:` names itself. http only.
+	FilterOps map[string]string `yaml:"filter_ops,omitempty"`
+	// FilterExcept lists column titles the rule leaves alone: numbers,
+	// ids, enums the API can't match on.
+	FilterExcept []string `yaml:"filter_except,omitempty"`
+	// FilterParams is where each comparison on each column is sent,
+	// title → op → param, worked out at load from Filters,
+	// FilterColumnOps and FilterOps. What the request builder reads.
+	FilterParams map[string]map[string]string `yaml:"-"`
+	// ruleKeys and ruleSeen record, while bound tables are checked, the
+	// value key the rule used for each title and every title a bound
+	// table has, so two tables can't disagree and filter_except can't
+	// name a column none has.
+	ruleKeys map[string]string
+	ruleSeen map[string]bool
 
 	// SortParam is the query parameter carrying the sort field. Without
 	// it, a sortable column on the bound table asks for a sort the
@@ -268,6 +297,11 @@ type WindowConfig struct {
 	// for APIs whose sort tokens aren't the column titles ("Year" →
 	// "first_publish_year"). Unlisted columns send their title as-is.
 	Sorts map[string]string `yaml:"sorts,omitempty"`
+	// SortFields lists the API's sort fields. A bound table's column
+	// whose `sorts:` entry, or else plain one-key `value:`, is listed
+	// becomes sortable without `sortable: true`, and sends that field.
+	// The restriction belongs to the API, not to each table.
+	SortFields []string `yaml:"sort_fields,omitempty"`
 	// SortDescPrefix is prepended to the sort field for a descending
 	// sort — "-" covers Django REST (`ordering=-created`) and most of
 	// what follows it. Empty means the API has no descending form, so
@@ -388,6 +422,15 @@ type App struct {
 	// Theme names a built-in theme.Theme.Name to use as the initial palette.
 	// Unknown names fall through to the first theme.
 	Theme string `yaml:"theme,omitempty"`
+	// Surface names the built-in surface to start on: how every pane's
+	// edge and body are drawn, independent of the palette. One of
+	// SurfaceNames; unset is outlined.
+	Surface string `yaml:"surface,omitempty"`
+	// Colors forces the colour depth instead of detecting it from TERM
+	// and COLORTERM: one of ColorNames. "auto" (the default) detects.
+	// For terminals that support more than they say — tmux often hides
+	// COLORTERM — so colours and filled surfaces don't degrade.
+	Colors string `yaml:"colors,omitempty"`
 	// Glyphs overrides the marks components draw — row cursors, expand
 	// arrows, scrollbar thumbs, sort indicators. Unset fields keep the
 	// library's own mark, so overriding one arrow doesn't blank the
@@ -419,6 +462,10 @@ type App struct {
 	// the validator rejects the collision rather than letting one
 	// silently shadow the other.
 	ThemeKey string `yaml:"theme_key,omitempty"`
+	// SurfaceKey cycles the surface, live, through every built-in one,
+	// starting from Surface. Defaults to "T"; "-" pins the surface.
+	// Claimed globally like ThemeKey.
+	SurfaceKey string `yaml:"surface_key,omitempty"`
 	// OutputKey opens tuilib's output console — the scrollback that
 	// collects every statusbar message and everything a subprocess
 	// streams, with a statusbar badge counting events and a picker for
@@ -456,6 +503,10 @@ type App struct {
 	// ActionsTitle titles the action menu. Defaults to tuilib's
 	// "Actions".
 	ActionsTitle string `yaml:"actions_title,omitempty"`
+	// ActionGroups orders the action menu's group headings. Groups it
+	// doesn't list follow in the order a screen's bindings name them.
+	// Every name must be a group some binding uses, to catch typos.
+	ActionGroups []string `yaml:"action_groups,omitempty"`
 	// FormSpacing is the number of blank lines between form fields, in
 	// action-input forms and boot prompts alike. Defaults to 0.
 	FormSpacing int `yaml:"form_spacing,omitempty"`
@@ -574,16 +625,16 @@ var KeymapNames = []string{
 	"sort_prev", "sort_next", "sort_dir", "col_prev", "col_next",
 }
 
-// Borders picks the border shapes a theme draws with. Values come from
-// BorderShapeNames; an unset field leaves the palette's own shape in
-// place, which for every shipped palette means tuilib's default.
+// Borders picks the line shapes of the Outlined surface every pane is
+// drawn with. Values come from BorderShapeNames; an unset field leaves
+// tuilib's own shape in place.
 type Borders struct {
-	// Active / Inactive are the shapes for ordinary components, focused
-	// and unfocused. tuilib defaults both to normal on purpose: focus
-	// is signalled by border color, and a component that changed weight
-	// on focus would move the eye for a reason the user didn't ask
-	// about. Set them differently only if that is what you want.
-	Active   string `yaml:"active,omitempty"`
+	// Active is the shape of every ordinary component, focused or not:
+	// focus is signalled by colour.
+	Active string `yaml:"active,omitempty"`
+	// Inactive is no longer supported: a surface draws the same lines
+	// whether a pane is focused or not. Kept only so a config setting it
+	// gets a load error that says so, rather than "unknown field".
 	Inactive string `yaml:"inactive,omitempty"`
 	// Overlay is for what floats above content — confirm, alert, the
 	// output console, the action menu. Defaults to thick, because a
@@ -598,12 +649,20 @@ type Borders struct {
 	SlotBrackets string `yaml:"slot_brackets,omitempty"`
 }
 
-// BorderShapeNames are the shapes `app.borders.{active,inactive,overlay}`
+// BorderShapeNames are the shapes `app.borders.{active,overlay}`
 // accept. internal/build maps each one to its lipgloss constructor; a
 // test there walks this list so the two can't drift apart.
 var BorderShapeNames = []string{
 	"normal", "rounded", "thick", "double", "hidden", "block", "ascii",
 }
+
+// ColorNames are the values `app.colors` accepts.
+var ColorNames = []string{"auto", "truecolor", "256", "16"}
+
+// SurfaceNames are the surfaces `app.surface` accepts, in the order the
+// surface key cycles them. internal/build maps each to tuilib's built-in;
+// a test there walks this list so the two can't drift apart.
+var SurfaceNames = []string{"outlined", "filled", "banded", "elevated", "accented"}
 
 // SlotBracketNames are the values `app.borders.slot_brackets` accepts.
 var SlotBracketNames = []string{"none", "corners", "tees"}
@@ -626,6 +685,23 @@ type EnvSpec struct {
 	// recommended — a good description turns a cryptic failure into
 	// a self-serve fix.
 	Description string `yaml:"description,omitempty"`
+	// From reads the value from a file or a command when the var is
+	// unset. Resolved by ResolveEnv at the entry points, never by
+	// Load. Not with Default.
+	From *EnvFrom `yaml:"from,omitempty"`
+}
+
+// EnvFrom is where an app.env var's value comes from: exactly one of
+// File or Command.
+type EnvFrom struct {
+	// File is read whole and trimmed. `~` and ${env.X} expand; a
+	// relative path is relative to the config file's directory.
+	File string `yaml:"file,omitempty"`
+	// Command runs as argv, no shell; its trimmed stdout is the value.
+	// stdin and stderr are the terminal's, so a password prompt works.
+	Command []string `yaml:"command,omitempty"`
+	// Timeout bounds Command, as a Go duration. Default 60s.
+	Timeout string `yaml:"timeout,omitempty"`
 }
 
 // Screen describes one screen — its breadcrumb title, its layout tree,
@@ -709,6 +785,18 @@ func (a *App) ThemeCycleKey() string {
 		return ""
 	}
 	return a.ThemeKey
+}
+
+// SurfaceCycleKey returns the surface-cycle key with the default
+// applied, or "" when the config pinned the surface with "-".
+func (a *App) SurfaceCycleKey() string {
+	switch a.SurfaceKey {
+	case "":
+		return "T"
+	case "-":
+		return ""
+	}
+	return a.SurfaceKey
 }
 
 // QuitKeyName returns the quit key with the default applied. ctrl+c
@@ -1043,6 +1131,11 @@ type Component struct {
 	// list fields
 	Items []string `yaml:"items,omitempty"`
 
+	// menu fields. A menu's `items:` are maps, a list's strings, so the
+	// key is routed by `type:` when the component is decoded (see
+	// UnmarshalYAML); MenuItems has no key of its own.
+	MenuItems []MenuItem `yaml:"-"`
+
 	// table fields
 	Columns     []Column `yaml:"columns,omitempty"`
 	Rows        [][]any  `yaml:"rows,omitempty"`
@@ -1291,7 +1384,10 @@ type Column struct {
 	Flex     int    `yaml:"flex,omitempty"`
 	MaxWidth int    `yaml:"max_width,omitempty"`
 	Align    string `yaml:"align,omitempty"` // left | right | center
-	Sortable bool   `yaml:"sortable,omitempty"`
+	// Sortable makes the column sortable. Unset, a windowed source's
+	// `sort_fields:` decides; an explicit false opts a listed column
+	// out. See IsSortable.
+	Sortable *bool `yaml:"sortable,omitempty"`
 	// Sort picks the comparator when Sortable is true.
 	//   "" / "string"  case-insensitive lex on the ANSI-stripped cell (default)
 	//   "number"       strconv.ParseFloat after stripping commas
@@ -1330,6 +1426,10 @@ type Column struct {
 	// this column, which otherwise come only from the page that's loaded.
 	Distinct *Distinct `yaml:"distinct,omitempty"`
 }
+
+// IsSortable reports whether the column sorts: `sortable:` as written,
+// or as a windowed source's `sort_fields:` set it at load.
+func (c Column) IsSortable() bool { return c.Sortable != nil && *c.Sortable }
 
 // Metric is `metric:` on a table column or an inspector field: an inline
 // summary drawn by tuilib's pkg/metrics. Exactly one kind key is set, and
@@ -1528,4 +1628,110 @@ type Colors struct {
 	Gutter string `yaml:"gutter,omitempty"`
 	// eventlog: positions of items that just loaded.
 	New string `yaml:"new,omitempty"`
+}
+
+// MenuItem is one entry in a `type: menu` component: a screen to open,
+// under an optional group heading.
+type MenuItem struct {
+	// Label is the entry's text, and what the filter matches (with Group).
+	Label string `yaml:"label"`
+	// Screen names the screen in tui.screens that choosing the item pushes.
+	Screen string `yaml:"screen"`
+	// Group files the item under a heading. Headings appear only when the
+	// menu's items name two or more groups.
+	Group string `yaml:"group,omitempty"`
+	// Description is drawn dimmed beside the label, cut off when space
+	// runs out. Not searched by the filter.
+	Description string `yaml:"description,omitempty"`
+	// Bind fills the destination screen's source `parameters:`, as a push
+	// binding's bind: does. Values are literals or ${env.*}: a menu has no
+	// selection to read.
+	Bind map[string]string `yaml:"bind,omitempty"`
+}
+
+// UnmarshalYAML decodes a component, sending `items:` to MenuItems when
+// the component is a menu and to Items otherwise.
+func (c *Component) UnmarshalYAML(n *yaml.Node) error {
+	type plain Component
+	if n.Kind != yaml.MappingNode {
+		return n.Decode((*plain)(c))
+	}
+	var kind string
+	var items *yaml.Node
+	rest := *n
+	rest.Content = nil
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k, v := n.Content[i], n.Content[i+1]
+		if k.Value == "type" {
+			kind = v.Value
+		}
+		if k.Value == "items" {
+			items = v
+		}
+	}
+	if kind != "menu" || items == nil {
+		return n.Decode((*plain)(c))
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value != "items" {
+			rest.Content = append(rest.Content, n.Content[i], n.Content[i+1])
+		}
+	}
+	if err := rest.Decode((*plain)(c)); err != nil {
+		return err
+	}
+	return items.Decode(&c.MenuItems)
+}
+
+// FilterOpNames are the comparisons filter_ops and a `filters:` map
+// entry can name, as the filter bar types them: name:x, name=x, name!=x,
+// year>x, year>=x, year<x, year<=x.
+var FilterOpNames = []string{"contains", "eq", "ne", "gt", "gte", "lt", "lte"}
+
+// UnmarshalYAML decodes a window, splitting `filters:` into string
+// entries (Filters) and map entries (FilterColumnOps).
+func (w *WindowConfig) UnmarshalYAML(n *yaml.Node) error {
+	type plain WindowConfig
+	if n.Kind != yaml.MappingNode {
+		return n.Decode((*plain)(w))
+	}
+	rest := *n
+	rest.Content = nil
+	var filters *yaml.Node
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == "filters" && n.Content[i+1].Kind == yaml.MappingNode {
+			filters = n.Content[i+1]
+			continue
+		}
+		rest.Content = append(rest.Content, n.Content[i], n.Content[i+1])
+	}
+	if err := rest.Decode((*plain)(w)); err != nil {
+		return err
+	}
+	if filters == nil {
+		return nil
+	}
+	for i := 0; i+1 < len(filters.Content); i += 2 {
+		title, v := filters.Content[i].Value, filters.Content[i+1]
+		if v.Kind == yaml.MappingNode {
+			var ops map[string]string
+			if err := v.Decode(&ops); err != nil {
+				return fmt.Errorf("filters.%s: %w", title, err)
+			}
+			if w.FilterColumnOps == nil {
+				w.FilterColumnOps = map[string]map[string]string{}
+			}
+			w.FilterColumnOps[title] = ops
+			continue
+		}
+		var dest string
+		if err := v.Decode(&dest); err != nil {
+			return fmt.Errorf("filters.%s: %w", title, err)
+		}
+		if w.Filters == nil {
+			w.Filters = map[string]string{}
+		}
+		w.Filters[title] = dest
+	}
+	return nil
 }

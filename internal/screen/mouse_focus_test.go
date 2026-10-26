@@ -8,6 +8,7 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/jsdrews/tuilib/pkg/app"
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	"github.com/jsdrews/tui-builder/internal/build"
@@ -28,13 +29,13 @@ func TestClickFocusesClickedPane(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var m tea.Model = app.New(app.Options{
 		Root:       root,
-		Themes:     []theme.Theme{theme.Nord()},
+		Palettes:   []palette.Palette{palette.Nord()},
 		SkipConfig: true,
 		Mouse:      app.MouseClick,
 	})
@@ -100,13 +101,13 @@ func TestDoubleClickActivatesLikeEnter(t *testing.T) {
 		t.Fatal(err)
 	}
 	multi := &Multi{Screens: c.TUI.Screens, Components: c.TUI.Components, Sources: c.Data.Sources, Actions: c.Actions}
-	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.Nord())
+	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var m tea.Model = app.New(app.Options{
 		Root:       root,
-		Themes:     []theme.Theme{theme.Nord()},
+		Palettes:   []palette.Palette{palette.Nord()},
 		SkipConfig: true,
 		Mouse:      app.MouseClick,
 	})
@@ -160,13 +161,13 @@ func TestEnterFiresActionBoundToEnter(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var m tea.Model = app.New(app.Options{
 		Root:       root,
-		Themes:     []theme.Theme{theme.Nord()},
+		Palettes:   []palette.Palette{palette.Nord()},
 		SkipConfig: true,
 	})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})

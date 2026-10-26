@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
@@ -20,7 +21,7 @@ func streamLogModel(t *testing.T) *Model {
 		Type: "exec", Follow: true, Command: []string{"sh", "-c", "echo one; echo two"},
 	})}
 	sc := &cfg.Screen{Layout: cfg.Node{Component: "log"}}
-	m, err := New(sc, comps, sources, nil, theme.Nord())
+	m, err := New(sc, comps, sources, nil, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +80,7 @@ func TestDistinctSourceIsFetchedForItsColumn(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	m, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, nil, theme.Nord())
+	m, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, nil, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}

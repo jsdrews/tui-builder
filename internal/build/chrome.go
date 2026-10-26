@@ -4,50 +4,92 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jsdrews/tuilib/pkg/glyph"
-	"github.com/jsdrews/tuilib/pkg/pane"
-	"github.com/jsdrews/tuilib/pkg/theme"
+	"github.com/jsdrews/tuilib/pkg/surface"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
 )
 
-// ApplyChrome writes the config's `app.glyphs` / `app.borders`
-// overrides onto every theme in themes and returns the result.
-//
-// Every theme, not just the one `app.theme` names: a palette is a
-// choice of color, while glyphs and border shapes are a choice of
-// vocabulary. Cycling palettes at runtime (`t`) walks the whole slice,
-// and a cursor that turned back into "▸" partway through that cycle
-// would read as a bug.
-//
-// Unset fields are left alone rather than filled in here. tuilib
-// resolves a zero border shape to its own default and a zero glyph via
-// glyph.Default, so "unset" keeps exactly one meaning and it lives
-// upstream — which is also why a palette that ships its own glyphs one
-// day will keep the ones this config doesn't mention.
-func ApplyChrome(themes []theme.Theme, a *cfg.App) []theme.Theme {
-	out := make([]theme.Theme, len(themes))
-	for i, t := range themes {
-		t.Glyphs = overrideGlyphs(t.Glyphs, &a.Glyphs)
-		if b, ok := borderShape(a.Borders.Active); ok {
-			t.BorderShapeActive = b
+// Surfaces are tuilib's built-in surfaces with the config's chrome on
+// each, in cycle order, starting from the one named start (the first
+// when start names none). Every surface gets the chrome, so cycling
+// (`T`) keeps the brackets and divider, and Outlined keeps its shapes
+// whenever it's reached — chosen, cycled to, or fallen back to.
+func Surfaces(a *cfg.App, start string) []surface.Surface {
+	all := make([]surface.Surface, 0, len(cfg.SurfaceNames))
+	head := 0
+	for _, name := range cfg.SurfaceNames {
+		s, ok := builtinSurface(name)
+		if !ok {
+			continue
 		}
-		if b, ok := borderShape(a.Borders.Inactive); ok {
-			t.BorderShapeInactive = b
+		if name == start {
+			head = len(all)
+		}
+		all = append(all, ChromeSurface(s, a))
+	}
+	return append(all[head:], all[:head]...)
+}
+
+// builtinSurface maps a config surface name to tuilib's built-in.
+// TestSurfaceNamesAllMap keeps cfg.SurfaceNames and this in step.
+func builtinSurface(name string) (surface.Surface, bool) {
+	for _, s := range surface.Builtins() {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return surface.Surface{}, false
+}
+
+// ChromeSurface is base with the config's `app.borders` and
+// `app.glyphs.rule` applied: the line shape of every pane and of what
+// floats over a screen, how a title meets the line, and the divider
+// under a pinned header.
+//
+// Unset fields leave base alone, so an empty app block draws exactly
+// what tuilib's own Outlined draws. The border shapes only mean
+// something on a lined surface; on any other base they're skipped.
+func ChromeSurface(base surface.Surface, a *cfg.App) surface.Surface {
+	s := base
+	if _, lined := s.Lined(); lined {
+		if b, ok := borderShape(a.Borders.Active); ok {
+			overlay := s.Overlay
+			s = surface.OutlinedWith(b)
+			s.Name = base.Name
+			s.Overlay = overlay
 		}
 		if b, ok := borderShape(a.Borders.Overlay); ok {
-			t.BorderShapeOverlay = b
+			o := surface.OutlinedWith(b)
+			o.Name = base.Name + "-overlay"
+			s.Overlay = &o
 		}
-		if s, ok := slotBrackets(a.Borders.SlotBrackets); ok {
-			t.SlotBrackets = s
-		}
-		out[i] = t
 	}
-	return out
+	apply := func(s *surface.Surface) {
+		if br, ok := slotBrackets(a.Borders.SlotBrackets); ok {
+			s.Brackets = br
+		}
+		if a.Glyphs.Rule != "" {
+			s.Divider.Glyph = a.Glyphs.Rule
+		}
+	}
+	apply(&s)
+	if s.Overlay != nil {
+		o := *s.Overlay
+		apply(&o)
+		s.Overlay = &o
+	}
+	return s
 }
+
+// Glyphs is the config's `app.glyphs` as a glyph set, for the app shell,
+// which puts it on every theme it composes — the screens' and its own
+// overlays' alike. Unset fields stay empty and fall back to glyph.Default.
+func Glyphs(a *cfg.App) glyph.Set { return overrideGlyphs(glyph.Set{}, &a.Glyphs) }
 
 // overrideGlyphs copies the non-empty fields of o over base. Empty
 // means "leave it", never "blank it" — a config that sets one arrow
-// keeps the twelve marks it didn't mention.
+// keeps the twelve marks it didn't mention. Rule isn't here: it's the
+// surface's divider (ChromeSurface).
 func overrideGlyphs(base glyph.Set, o *cfg.Glyphs) glyph.Set {
 	for _, f := range []struct {
 		dst *string
@@ -57,7 +99,6 @@ func overrideGlyphs(base glyph.Set, o *cfg.Glyphs) glyph.Set {
 		{&base.Mark, o.Mark},
 		{&base.ExpandOpen, o.ExpandOpen},
 		{&base.ExpandClosed, o.ExpandClosed},
-		{&base.Rule, o.Rule},
 		{&base.ScrollThumb, o.ScrollThumb},
 		{&base.ScrollTrack, o.ScrollTrack},
 		{&base.HScrollThumb, o.HScrollThumb},
@@ -79,7 +120,7 @@ func overrideGlyphs(base glyph.Set, o *cfg.Glyphs) glyph.Set {
 
 // borderShape maps a config border name to its lipgloss constructor.
 // Names are validated at load against cfg.BorderShapeNames, so a miss
-// here means the two lists drifted; returning false keeps the palette's
+// here means the two lists drifted; returning false keeps the surface's
 // own shape rather than forcing a wrong one. TestBorderNamesAllMap
 // walks the list so that can't happen quietly.
 func borderShape(name string) (lipgloss.Border, bool) {
@@ -103,17 +144,17 @@ func borderShape(name string) (lipgloss.Border, bool) {
 }
 
 // slotBrackets maps a config slot-bracket name onto tuilib's enum. The
-// zero value is SlotBracketsNone, which is also what "none" means, so
-// the bool is what distinguishes "the author asked for none" from "the
+// zero value is BracketsNone, which is also what "none" means, so the
+// bool is what distinguishes "the author asked for none" from "the
 // author said nothing".
-func slotBrackets(name string) (pane.SlotBracketStyle, bool) {
+func slotBrackets(name string) (surface.Brackets, bool) {
 	switch name {
 	case "none":
-		return pane.SlotBracketsNone, true
+		return surface.BracketsNone, true
 	case "corners":
-		return pane.SlotBracketsCorners, true
+		return surface.BracketsCorners, true
 	case "tees":
-		return pane.SlotBracketsTees, true
+		return surface.BracketsTees, true
 	}
-	return pane.SlotBracketsNone, false
+	return surface.BracketsNone, false
 }

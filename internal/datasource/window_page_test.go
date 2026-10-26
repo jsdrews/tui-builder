@@ -112,3 +112,34 @@ func TestWindowMissingTotalNotice(t *testing.T) {
 		t.Errorf("notices = %q", *notices)
 	}
 }
+
+// A comparing term goes out as the param FilterParams names for its
+// column and comparison, beside the contains filters; one with no param
+// is never sent.
+func TestWindowComparesBecomeParams(t *testing.T) {
+	var seen []url.Values
+	srv := stubPaged(t, 5, 100, &seen)
+	src := pagedSource(srv.URL, 10)
+	src.Window.Filters = map[string]string{"Name": "name__icontains"}
+	src.Window.FilterParams = map[string]map[string]string{
+		"Name": {"contains": "name__icontains"},
+		"Year": {"gte": "year__gte", "lt": "year__lt"},
+	}
+	ws := newWindowSource(t, src)
+	_, err := ws.FetchWindow(t.Context(), WindowQuery{Limit: 10,
+		Filters:  map[string]string{"Name": "tolk"},
+		Compares: []Comparison{{Title: "Year", Op: "gte", Value: "1950"}, {Title: "Year", Op: "eq", Value: "1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := seen[len(seen)-1]
+	if q.Get("name__icontains") != "tolk" || q.Get("year__gte") != "1950" {
+		t.Errorf("query = %v", q)
+	}
+	for k := range q {
+		if strings.HasPrefix(k, "year") && k != "year__gte" {
+			t.Errorf("unexpected param %s in %v", k, q)
+		}
+	}
+}

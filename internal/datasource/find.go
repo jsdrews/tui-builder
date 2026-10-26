@@ -31,8 +31,9 @@ type FindQuery struct {
 	// returns it. Empty when nothing is focused.
 	Cursor string
 	// Search and Filters are the view's filter, as on WindowQuery.
-	Search  string
-	Filters map[string]string
+	Search   string
+	Filters  map[string]string
+	Compares []Comparison
 }
 
 // FindResult is a search's answer.
@@ -78,6 +79,7 @@ func (s *httpSource) FindItem(ctx context.Context, q FindQuery) (FindResult, err
 				params.Set(param, val)
 			}
 		}
+		s.setCompares(params, q.Compares)
 	}
 	rendered, _ := renderPatch(f.Params, eq, vals)
 	for k, v := range rendered.(map[string]any) {

@@ -17,6 +17,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jsdrews/tuilib/pkg/app"
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/remote"
 	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/theme"
@@ -33,8 +34,10 @@ type windowStub struct {
 	mu    sync.Mutex
 	seen  []url.Values
 	total int
-	// fail, when set, makes the stub answer 500 to requests it matches.
-	fail func(url.Values) bool
+	// fail, when set, makes the stub answer failStatus (500 unless set)
+	// to requests it matches.
+	fail       func(url.Values) bool
+	failStatus int
 }
 
 func newWindowStub(total int) *windowStub {
@@ -43,10 +46,15 @@ func newWindowStub(total int) *windowStub {
 		q := r.URL.Query()
 		s.mu.Lock()
 		s.seen = append(s.seen, q)
-		fail := s.fail
+		fail, status := s.fail, s.failStatus
 		s.mu.Unlock()
 		if fail != nil && fail(q) {
-			http.Error(w, "boom", http.StatusInternalServerError)
+			if status == 0 {
+				status = http.StatusInternalServerError
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			fmt.Fprint(w, `{"detail": "Cannot order by 'title_sort'"}`)
 			return
 		}
 
@@ -98,6 +106,13 @@ type windowHarness struct {
 
 func newWindowHarness(t *testing.T, srv *windowStub, pageSize int) *windowHarness {
 	t.Helper()
+	return newWindowHarnessWith(t, srv, pageSize, nil)
+}
+
+// newWindowHarnessWith is newWindowHarness with a chance to change the
+// config before it's validated.
+func newWindowHarnessWith(t *testing.T, srv *windowStub, pageSize int, mutate func(*cfg.Config)) *windowHarness {
+	t.Helper()
 	c := cfg.Config{
 		Data: cfg.DataBlock{Sources: map[string]*cfg.Source{
 			"books": cfg.NewEntry(&cfg.Source{
@@ -119,7 +134,7 @@ func newWindowHarness(t *testing.T, srv *windowStub, pageSize int) *windowHarnes
 				"books": {
 					Type: "table", Title: "Books", Source: "books", Filterable: true,
 					Columns: []cfg.Column{
-						{Title: "Title", Width: 40, Value: cfg.Path{"title"}, Sortable: true},
+						{Title: "Title", Width: 40, Value: cfg.Path{"title"}, Sortable: yes()},
 						{Title: "Author", Width: 20, Value: cfg.Path{"author"}},
 					},
 				},
@@ -127,15 +142,18 @@ func newWindowHarness(t *testing.T, srv *windowStub, pageSize int) *windowHarnes
 			Screen: cfg.Screen{Title: "Books", Layout: cfg.Node{Component: "books"}},
 		},
 	}
+	if mutate != nil {
+		mutate(&c)
+	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var m tea.Model = app.New(app.Options{
-		Root: root, Themes: []theme.Theme{theme.Nord()}, SkipConfig: true,
+		Root: root, Palettes: []palette.Palette{palette.Nord()}, SkipConfig: true,
 	})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	return &windowHarness{t: t, model: m, root: root}
@@ -522,12 +540,12 @@ printf '{"total":%s,"rows":[%s]}' "$TOTAL" "$ROWS"
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var m tea.Model = app.New(app.Options{
-		Root: root, Themes: []theme.Theme{theme.Nord()}, SkipConfig: true,
+		Root: root, Palettes: []palette.Palette{palette.Nord()}, SkipConfig: true,
 	})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	return &windowHarness{t: t, model: m, root: root}
@@ -669,7 +687,7 @@ func TestWindowPagePassesItsContextToTheRequest(t *testing.T) {
 		t.Fatal("books isn't a windowed source")
 	}
 	c := h.root.tree.Components["books"]
-	page := windowPage(ws, c, nil, theme.Nord())
+	page := windowPage(ws, c, nil, theme.New(palette.Nord()))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -722,11 +740,11 @@ func TestTwoWindowedTablesKeepTheirOwnQueries(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var m tea.Model = app.New(app.Options{Root: root, Themes: []theme.Theme{theme.Nord()}, SkipConfig: true})
+	var m tea.Model = app.New(app.Options{Root: root, Palettes: []palette.Palette{palette.Nord()}, SkipConfig: true})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
 	h := &windowHarness{t: t, model: m, root: root}
 	h.drain(h.model.Init())
@@ -750,5 +768,92 @@ func TestTwoWindowedTablesKeepTheirOwnQueries(t *testing.T) {
 	}
 	if !leftSaw {
 		t.Error("the left table's source never got its own filter")
+	}
+}
+
+// A sort the server refuses with a 400 is reverted rather than failing
+// the table: the rows stay, the user is told once, and the column drops
+// out of the sort cycle so the next `s` doesn't ask again.
+func TestWindowRefusedSortReverts(t *testing.T) {
+	srv := newWindowStub(500)
+	defer srv.Close()
+	srv.fail = func(q url.Values) bool { return q.Get("ordering") != "" }
+	srv.failStatus = http.StatusBadRequest
+	h := newWindowHarness(t, srv, 20)
+	h.drain(h.model.Init())
+
+	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	if h.table().Failed() {
+		t.Fatal("a refused sort failed the table; it should revert")
+	}
+	view := h.view()
+	if !strings.Contains(view, "Book-0000") {
+		t.Errorf("rows went away after a refused sort:\n%s", view)
+	}
+	if !strings.Contains(view, "can't sort by Title") {
+		t.Errorf("no notice for the refused sort:\n%s", view)
+	}
+
+	sorted := func() int {
+		n := 0
+		for _, q := range srv.requests() {
+			if q.Get("ordering") != "" {
+				n++
+			}
+		}
+		return n
+	}
+	before := sorted()
+	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	if got := sorted(); got != before {
+		t.Errorf("the refused column was asked to sort again (%d sorted requests, was %d)", got, before)
+	}
+}
+
+// A 500 on a sort is a failure, not a refusal: it might work next time.
+func TestWindowFailedSortIsNotARefusal(t *testing.T) {
+	srv := newWindowStub(500)
+	defer srv.Close()
+	srv.fail = func(q url.Values) bool { return q.Get("ordering") != "" }
+	h := newWindowHarness(t, srv, 20)
+	h.drain(h.model.Init())
+
+	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	if !h.table().Failed() {
+		t.Error("a 500 on a sort should fail the query, as before")
+	}
+	if strings.Contains(h.view(), "can't sort by") {
+		t.Error("a 500 was reported as a refusal")
+	}
+}
+
+// The filter rule end to end: a comparison typed in the filter bar goes
+// out as its param, and one the column has no param for is left out with
+// a notice rather than searched for.
+func TestWindowFilterRuleComparisons(t *testing.T) {
+	srv := newWindowStub(500)
+	defer srv.Close()
+	h := newWindowHarnessWith(t, srv, 20, func(c *cfg.Config) {
+		w := c.Data.Sources["books"].Window
+		w.Filters = nil
+		w.FilterOps = map[string]string{"contains": "${column.value}__icontains", "gte": "${column.value}__gte"}
+		c.TUI.Components["books"].Columns = append(c.TUI.Components["books"].Columns,
+			cfg.Column{Title: "Year", Width: 6, Value: cfg.Path{"year"}})
+	})
+	h.drain(h.model.Init())
+
+	h.typeFilter("year>=1950 year<2000")
+	reqs := srv.requests()
+	last := reqs[len(reqs)-1]
+	if last.Get("year__gte") != "1950" {
+		t.Errorf("year>=1950 wasn't sent as year__gte; last request %v", last)
+	}
+	for k := range last {
+		if k == "q" || strings.Contains(k, "lt") {
+			t.Errorf("the unsupported year<2000 was sent (%s=%s)", k, last.Get(k))
+		}
+	}
+	if !strings.Contains(h.view(), "`<` isn't supported on") {
+		t.Errorf("no notice for year<2000:\n%s", h.view())
 	}
 }

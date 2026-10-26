@@ -8,7 +8,7 @@ import (
 func TestBorderNamesAccepted(t *testing.T) {
 	for _, name := range BorderShapeNames {
 		c := promptConfig()
-		c.App.Borders = Borders{Active: name, Inactive: name, Overlay: name}
+		c.App.Borders = Borders{Active: name, Overlay: name}
 		if err := c.Validate(); err != nil {
 			t.Errorf("border %q: Validate: %v", name, err)
 		}
@@ -19,12 +19,12 @@ func TestBorderNamesAccepted(t *testing.T) {
 // change just appears not to have worked.
 func TestBorderUnknownNameRejected(t *testing.T) {
 	c := promptConfig()
-	c.App.Borders = Borders{Inactive: "wobbly"}
+	c.App.Borders = Borders{Overlay: "wobbly"}
 	err := c.Validate()
 	if err == nil {
 		t.Fatal("expected an error for an unknown border name")
 	}
-	if !strings.Contains(err.Error(), "app.borders.inactive") || !strings.Contains(err.Error(), "wobbly") {
+	if !strings.Contains(err.Error(), "app.borders.overlay") || !strings.Contains(err.Error(), "wobbly") {
 		t.Errorf("error should name the field and the bad value, got: %v", err)
 	}
 	// And the message should list what is allowed.
@@ -123,5 +123,69 @@ func TestEveryGlyphFieldValidated(t *testing.T) {
 		if !strings.Contains(err.Error(), "app.glyphs."+field) {
 			t.Errorf("%s: error should name the field, got: %v", field, err)
 		}
+	}
+}
+
+// Surfaces draw the same lines focused or not, so a separate unfocused
+// shape can't be honoured; say so rather than silently ignore it.
+func TestBorderInactiveRejected(t *testing.T) {
+	c := promptConfig()
+	c.App.Borders = Borders{Inactive: "rounded"}
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "app.borders.inactive: no longer supported") || !strings.Contains(err.Error(), "app.borders.active") {
+		t.Fatalf("want an unsupported error pointing at active, got %v", err)
+	}
+}
+
+func TestSurfaceNamesAccepted(t *testing.T) {
+	for _, name := range SurfaceNames {
+		c := promptConfig()
+		c.App.Surface = name
+		if err := c.Validate(); err != nil {
+			t.Errorf("surface %q: Validate: %v", name, err)
+		}
+	}
+}
+
+func TestSurfaceUnknownNameRejected(t *testing.T) {
+	c := promptConfig()
+	c.App.Surface = "glossy"
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), `app.surface: unknown surface "glossy"`) || !strings.Contains(err.Error(), "banded") {
+		t.Fatalf("want an unknown-surface error listing the names, got %v", err)
+	}
+}
+
+// The surface key is claimed by the shell like the theme key, so it
+// can't collide with another shell key, and "-" frees it.
+func TestSurfaceKey(t *testing.T) {
+	a := &App{}
+	if a.SurfaceCycleKey() != "T" {
+		t.Errorf("default surface key = %q, want T", a.SurfaceCycleKey())
+	}
+	a.SurfaceKey = "-"
+	if a.SurfaceCycleKey() != "" {
+		t.Error(`surface_key "-" should pin the surface`)
+	}
+	c := promptConfig()
+	c.App.SurfaceKey = "t"
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "cycles the surface") {
+		t.Fatalf("want a collision with the theme key, got %v", err)
+	}
+}
+
+func TestColorsValues(t *testing.T) {
+	for _, name := range ColorNames {
+		c := promptConfig()
+		c.App.Colors = name
+		if err := c.Validate(); err != nil {
+			t.Errorf("colors %q: Validate: %v", name, err)
+		}
+	}
+	c := promptConfig()
+	c.App.Colors = "millions"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), `app.colors: unknown value "millions"`) {
+		t.Fatalf("want an unknown-value error, got %v", err)
 	}
 }

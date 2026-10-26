@@ -27,6 +27,7 @@
 #
 # Every action here runs `echo`, so nothing external is needed.
 app:
+  surface: filled
   title: Action inputs demo
   theme: nord
 
@@ -86,6 +87,7 @@ tui:
       # is reached through the menu.
       - key: enter
         action: order
+        group: write
         label: order
         from: fruits
         # The confirm message previews values the form just collected.
@@ -96,6 +98,7 @@ tui:
       # menu is open. Pressing `n` on the list does nothing.
       - key: n
         action: request
+        group: write
         label: request
         from: fruits
         bind: {fruit: "${selection}"}
@@ -104,6 +107,7 @@ tui:
       # the alphabet stops being the ceiling on how many verbs a screen
       # can have, so a verb no longer has to earn a letter to exist.
       - action: taste
+        group: read
         label: taste
         from: fruits
         bind: {fruit: "${selection}"}

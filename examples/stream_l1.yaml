@@ -27,6 +27,7 @@
 # Geography: binance.us URLs work in the US. International users:
 # swap `binance.us` for `binance.com`.
 app:
+  surface: filled
   title: Crypto L1 (bookTicker × @ticker merged)
   theme: nord
 

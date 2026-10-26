@@ -15,6 +15,7 @@
 # This example synthesizes ticks via /bin/sh so the demo works without
 # extra setup. Try it as a model for wiring a real follow command.
 app:
+  surface: filled
   title: Streaming exec demo
   theme: nord
 

@@ -36,6 +36,7 @@
 # bottom pane's content. Revisit a row you've already viewed and the
 # ParamCache serves it instantly (no network).
 app:
+  surface: filled
   title: Repos (on-hover detail)
   theme: nord
 

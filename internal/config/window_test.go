@@ -131,7 +131,7 @@ func TestWindowRejectsNonTableBinding(t *testing.T) {
 
 func TestWindowRejectsSortableColumnWithoutSortParam(t *testing.T) {
 	c := windowedConfig()
-	c.TUI.Components["books"].Columns[0].Sortable = true
+	c.TUI.Components["books"].Columns[0].Sortable = yes()
 	err := c.Validate()
 	if err == nil {
 		t.Fatal("Validate succeeded with a sortable column and no sort_param")
@@ -315,7 +315,7 @@ func TestExecWindowSortTokens(t *testing.T) {
 	} {
 		c := execWindowedConfig()
 		c.Data.Sources["books"].Command[2] += tc.tokens
-		c.TUI.Components["books"].Columns[0].Sortable = true
+		c.TUI.Components["books"].Columns[0].Sortable = yes()
 		err := c.Validate()
 		if tc.wantErr == "" && err != nil || tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
 			t.Errorf("%q: err = %v, want %q", tc.tokens, err, tc.wantErr)
@@ -406,3 +406,6 @@ func TestWindowPageParam(t *testing.T) {
 		}
 	}
 }
+
+// yes is a *bool true, for Column.Sortable.
+func yes() *bool { v := true; return &v }

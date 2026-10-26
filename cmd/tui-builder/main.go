@@ -10,11 +10,14 @@ package main
 import (
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/jsdrews/tuilib/pkg/action"
 	"github.com/jsdrews/tuilib/pkg/app"
@@ -23,7 +26,9 @@ import (
 	"github.com/jsdrews/tuilib/pkg/geom"
 	"github.com/jsdrews/tuilib/pkg/mouse"
 	"github.com/jsdrews/tuilib/pkg/output"
+	"github.com/jsdrews/tuilib/pkg/palette"
 	tscreen "github.com/jsdrews/tuilib/pkg/screen"
+	"github.com/jsdrews/tuilib/pkg/surface"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	"github.com/jsdrews/tui-builder/internal/build"
@@ -54,17 +59,35 @@ func run() error {
 		return err
 	}
 
-	// app.glyphs / app.borders land on every palette, not just the one
-	// app.theme names — cycling themes (`t`) walks the whole slice, and
-	// the chrome vocabulary shouldn't change halfway through.
-	themes := build.ApplyChrome(theme.All(), &c.App)
-	// The keymap, form spacing and mask reach inside components and
-	// forms, which every builder (and every theme-swap rebuild) reads.
+	// A forced colour depth, before anything is drawn or the surfaces are
+	// resolved against the terminal (termCaps reads the profile).
+	if p, ok := colorProfile(os.Getenv(colorsEnvVar), c.App.Colors); ok {
+		lipgloss.SetColorProfile(p)
+	}
+
+	// The keymap, form spacing, mask and glyphs reach inside components
+	// and forms, which every builder (and every theme-swap rebuild) reads.
 	build.SetAppChrome(&c.App)
 	// The user's own tuilib config file. A missing or unreadable file is
 	// the normal case and means "no preferences".
 	user, _ := tconfig.Load()
-	initial := initialTheme(themes, os.Getenv(themeEnvVar), c.App.Theme, user.Theme)
+	// The surfaces, with app.borders and app.glyphs.rule on each, start
+	// first. The shell composes the current one with the current
+	// palette, so cycling either (`t`, `T`) keeps the other.
+	surfaces := build.Surfaces(&c.App, initialSurface(os.Getenv(surfaceEnvVar), c.App.Surface, user.Surface))
+	palettes := palette.All()
+	caps := termCaps(user.BlockGlyphs)
+	start := initialPalette(palettes, os.Getenv(themeEnvVar), c.App.Theme, userPalette(user))
+	glyphs := build.Glyphs(&c.App)
+	initial := theme.Compose(start, surfaces[0], caps)
+	initial.Glyphs = glyphs
+
+	// app.env values from a file or a command, before the prompts so a
+	// prompt with the same key starts with the resolved value. Commands
+	// still own the terminal here, so a password prompt works.
+	if err := c.ResolveEnv(); err != nil {
+		return err
+	}
 
 	// Pre-flight: if the config declares app-level prompts, collect
 	// them BEFORE building the screen so URL / argv / header
@@ -72,7 +95,7 @@ func run() error {
 	// a tiny separate tea.Program with just a form; on submit we
 	// os.Setenv each value, on cancel we exit cleanly.
 	if len(c.App.Prompts) > 0 {
-		if err := collectAppPrompts(c.App.Prompts, initial); err != nil {
+		if err := collectAppPrompts(promptTitle(c.App.Title), c.App.Prompts, initial); err != nil {
 			return err
 		}
 	}
@@ -83,7 +106,7 @@ func run() error {
 	// supply a var that the config references.
 	c.SubstituteEnv()
 
-	themes = reorderThemes(themes, initial.Name)
+	palettes = reorderPalettes(palettes, start.Name)
 
 	var root tscreen.Screen
 	if len(c.TUI.Screens) > 0 {
@@ -102,12 +125,20 @@ func run() error {
 	}
 
 	shell := app.New(app.Options{
-		Root:    root,
-		Themes:  themes,
-		Version: c.App.Version,
-		// tui-builder resolves the initial theme itself (initialTheme)
-		// so app.theme beats the user's config file; tuilib's own
-		// resolution would put the file first.
+		Root:     root,
+		Palettes: palettes,
+		Surfaces: surfaces,
+		// app.glyphs, on every theme the shell composes: the screens get
+		// them through SetTheme, and the shell's own overlays draw them too.
+		Glyphs: glyphs,
+		// Surface cycling; app.surface_key: "-" pins the surface.
+		SurfaceKey: keyBinding(c.App.SurfaceCycleKey(), "surface"),
+		// The same capabilities the first screens were built against.
+		Capabilities: &caps,
+		Version:      c.App.Version,
+		// tui-builder resolves the initial palette itself
+		// (initialPalette) so app.theme beats the user's config file;
+		// tuilib's own resolution would put the file first.
 		SkipConfig:          true,
 		DoubleClickInterval: doubleClick(c.App.DoubleClick, user.DoubleClickMs),
 		QuitKey:             keyBinding(c.App.QuitKeyName(), "quit", "ctrl+c"),
@@ -123,7 +154,7 @@ func run() error {
 		// Zero binding (app.output_key: "-") leaves it off entirely.
 		OutputKey: outputBinding(c.App.OutputConsoleKey()),
 		// Theme cycling. A zero binding disables it, which is what
-		// this was until now — so `theme.All()`, reorderThemes and
+		// this was until now — so `palette.All()`, reorderPalettes and
 		// every "press t" in the docs described something that
 		// couldn't happen. Zero binding (app.theme_key: "-") pins
 		// the palette.
@@ -159,20 +190,93 @@ func run() error {
 // themeEnvVar picks the starting palette for one run, ahead of the config.
 const themeEnvVar = "TUI_BUILDER_THEME"
 
-// initialTheme picks the starting palette. Most specific wins: the person
+// initialPalette picks the starting palette. Most specific wins: the person
 // running it right now (env), then the config's author (app.theme), then
 // the user's machine-wide default (their tuilib config file), then the
 // first theme. An unknown name at any step falls through to the next.
-func initialTheme(themes []theme.Theme, env, appTheme, userTheme string) theme.Theme {
+func initialPalette(palettes []palette.Palette, env, appTheme, userTheme string) palette.Palette {
 	for _, name := range []string{env, appTheme, userTheme} {
 		if name == "" {
 			continue
 		}
-		if t, ok := theme.ByName(themes, name); ok {
-			return t
+		if p, ok := palette.ByName(palettes, name); ok {
+			return p
 		}
 	}
-	return themes[0]
+	return palettes[0]
+}
+
+// promptTitle frames the startup prompts: the app's title, or a plain
+// heading when the config has none.
+func promptTitle(appTitle string) string {
+	if appTitle != "" {
+		return appTitle
+	}
+	return "Settings"
+}
+
+// colorsEnvVar forces the colour depth for one run, ahead of the config.
+const colorsEnvVar = "TUI_BUILDER_COLORS"
+
+// colorProfile is the colour depth to force: the env var's, else
+// app.colors. ok is false for "auto", unset, or an unknown env value
+// (which falls through to the config, as theme names do), leaving
+// lipgloss to detect it from TERM and COLORTERM.
+func colorProfile(env, appColors string) (termenv.Profile, bool) {
+	for _, name := range []string{env, appColors} {
+		switch name {
+		case "truecolor":
+			return termenv.TrueColor, true
+		case "256":
+			return termenv.ANSI256, true
+		case "16":
+			return termenv.ANSI, true
+		case "auto":
+			return 0, false
+		}
+	}
+	return 0, false
+}
+
+// surfaceEnvVar picks the starting surface for one run, ahead of the
+// config.
+const surfaceEnvVar = "TUI_BUILDER_SURFACE"
+
+// initialSurface picks the starting surface's name the way
+// initialPalette picks a palette: env, then app.surface, then the
+// user's tuilib config, then outlined. An unknown name falls through.
+func initialSurface(env, appSurface, userSurface string) string {
+	for _, name := range []string{env, appSurface, userSurface} {
+		if slices.Contains(cfg.SurfaceNames, name) {
+			return name
+		}
+	}
+	return cfg.SurfaceNames[0]
+}
+
+// userPalette is the palette the user's tuilib config file names:
+// `palette:`, or the older `theme:` it replaced.
+func userPalette(u tconfig.Config) string {
+	if u.Palette != "" {
+		return u.Palette
+	}
+	return u.Theme
+}
+
+// termCaps is what the terminal offers a surface: its colour profile,
+// and whether block glyphs draw without seams — the user's
+// `block_glyphs:` when set, else off for terminals known to draw them
+// from the font. It's tuilib's own detection, which SkipConfig turns
+// off along with the rest of the user's file.
+func termCaps(blockGlyphs *bool) surface.Caps {
+	caps := surface.Caps{Profile: lipgloss.ColorProfile(), BlockGlyphs: true}
+	switch {
+	case blockGlyphs != nil:
+		caps.BlockGlyphs = *blockGlyphs
+	case os.Getenv("TERM_PROGRAM") == "Apple_Terminal":
+		caps.BlockGlyphs = false
+	}
+	return caps
 }
 
 // doubleClick is app.double_click, else the user's tuilib config file's
@@ -251,9 +355,14 @@ func initialOr(key, fallback string) string {
 // Pre-populating: each text prompt's Initial defaults to the current
 // env value if one is set, so `SYMBOLS=… tui-builder …` skips the
 // modal in spirit — you can see the value and just press enter.
-func collectAppPrompts(prompts []cfg.Prompt, th theme.Theme) error {
+//
+// title frames the form: the app's title, so the first thing on screen
+// says what is asking.
+func collectAppPrompts(title string, prompts []cfg.Prompt, th theme.Theme) error {
+	opts := build.FormOptions(th).With(promptFields(prompts))
+	opts.Title = title
 	m := &promptModel{
-		form:  form.New(build.FormOptions(th).With(promptFields(prompts))),
+		form:  form.New(opts),
 		mouse: mouse.NewTracker(0),
 	}
 	prog := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
@@ -348,7 +457,7 @@ func (m *promptModel) View() string {
 	return m.form.View()
 }
 
-func reorderThemes(in []theme.Theme, head string) []theme.Theme {
+func reorderPalettes(in []palette.Palette, head string) []palette.Palette {
 	if head == "" {
 		return in
 	}
@@ -357,7 +466,7 @@ func reorderThemes(in []theme.Theme, head string) []theme.Theme {
 			if i == 0 {
 				return in
 			}
-			out := make([]theme.Theme, 0, len(in))
+			out := make([]palette.Palette, 0, len(in))
 			out = append(out, t)
 			out = append(out, in[:i]...)
 			out = append(out, in[i+1:]...)

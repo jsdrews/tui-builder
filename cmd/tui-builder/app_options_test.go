@@ -5,9 +5,10 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/muesli/termenv"
 
 	"github.com/jsdrews/tuilib/pkg/app"
-	"github.com/jsdrews/tuilib/pkg/theme"
+	"github.com/jsdrews/tuilib/pkg/palette"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
 )
@@ -15,9 +16,9 @@ import (
 // Most specific wins: env (this run), then app.theme (the config's
 // author), then the user's tuilib config (their machine), then the
 // first theme. Before, the user's file beat app.theme.
-func TestInitialThemePrecedence(t *testing.T) {
-	themes := theme.All()
-	first := themes[0].Name
+func TestInitialPalettePrecedence(t *testing.T) {
+	palettes := palette.All()
+	first := palettes[0].Name
 	cases := []struct {
 		env, appTheme, user, want string
 	}{
@@ -29,7 +30,7 @@ func TestInitialThemePrecedence(t *testing.T) {
 		{"", "nope", "nope", first},
 	}
 	for _, tc := range cases {
-		if got := initialTheme(themes, tc.env, tc.appTheme, tc.user).Name; got != tc.want {
+		if got := initialPalette(palettes, tc.env, tc.appTheme, tc.user).Name; got != tc.want {
 			t.Errorf("env=%q app=%q user=%q: got %q, want %q", tc.env, tc.appTheme, tc.user, got, tc.want)
 		}
 	}
@@ -109,4 +110,45 @@ func flatten(cmd tea.Cmd) []tea.Msg {
 		return out
 	}
 	return []tea.Msg{msg}
+}
+
+// Same precedence as the palette: env, app.surface, the user's file,
+// then outlined; an unknown name falls through.
+func TestInitialSurfacePrecedence(t *testing.T) {
+	for _, tc := range []struct{ env, app, user, want string }{
+		{"", "", "", "outlined"},
+		{"", "", "filled", "filled"},
+		{"", "banded", "filled", "banded"},
+		{"elevated", "banded", "filled", "elevated"},
+		{"nope", "banded", "filled", "banded"},
+	} {
+		if got := initialSurface(tc.env, tc.app, tc.user); got != tc.want {
+			t.Errorf("env=%q app=%q user=%q: got %q, want %q", tc.env, tc.app, tc.user, got, tc.want)
+		}
+	}
+}
+
+// The env var beats app.colors; auto, unset or an unknown env value
+// leaves detection alone (an unknown env value falls through to the
+// config).
+func TestColorProfile(t *testing.T) {
+	for _, tc := range []struct {
+		env, app string
+		want     termenv.Profile
+		ok       bool
+	}{
+		{"", "", 0, false},
+		{"", "auto", 0, false},
+		{"", "truecolor", termenv.TrueColor, true},
+		{"", "256", termenv.ANSI256, true},
+		{"", "16", termenv.ANSI, true},
+		{"256", "truecolor", termenv.ANSI256, true},
+		{"auto", "truecolor", 0, false},
+		{"lots", "truecolor", termenv.TrueColor, true},
+	} {
+		got, ok := colorProfile(tc.env, tc.app)
+		if ok != tc.ok || (ok && got != tc.want) {
+			t.Errorf("env=%q app=%q: got %v %v, want %v %v", tc.env, tc.app, got, ok, tc.want, tc.ok)
+		}
+	}
 }

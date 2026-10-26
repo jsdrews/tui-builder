@@ -3,6 +3,7 @@ package build
 import (
 	"testing"
 
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
@@ -17,13 +18,13 @@ func TestSubstituteInputValues(t *testing.T) {
 }
 
 func TestInputAndToggleValues(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	in, _ := NewComponent(&cfg.Component{Type: "input", Initial: "web"}, th)
 	tg, _ := NewComponent(&cfg.Component{Type: "toggle", Initial: "true"}, th)
 	if InputValue(in) != "web" || InputValue(tg) != "true" {
 		t.Errorf("values = %q, %q", InputValue(in), InputValue(tg))
 	}
-	in.Rebuild(theme.Dark())
+	in.Rebuild(theme.New(palette.Dark()))
 	if InputValue(in) != "web" {
 		t.Errorf("a theme swap lost the input's value: %q", InputValue(in))
 	}
@@ -38,7 +39,7 @@ func TestInputDefaultsToThreeRowsInAVStack(t *testing.T) {
 	tree, err := Build(root, map[string]*cfg.Component{
 		"search": {Type: "input"},
 		"items":  {Type: "list", Items: []string{"a"}},
-	}, theme.Nord())
+	}, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}

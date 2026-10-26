@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jsdrews/tuilib/pkg/app"
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	"github.com/jsdrews/tui-builder/internal/build"
@@ -66,13 +67,13 @@ func TestKubeMultiEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var m tea.Model = app.New(app.Options{
 		Root:       root,
-		Themes:     []theme.Theme{theme.Nord()},
+		Palettes:   []palette.Palette{palette.Nord()},
 		SkipConfig: true,
 	})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
@@ -148,13 +149,13 @@ func TestKubeMultiAllClustersDown(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var m tea.Model = app.New(app.Options{
 		Root:       root,
-		Themes:     []theme.Theme{theme.Nord()},
+		Palettes:   []palette.Palette{palette.Nord()},
 		SkipConfig: true,
 		// The failure sink under test. Without this the whole console
 		// feature is off and app.ErrorDetail's Body has nowhere to go.
@@ -291,7 +292,7 @@ func TestParamsBindEndToEnd(t *testing.T) {
 			},
 		},
 		Initial: "users"},
-		Actions: pushRegistry(),
+		Actions: pushRegistry("open_posts"),
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
@@ -302,13 +303,13 @@ func TestParamsBindEndToEnd(t *testing.T) {
 		Components: c.TUI.Components, Sources: c.Data.Sources,
 		Actions: c.Actions,
 	}
-	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.Nord())
+	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var m tea.Model = app.New(app.Options{
 		Root:       root,
-		Themes:     []theme.Theme{theme.Nord()},
+		Palettes:   []palette.Palette{palette.Nord()},
 		SkipConfig: true,
 	})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
@@ -430,7 +431,7 @@ func TestParamsBindFromListSelection(t *testing.T) {
 			},
 		},
 		Initial: "namespaces"},
-		Actions: pushRegistry(),
+		Actions: pushRegistry("open_pods"),
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
@@ -440,12 +441,12 @@ func TestParamsBindFromListSelection(t *testing.T) {
 		Screens: c.TUI.Screens, Components: c.TUI.Components, Sources: c.Data.Sources,
 		Actions: c.Actions,
 	}
-	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.Nord())
+	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var m tea.Model = app.New(app.Options{
-		Root: root, Themes: []theme.Theme{theme.Nord()}, SkipConfig: true,
+		Root: root, Palettes: []palette.Palette{palette.Nord()}, SkipConfig: true,
 	})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	drain := func(start tea.Cmd) {
@@ -585,7 +586,7 @@ func TestParamsBindIgnoresUnusedSources(t *testing.T) {
 			},
 		},
 		Initial: "namespaces"},
-		Actions: pushRegistry(),
+		Actions: pushRegistry("open_pods"),
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
@@ -595,12 +596,12 @@ func TestParamsBindIgnoresUnusedSources(t *testing.T) {
 		Screens: c.TUI.Screens, Components: c.TUI.Components, Sources: c.Data.Sources,
 		Actions: c.Actions,
 	}
-	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.Nord())
+	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var m tea.Model = app.New(app.Options{
-		Root: root, Themes: []theme.Theme{theme.Nord()}, SkipConfig: true,
+		Root: root, Palettes: []palette.Palette{palette.Nord()}, SkipConfig: true,
 	})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	drain := func(start tea.Cmd) {
@@ -695,7 +696,7 @@ func TestParamsBindMissingRequired(t *testing.T) {
 			"posts": {Layout: cfg.Node{Component: "posts_table"}},
 		},
 		Initial: "users"},
-		Actions: pushRegistry(),
+		Actions: pushRegistry("open_posts"),
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
@@ -705,12 +706,12 @@ func TestParamsBindMissingRequired(t *testing.T) {
 		Screens: c.TUI.Screens, Components: c.TUI.Components, Sources: c.Data.Sources,
 		Actions: c.Actions,
 	}
-	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.Nord())
+	root, err := NewMulti(c.TUI.Initial, multi, build.Selection{}, nil, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var m tea.Model = app.New(app.Options{
-		Root: root, Themes: []theme.Theme{theme.Nord()}, SkipConfig: true,
+		Root: root, Palettes: []palette.Palette{palette.Nord()}, SkipConfig: true,
 	})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	drain := func(start tea.Cmd) {
@@ -791,11 +792,18 @@ func stubKube(pods map[string]string) *httptest.Server {
 	}))
 }
 
-// pushRegistry declares every push action the multi-screen fixtures bind
-// to. Pushes are registry entries now, not their own on_key: block.
-func pushRegistry() map[string]*cfg.Action {
-	return map[string]*cfg.Action{
+// pushRegistry declares the named push actions the multi-screen
+// fixtures bind to. Pushes are registry entries now, not their own
+// on_key: block. Each fixture takes only the ones whose screen it
+// defines, since a push to a missing screen fails Validate.
+func pushRegistry(names ...string) map[string]*cfg.Action {
+	all := map[string]*cfg.Action{
 		"open_pods":  {Push: "pods"},
 		"open_posts": {Push: "posts"},
 	}
+	reg := map[string]*cfg.Action{}
+	for _, n := range names {
+		reg[n] = all[n]
+	}
+	return reg
 }

@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jsdrews/tuilib/pkg/app"
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
@@ -44,11 +45,11 @@ func newEventlogHarness(t *testing.T, srv *windowStub, mutate func(*cfg.Config))
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var m tea.Model = app.New(app.Options{Root: root, Themes: []theme.Theme{theme.Nord(), theme.Dark()}, SkipConfig: true})
+	var m tea.Model = app.New(app.Options{Root: root, Palettes: []palette.Palette{palette.Nord(), palette.Dark()}, SkipConfig: true})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	return &windowHarness{t: t, model: m, root: root}
 }
@@ -170,7 +171,7 @@ func TestEventlogKeepsItsItemsAcrossAThemeSwap(t *testing.T) {
 	h := newEventlogHarness(t, srv, nil)
 	h.drain(h.model.Init())
 
-	h.root.SetTheme(theme.Dark())
+	h.root.SetTheme(theme.New(palette.Dark()))
 	if got := h.view(); !strings.Contains(got, "Book-0000") {
 		t.Errorf("items lost across a theme swap; view:\n%s", got)
 	}
@@ -182,11 +183,11 @@ func TestEventlogExampleRenders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var m tea.Model = app.New(app.Options{Root: root, Themes: []theme.Theme{theme.Nord()}, SkipConfig: true})
+	var m tea.Model = app.New(app.Options{Root: root, Palettes: []palette.Palette{palette.Nord()}, SkipConfig: true})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	h := &windowHarness{t: t, model: m, root: root}
 	h.drain(h.model.Init())

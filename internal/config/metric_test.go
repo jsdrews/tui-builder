@@ -35,7 +35,7 @@ func TestMetricValidation(t *testing.T) {
 		{"color on ratio", Column{Title: "X", Metric: &Metric{Ratio: []string{"a", "b"}, Color: "red"}}, "items", "only apply to a bar or a sparkline"},
 		{"with value", Column{Title: "X", Value: Path{"v"}, Metric: &Metric{Spark: "a"}}, "items", "not with `value:`"},
 		{"with color rules", Column{Title: "X", ColorRules: []ColorRule{{Color: "red"}}, Metric: &Metric{Spark: "a"}}, "items", "not with `color_rules:`"},
-		{"sortable", Column{Title: "X", Sortable: true, Metric: &Metric{Spark: "a"}}, "items", "not with `sortable: true`"},
+		{"sortable", Column{Title: "X", Sortable: yes(), Metric: &Metric{Spark: "a"}}, "items", "not with `sortable: true`"},
 		{"static table", Column{Title: "X", Metric: &Metric{Spark: "a"}}, "", "needs a table bound"},
 	}
 	for _, tc := range cases {

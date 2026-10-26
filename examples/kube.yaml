@@ -23,6 +23,7 @@
 #   `root: items` on each list source so the bindings see the array.
 #   Detail endpoints return a single object — no root needed.
 app:
+  surface: filled
   title: Kubernetes
   theme: nord
 

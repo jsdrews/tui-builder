@@ -12,6 +12,7 @@
 # `on_error: skip` keeps the data flowing when one child fails (only
 # errors when every child fails). Default is `on_error: fail`.
 app:
+  surface: filled
   title: Merged people directory
   theme: nord
 

@@ -16,6 +16,7 @@
 # the outage marker: the title says "· reads failing", the rows keep what
 # the last good read said, and the error is reported once.
 app:
+  surface: filled
   title: Pods
   theme: nord
   env:
@@ -68,6 +69,7 @@ tui:
     actions:
       - key: enter
         action: restart
+        group: write
         from: pods
         bind: {name: "${selection.Name}"}
 actions:

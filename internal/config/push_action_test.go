@@ -112,3 +112,67 @@ func TestTwoKeylessBindingsDoNotCollide(t *testing.T) {
 		t.Fatalf("Validate: %v", err)
 	}
 }
+
+// A push naming a screen that doesn't exist is a load error, not an
+// alert the first time the key is pressed — bound or not.
+func TestPushToUndefinedScreenFailsLoad(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		bindings []ActionBinding
+	}{
+		{"bound", []ActionBinding{{Key: "enter", Action: "open", From: "tbl"}}},
+		{"unbound", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := pushConfig(tc.bindings, map[string]*Action{"open": {Push: "nope"}})
+			err := c.Validate()
+			if err == nil || !strings.Contains(err.Error(), `actions.open: push: screen "nope" not defined`) {
+				t.Fatalf("expected an undefined-screen error, got: %v", err)
+			}
+			if !strings.Contains(err.Error(), "a, b") {
+				t.Errorf("error should list the screens there are: %v", err)
+			}
+		})
+	}
+}
+
+// A single-screen config has nowhere to push to.
+func TestPushFromSingleScreenFailsLoad(t *testing.T) {
+	c := pushConfig(nil, map[string]*Action{"open": {Push: "b"}})
+	c.TUI.Screen = *c.TUI.Screens["a"]
+	c.TUI.Screens, c.TUI.Initial = nil, ""
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "single `tui.screen:`") {
+		t.Fatalf("expected a single-screen error, got: %v", err)
+	}
+}
+
+func TestActionGroupsValidation(t *testing.T) {
+	reg := func() map[string]*Action {
+		return map[string]*Action{"open": {Push: "b"}, "del": {Type: "http", URL: "http://h", Method: "DELETE"}}
+	}
+	bindings := []ActionBinding{
+		{Key: "enter", Action: "open", From: "tbl"},
+		{Key: "x", Action: "del", Group: "danger"},
+	}
+	ok := pushConfig(bindings, reg())
+	ok.App.ActionGroups = []string{"danger", "read"}
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("listed groups are all used: %v", err)
+	}
+	for _, tc := range []struct {
+		groups []string
+		want   string
+	}{
+		{[]string{"read", "wirte"}, `app.action_groups[1]: no binding is in group "wirte"`},
+		{[]string{"read", "read"}, `"read" is listed twice`},
+		{[]string{"write"}, `no binding is in group "write"`}, // del names its own group
+	} {
+		c := pushConfig(bindings, reg())
+		c.App.ActionGroups = tc.groups
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("groups %v: want %q, got %v", tc.groups, tc.want, err)
+		}
+	}
+}

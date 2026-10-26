@@ -48,6 +48,7 @@
 #     more_when: has_more
 
 app:
+  surface: filled
   title: Paginated fetch demo
 
 data:

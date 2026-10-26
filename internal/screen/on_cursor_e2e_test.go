@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jsdrews/tuilib/pkg/geom"
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
@@ -104,7 +105,7 @@ func newTestModel(t *testing.T, c *cfg.Config) *Model {
 	if err := c.Validate(); err != nil {
 		t.Fatalf("config validate: %v", err)
 	}
-	m, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	m, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatalf("build model: %v", err)
 	}
@@ -615,7 +616,7 @@ func TestOnCursorFsExample_YAML(t *testing.T) {
 	if err != nil {
 		t.Skipf("skip: cannot load fs example: %v", err)
 	}
-	m, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	m, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatalf("build model from fs example: %v", err)
 	}

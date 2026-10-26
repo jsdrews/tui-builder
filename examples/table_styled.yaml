@@ -8,6 +8,7 @@
 # gray (alias bright_black), bright_*. Or pass an integer 0-255 for any
 # 256-color palette index.
 app:
+  surface: filled
   title: Styled Cells
   theme: nord
 

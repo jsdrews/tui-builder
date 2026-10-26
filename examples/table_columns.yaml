@@ -9,6 +9,7 @@
 #
 # Align: left (default), right, center.
 app:
+  surface: filled
   title: Column Sizing
   theme: nord
 

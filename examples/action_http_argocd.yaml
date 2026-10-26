@@ -25,6 +25,7 @@
 # returns immediately and the work happens afterwards, so the honest
 # picture comes from polling regardless.
 app:
+  surface: filled
   title: Argo CD
   theme: nord
 

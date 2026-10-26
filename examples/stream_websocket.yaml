@@ -28,6 +28,7 @@
 # Authentication: `headers:` apply on the initial HTTP upgrade request,
 # so `Authorization: "Bearer ${env.TOKEN}"` etc. compose normally.
 app:
+  surface: filled
   title: Streaming websocket demo (live BTC trades)
   theme: nord
 

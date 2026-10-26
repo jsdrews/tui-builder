@@ -74,7 +74,9 @@ reason. `enter` (or a double click) fires its binding directly.
   source rules, including that `headers:` can't also set the header it
   owns.
 - push needs `push:` and takes no `run:`, `url:`, `inputs:` or
-  `multi: true`.
+  `multi: true`. The screen it names must exist in `tui.screens`, whether
+  or not anything binds the action; a single-screen config has nothing
+  to push to.
 - Inputs follow the [input rules](#inputs).
 
 ```yaml
@@ -243,6 +245,7 @@ map at load, so the two forms behave identically.
 | `name` | string | — | required for an inline declaration | The registry name the inline action gets. |
 | `key` | string | — (menu only) | — | `enter` fires directly (a double click is its mouse form). Any other key is a shortcut inside the action menu. Omit it to list the action in the menu only. |
 | `label` | string | action name; a push: `open <screen>` | — | The action's name in the menu and help. |
+| `group` | string | `read` for a push or an http `GET` / `HEAD`; `write` for any other http method; none for exec | — | The heading the binding sits under in the action menu. Headings appear only when a screen's menu has two or more groups; bindings with no group go last, under `other`. `tab` / `shift+tab` jump between groups in the menu. |
 | `from` | string | — | see validation | The list, table, tree or eventlog whose focused row supplies `${selection.*}` (or whose marked rows a `multi` action runs over). |
 | `bind` | map of template | — | — | Fills the action's `inputs:` (or, on a push, the destination's source `parameters:`) from `${selection.*}` and `${env.*}`. |
 | `confirm` | template or map | — | — | Shows a yes/no dialog before running. Takes `${selection.*}` and `${inputs.*}` (resolved values, after the form). The map form, `{message: …, default: yes}`, starts the dialog on Yes; the default is `no` (Cancel). See [`confirm`](#confirm). |

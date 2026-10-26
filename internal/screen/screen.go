@@ -31,6 +31,7 @@ import (
 	"github.com/jsdrews/tuilib/pkg/inspector"
 	"github.com/jsdrews/tuilib/pkg/layout"
 	"github.com/jsdrews/tuilib/pkg/list"
+	"github.com/jsdrews/tuilib/pkg/menu"
 	"github.com/jsdrews/tuilib/pkg/mouse"
 	"github.com/jsdrews/tuilib/pkg/poll"
 	"github.com/jsdrews/tuilib/pkg/runner"
@@ -760,6 +761,10 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		return m, m.applyCursorFetch(x)
 	case windowViewportMsg:
 		return m, m.handleWindowViewport(x)
+	case table.SortRefusedMsg:
+		return m, sortRefused(x)
+	case menu.ChosenMsg:
+		return m, m.openMenuItem(msg)
 	case windowQueryMsg:
 		return m, m.handleWindowQuery(x)
 	case windowTickMsg:
@@ -1238,6 +1243,8 @@ func componentHelpSections(c *build.Component) []help.Section {
 		return c.Input.HelpSections()
 	case build.KToggle:
 		return c.Toggle.HelpSections()
+	case build.KMenu:
+		return c.Menu.HelpSections()
 	}
 	return nil
 }
@@ -1316,6 +1323,8 @@ func focusableOf(c *build.Component) focus.Focusable {
 		return c.Input
 	case build.KToggle:
 		return c.Toggle
+	case build.KMenu:
+		return c.Menu
 	}
 	return nil
 }
@@ -1376,6 +1385,8 @@ func componentCapturing(c *build.Component) bool {
 		return c.Eventlog.IsCapturingKeys()
 	case build.KInput:
 		return c.Input.IsCapturingKeys()
+	case build.KMenu:
+		return c.Menu.IsCapturingKeys()
 	}
 	return false
 }
@@ -1400,6 +1411,8 @@ func componentHelp(c *build.Component) []key.Binding {
 		return c.Input.Help()
 	case build.KToggle:
 		return c.Toggle.Help()
+	case build.KMenu:
+		return c.Menu.Help()
 	}
 	return nil
 }
@@ -1421,7 +1434,9 @@ func (m *Model) activate() (tea.Cmd, bool) {
 		return nil, false
 	}
 	cur := m.current()
-	if cur != nil && componentCapturing(cur) {
+	// A menu owns enter: it opens the focused item, so even a screen-wide
+	// enter binding waits until another pane has focus.
+	if cur != nil && (componentCapturing(cur) || cur.Kind == build.KMenu) {
 		return nil, false
 	}
 	focusedName := ""
@@ -1475,7 +1490,7 @@ func (m *Model) startAction(b cfg.ActionBinding) (tea.Cmd, bool) {
 	// The form is generated from the action's own declared inputs —
 	// there is no separate prompts: schema to keep in sync.
 	if missing := unboundInputs(def, inputs); len(missing) > 0 {
-		f := m.newInputForm(def, missing)
+		f := m.newInputForm(menuLabel(b, def), def, missing)
 		m.formModal = &f
 		m.pendingBinding = b
 		m.pendingInputs = inputs
@@ -1730,14 +1745,16 @@ func (m *Model) actionOutcome(err error) tea.Cmd {
 // inputs. Fields are generated from each input's own Parameter — the
 // data type picks the widget (bool → toggle, anything with Options →
 // select, otherwise a text input), so there is no second widget schema
-// to keep in step with the type system.
-func (m *Model) newInputForm(def *cfg.Action, names []string) form.Model {
+// to keep in step with the type system. title frames it, so the modal
+// says which action it's collecting for.
+func (m *Model) newInputForm(title string, def *cfg.Action, names []string) form.Model {
 	fields := make([]form.Field, len(names))
 	for i, name := range names {
 		p := def.Inputs[name]
 		fields[i] = build.FormField(name, labelOr(p.Label, name), *p, p.Default)
 	}
 	opts := build.FormOptions(m.th).With(fields)
+	opts.Title = title
 	opts.SubmitText = "Run"
 	return form.New(opts)
 }
@@ -1844,6 +1861,42 @@ func componentActivated(c *build.Component, msg tea.Msg) bool {
 // destination's parameters from the binding's bind: map against sel.
 // The bool is always true — a push is handled even when it fails, since
 // the failure surfaces as an error cmd rather than falling through.
+// openMenuItem pushes the screen a menu's chosen item names, its bind:
+// filling the destination's parameters the way a push binding's does.
+// Values are literals or ${env.*}, which SubstituteEnv has resolved, so
+// there's no selection to substitute.
+func (m *Model) openMenuItem(msg tea.Msg) tea.Cmd {
+	for _, c := range m.tree.All() {
+		it, ok := build.MenuItemFor(c, msg)
+		if !ok {
+			continue
+		}
+		if m.multi == nil {
+			return app.Error(fmt.Sprintf("%s: a menu needs a multi-screen config", it.Screen))
+		}
+		params := make(map[string]string, len(it.Bind))
+		for k, v := range it.Bind {
+			params[k] = v
+		}
+		return m.pushScreen(it.Screen, build.Selection{}, params)
+	}
+	return nil
+}
+
+// pushScreen builds the named screen with sel and params and pushes it,
+// pausing this one's polls while it's covered.
+func (m *Model) pushScreen(name string, sel build.Selection, params map[string]string) tea.Cmd {
+	child, err := BuildMulti(name, m.multi, sel, params, m.th)
+	if err != nil {
+		return app.Error(fmt.Sprintf("%s: %v", name, err))
+	}
+	pause := m.setCovered(true)
+	if cancel := cancelOf(child); cancel != nil {
+		m.pushed = append(m.pushed, cancel)
+	}
+	return tea.Batch(pause, tscreen.Push(child))
+}
+
 func (m *Model) pushAction(b cfg.ActionBinding, def *cfg.Action, sel build.Selection) (tea.Cmd, bool) {
 	if m.multi == nil {
 		return app.Error(fmt.Sprintf("%s: push actions need a multi-screen config", b.Action)), true
@@ -1857,15 +1910,7 @@ func (m *Model) pushAction(b cfg.ActionBinding, def *cfg.Action, sel build.Selec
 	for k, v := range b.Bind {
 		params[k] = build.Substitute(v, sel)
 	}
-	child, err := BuildMulti(def.Push, m.multi, sel, params, m.th)
-	if err != nil {
-		return app.Error(fmt.Sprintf("%s: %v", def.Push, err)), true
-	}
-	pause := m.setCovered(true)
-	if cancel := cancelOf(child); cancel != nil {
-		m.pushed = append(m.pushed, cancel)
-	}
-	return tea.Batch(pause, tscreen.Push(child)), true
+	return m.pushScreen(def.Push, sel, params), true
 }
 
 // selectionFrom extracts a Selection from a list or table component. The
@@ -2011,6 +2056,10 @@ func updateComponent(c *build.Component, msg tea.Msg) tea.Cmd {
 	case build.KToggle:
 		m, cmd := c.Toggle.Update(msg)
 		*c.Toggle = m
+		return cmd
+	case build.KMenu:
+		m, cmd := c.Menu.Update(msg)
+		*c.Menu = m
 		return cmd
 	}
 	return nil

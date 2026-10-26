@@ -135,6 +135,15 @@ func (e *HTTPError) Error() string {
 	return head + " — " + e.Message
 }
 
+// Refusal reports a request the server understood and rejected as
+// unsupported — a 400 or a 422 — rather than one that failed: asking
+// again won't help. A window answering a sort with one makes that
+// column unavailable. 401, 403, 404, 429 and 5xx are failures, which
+// might work if tried again.
+func (e *HTTPError) Refusal() bool {
+	return e.Status == http.StatusBadRequest || e.Status == http.StatusUnprocessableEntity
+}
+
 // Detail is the console's longer form: the request, and what the server
 // said.
 func (e *HTTPError) Detail() string {

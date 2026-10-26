@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/remote"
 	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/theme"
@@ -17,7 +18,7 @@ import (
 // on its own, so anything dropped here stays blank until the user thinks
 // to press r.
 func TestFetchedDataSurvivesThemeRebuild(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 
 	tbl := markableTable(t)
 	ApplyData(tbl, pods(
@@ -48,7 +49,7 @@ func TestFetchedDataSurvivesThemeRebuild(t *testing.T) {
 	ApplyData(txt, "line one\nline two", th)
 
 	for _, c := range []*Component{tbl, lst, ins, txt} {
-		c.Rebuild(theme.Dark())
+		c.Rebuild(theme.New(palette.Dark()))
 	}
 
 	if got := len(tbl.Table.Rows()); got != 2 {
@@ -80,7 +81,7 @@ func TestFetchedDataSurvivesThemeRebuild(t *testing.T) {
 // A windowed table holds one page of a larger set, and nothing re-delivers
 // it after a rebuild: the source only refetches on a scroll or a filter.
 func TestWindowSurvivesThemeRebuild(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	c, err := NewComponent(&cfg.Component{
 		Type:     "table",
 		Source:   "books",
@@ -101,7 +102,7 @@ func TestWindowSurvivesThemeRebuild(t *testing.T) {
 	answered := table.Answer{Raw: "author:herbert"}
 	c.Table.SetWindow(TableRows(c, items, th), 40, 900, answered)
 
-	c.Rebuild(theme.Dark())
+	c.Rebuild(theme.New(palette.Dark()))
 
 	if c.Table != &c.Remote.Model {
 		t.Fatal("after rebuild, Table no longer points at the remote table's model")
@@ -120,7 +121,7 @@ func TestWindowSurvivesThemeRebuild(t *testing.T) {
 // (sort on every change) has to reach it as a negative duration.
 func TestSortDebounceReachesTableOptions(t *testing.T) {
 	for in, want := range map[string]time.Duration{"": 0, "300ms": 300 * time.Millisecond, "0": -1} {
-		opts := tableOptions(&cfg.Component{Type: "table", SortDebounce: in}, theme.Nord())
+		opts := tableOptions(&cfg.Component{Type: "table", SortDebounce: in}, theme.New(palette.Nord()))
 		if opts.SortDebounce != want {
 			t.Errorf("sort_debounce %q → %v, want %v", in, opts.SortDebounce, want)
 		}
@@ -131,7 +132,7 @@ func TestSortDebounceReachesTableOptions(t *testing.T) {
 // brings back cells as they were rendered, so without a re-render a
 // static or one-shot component would keep the old palette forever.
 func TestColorRulesFollowThemeRebuild(t *testing.T) {
-	old, next := theme.Nord(), theme.Dark()
+	old, next := theme.New(palette.Nord()), theme.New(palette.Dark())
 	rules := []cfg.ColorRule{{When: "Running", Color: "theme:accent"}}
 	if applyColorRules("Running", rules, old) == applyColorRules("Running", rules, next) {
 		t.Fatal("fixture themes share an accent; pick two that differ")

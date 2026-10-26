@@ -44,6 +44,7 @@
 # A multi verb fans out into one run per row — separately tracked,
 # separately cancellable, each logged under its own name in `o`.
 app:
+  surface: filled
   title: Marking
   theme: nord
 
@@ -122,6 +123,7 @@ tui:
   screen:
     actions:
       - action: touch
+        group: write
         label:  touch
         from:   pods
         # One confirm gates the whole fan-out, not one per row. The
@@ -131,6 +133,7 @@ tui:
         confirm: "Touch ${selection.Name}?"
         bind:   {name: "${selection.Name}"}
       - action: count
+        group: read
         label:  count
         from:   pods
         bind:   {name: "${selection.Name}"}

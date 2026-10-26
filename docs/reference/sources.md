@@ -631,7 +631,9 @@ Supported on `http` (the request goes in the query string) and `exec`
 | `page_size` | int | `100` | — | Rows per request. |
 | `prefetch` | int | `0` | — | Extra pages fetched beyond the screen. `1` hides the placeholder flash at page boundaries, for one extra request. |
 | `total_path` | [locator](#locators) | — | required, except with `cursor` | Where the total match count is: a dot-path into the raw response (before `root:`), or a header such as `header:X-Total-Count`. Without a total the table never scrolls past its first window, so it's required; a response that lacks it posts one notice. |
-| `filters` | map of string | — | — | Maps a column **title** to where a scoped `title:value` filter term goes: a query parameter on http, a `${window.filters.NAME}` token name on exec. Terms on unmapped columns are treated as bare terms. Without `search_param` (or `${window.search}` on exec), bare terms aren't sent: the table says so and its placeholder shows the column syntax. |
+| `filters` | map of string, or of map | — | a map value: http only | Maps a column **title** to where a scoped `title:value` filter term goes: a query parameter on http, a `${window.filters.NAME}` token name on exec. On http a value can instead be a map of [comparisons](#filter-rules) to params, `{gte: year_from, lte: year_to}`. An entry here replaces `filter_ops` for that column. Terms on unmapped columns are treated as bare terms. Without `search_param` (or `${window.search}` on exec), bare terms aren't sent: the table says so and its placeholder shows the column syntax. |
+| `filter_ops` | map of string | — | http only | One [filter rule](#filter-rules) for every column instead of a `filters:` entry each: a param template per comparison, each using `${column.value}`. |
+| `filter_except` | list of string | — | needs `filter_ops` | Column titles `filter_ops` leaves alone: numbers, ids, enums the API can't match on. |
 | `offset_param` | string | — | http: this or `page_param`; not on exec | Query parameter for the first row wanted (`offset`, `_start`, `skip`). |
 | `page_param` | string | — | http: this or `offset_param`; not on exec | Query parameter for a page number, for APIs that page by number (`?page=3&per_page=50`). A window that spans several pages is fetched a page at a time, in order, and trimmed. |
 | `page_start` | int | `1` | with `page_param` | The first page's number; `0` for zero-based APIs. |
@@ -639,6 +641,7 @@ Supported on `http` (the request goes in the query string) and `exec`
 | `search_param` | string | — | http only | Query parameter for bare filter terms, joined with spaces. |
 | `sort_param` | string | — | http only | Query parameter for the sort field. |
 | `sorts` | map of string | — | http only; needs `sort_param` | Maps a column title to the sort field the API expects. Unlisted columns send their title. |
+| `sort_fields` | list of string | — | http: needs `sort_param`; exec: `command:` references `${window.sort}`; not Anchored | The sort fields the API accepts, e.g. an `order_by` enum. A bound table's column whose `sorts:` entry, or else whose `value:` is one plain key, is listed becomes sortable without `sortable: true`, and on http sends that field. `sortable: false` opts a column out. On exec it only decides which columns sort; the command still gets the title. |
 | `sort_desc_prefix` | string | — | http only; needs `sort_param` | Prepended for a descending sort, e.g. `-` for Django REST (`ordering=-created`). Empty means both directions send the same value. |
 | `cursor` | string | — | eventlog and span-table sources | Makes the source **Anchored**: walked from an edge instead of paged by offset. The dot-path to each item's cursor, the value the next request walks from (ES `sort`, a timestamp, an id). See [Anchored windows](#anchored-windows). |
 | `older` | map | — | http, with `cursor` | What the request changes to walk towards older items, merged into `body:` or set as query parameters. |
@@ -845,12 +848,67 @@ data:
 - A `sortable` column on the bound table needs `sort_param` (http), or
   a `command:` that references both `${window.sort}` and
   `${window.sort_dir}` (exec).
+- `filter_ops` templates use `${column.value}` and name known
+  comparisons, as do `filters:` map entries; both are http-only.
+  `filter_except` needs `filter_ops` and names columns a bound table
+  has. The rule must cover at least one column, and two tables bound to
+  the source can't read different keys under one title.
+- With `sort_fields`, `sortable: true` on a column the list doesn't
+  match is an error: the API won't sort by it. A listed field no column
+  shows is fine. Fields can't be empty.
 - `page_size` and `prefetch` are not negative.
 - With `cursor:`: http needs both `older:` and `newer:`, which are
   http-only; exec must reference `${window.cursor}`, `${window.dir}` and
   `${window.limit}`; the offset, total and sort fields are rejected.
 - `anchor:` needs `cursor:`. A paged window starts where the bound
   component's `start:` says.
+
+**A sort the server refuses.** When an http window's sort request is
+answered with a 400 or a 422, the server is saying it won't sort by
+that column, so asking again won't help. The table goes back to the
+sort its rows were in, without another request, and says once
+`can't sort by <column>: HTTP 400 — …`, with the request and the
+server's answer in the output console. The column is dimmed and drops
+out of the sort keys and header clicks until the screen is rebuilt. If
+the very first request's sort is refused, the table asks once more
+unsorted. Any other error (401, 404, 429, 5xx, a timeout) fails the
+query as usual. Exec windows never refuse. Listing the columns the API
+can sort by in [`sort_fields`](#window) avoids most refusals.
+
+#### Filter rules
+
+Many APIs filter every field the same way — Django-style
+`?name__icontains=tolk`, `?year__gte=1950` — without the spec listing
+each one. `filter_ops` says it once:
+
+```yaml
+window:
+  search_param: name__icontains              # bare text, as before
+  filter_ops:
+    contains: "${column.value}__icontains"   # name:tolk     → ?name__icontains=tolk
+    eq:       "${column.value}"              # name=tolkien  → ?name=tolkien
+    gte:      "${column.value}__gte"         # year>=1950    → ?year__gte=1950
+    lte:      "${column.value}__lte"         # year<=2000    → ?year__lte=2000
+  filter_except: [Id, Created]
+  filters:
+    Author: author                           # string: contains only
+    Year: {gte: year_from, lte: year_to}     # its own params per comparison
+```
+
+- **Comparisons**, as typed in the filter bar: `contains` (`name:x`),
+  `eq` (`name=x`), `ne` (`name!=x`), `gt` (`year>x`), `gte` (`year>=x`),
+  `lt` (`year<x`), `lte` (`year<=x`). A `~regex` term is sent under
+  `contains`, as before.
+- **Columns covered:** every visible column of a bound table whose
+  `value:` is one plain key, which is `${column.value}`. Nested paths,
+  fallback lists, hidden columns, `filter_except` titles and columns
+  `filters:` names are left out. Number columns aren't guessed: list
+  them in `filter_except`, or give them their own `filters:` map.
+- **A comparison the column can't send** (`year<2000` with no `lt`) is
+  left out of the request, with a notice: "`<` isn't supported on Year".
+  It isn't searched for as text.
+- Exec windows get `contains` only, through `${window.filters.NAME}`.
+- Only the param name is templated; the value is sent as typed.
 
 `wrangl` on a windowed source returns its first page.
 
@@ -866,6 +924,23 @@ books:
     total_path: numFound
     search_param: q          # "hobbit"         → ?q=hobbit
     filters: {Author: author} # "author:tolkien" → ?author=tolkien
+```
+
+An API that lists what it can sort by, such as an `order_by` enum,
+says so once on the source instead of on every column:
+
+```yaml
+things:
+  type: http
+  url: https://api.example.com/things
+  root: entries
+  window:
+    page_param: page
+    limit_param: per_page
+    total_path: total
+    sort_param: order_by
+    sort_desc_prefix: "-"
+    sort_fields: [name, created_at]   # columns with value: name / created_at sort
 ```
 
 ## `resume`

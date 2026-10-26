@@ -35,6 +35,7 @@
 # Edit examples/fixtures/people.json in another window while this is
 # running (`refresh: 5s`) — cursor + expand state survive each reload.
 app:
+  surface: filled
   title: Team tree
   theme: nord
 

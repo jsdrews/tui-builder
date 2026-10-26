@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/jsdrews/tuilib/pkg/metrics"
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
@@ -15,7 +16,7 @@ var metricRow = map[string]any{
 }
 
 func TestRenderMetricMatchesTuilib(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	cases := []struct {
 		name string
 		m    cfg.Metric
@@ -43,7 +44,7 @@ func TestRenderMetricMatchesTuilib(t *testing.T) {
 // A metric column draws glyphs, but anything reading the row as a
 // selection gets its first input.
 func TestMetricColumnSelectionIsTheRawValue(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	c, err := NewComponent(&cfg.Component{Type: "table", Source: "deploys", Columns: []cfg.Column{
 		{Title: "Name", Value: cfg.Path{"name"}},
 		{Title: "Ready", Metric: &cfg.Metric{Ratio: []string{"ready", "desired"}}},
@@ -69,7 +70,7 @@ func TestMetricColumnSelectionIsTheRawValue(t *testing.T) {
 }
 
 func TestInspectorFieldMetric(t *testing.T) {
-	th := theme.Nord()
+	th := theme.New(palette.Nord())
 	fields := buildInspectorFields([]cfg.InspectorField{
 		{Label: "Pods", Metric: &cfg.Metric{Badge: []string{"ok", "warn", "down"}}},
 	}, metricRow, th)

@@ -42,4 +42,5 @@ section in the plan gets trimmed or deleted.
   command, a menu component, filter comparisons and rules, sortable
   fields on the source. Decided on
   [Map: tuilib table bugs and tui-builder gaps from generated configs](https://github.com/jsdrews/tui-builder/issues/105);
-  six tuilib PRs and a release, then eight tui-builder PRs.
+  six tuilib PRs and a release, then nine tui-builder PRs. **All
+  built**, on tuilib v0.43.0; what changed is recorded in the plan.

@@ -19,7 +19,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jsdrews/tuilib/pkg/app"
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
+
+	"github.com/jsdrews/tui-builder/internal/build"
+	cfg "github.com/jsdrews/tui-builder/internal/config"
+	"github.com/jsdrews/tui-builder/internal/datasource"
 )
 
 func main() {
@@ -44,17 +49,26 @@ func run() error {
 		return fmt.Errorf("no examples found — pass -dir <path> to point at a configs directory")
 	}
 
-	themes := theme.All()
-	initial := themes[0]
-
-	root := NewLauncher(paths, initial)
+	palettes := palette.All()
+	// The shell picks the starting palette and hands the root its
+	// composed theme straight away; this one only lasts until then.
+	root := NewLauncher(paths, theme.New(palettes[0]))
 
 	prog := tea.NewProgram(
 		app.New(app.Options{
-			Root:   root,
-			Themes: themes,
+			Root:     root,
+			Palettes: palettes,
+			// Every built-in surface, so an example's `surface:` can be
+			// switched to as it opens, and `T` cycles them as in
+			// tui-builder.
+			Surfaces:   build.Surfaces(&cfg.App{}, ""),
+			SurfaceKey: key.NewBinding(key.WithKeys("T"), key.WithHelp("T", "surface")),
+			// tuilib's action menu, on `a` as in tui-builder: every
+			// example's bindings, grouped read / write. Without a binding
+			// the shell never opens it, so `a` did nothing here.
+			ActionsKey: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "actions")),
 			// Same default as tui-builder: `t` cycles the palette.
-			// Without a binding the Themes list above is inert.
+			// Without a binding the Palettes list above is inert.
 			ThemeKey: key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "theme")),
 			// Match tui-builder: the launcher pushes the same screens, so
 			// mouse must be on here too or clicking would work only for
@@ -70,6 +84,11 @@ func run() error {
 		}),
 		tea.WithAltScreen(),
 	)
+	// A source's passing notices (a retry, a walk stopped early) go to the
+	// output console, as under tui-builder. Send is safe from the fetch
+	// goroutines.
+	datasource.Notify = func(msg string) { prog.Send(app.StatusInfoMsg{Text: msg}) }
+	defer func() { datasource.Notify = nil }()
 	_, err = prog.Run()
 	return err
 }

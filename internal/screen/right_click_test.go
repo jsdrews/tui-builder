@@ -9,6 +9,7 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/jsdrews/tuilib/pkg/app"
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
@@ -30,13 +31,13 @@ func rightClickApp(t *testing.T) (tea.Model, func(tea.Cmd)) {
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var m tea.Model = app.New(app.Options{
 		Root:       root,
-		Themes:     []theme.Theme{theme.Nord()},
+		Palettes:   []palette.Palette{palette.Nord()},
 		SkipConfig: true,
 		Mouse:      app.MouseClick,
 		ActionsKey: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "actions")),

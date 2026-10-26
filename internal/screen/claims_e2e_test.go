@@ -9,6 +9,7 @@ import (
 
 	taction "github.com/jsdrews/tuilib/pkg/action"
 	"github.com/jsdrews/tuilib/pkg/app"
+	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/runner"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
@@ -54,11 +55,11 @@ func newClaimHarness(t *testing.T, srv *podsStub, claim *cfg.Claim, multi bool, 
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.Nord())
+	root, err := New(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, theme.New(palette.Nord()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var m tea.Model = app.New(app.Options{Root: root, Themes: []theme.Theme{theme.Nord()}, SkipConfig: true})
+	var m tea.Model = app.New(app.Options{Root: root, Palettes: []palette.Palette{palette.Nord()}, SkipConfig: true})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
 	h := &windowHarness{t: t, model: m, root: root}
 	h.drain(h.model.Init())

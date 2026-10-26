@@ -5,6 +5,7 @@
 # fixture in another window and watch the table update. With `refresh:`
 # unset, the file is read once on screen entry; press `r` to re-read.
 app:
+  surface: filled
   title: Fixture file
   theme: nord
 

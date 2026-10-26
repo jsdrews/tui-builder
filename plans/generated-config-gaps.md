@@ -11,8 +11,13 @@ refuses with a 400.
 It's locked: every decision was made on the map
 [Map: tuilib table bugs and tui-builder gaps from generated configs](https://github.com/jsdrews/tui-builder/issues/105).
 Each section links the ticket that holds its detail and reasoning.
-Six tuilib PRs and a release come first, then eight tui-builder PRs, in
+Six tuilib PRs and a release come first, then nine tui-builder PRs, in
 the [order at the bottom](#implementation-order).
+
+**All of it is built**, on tuilib v0.43.0. What follows is the record of
+what was decided; where the build departed from it, or found something
+the plan didn't foresee, is under
+[What changed while building it](#what-changed-while-building-it).
 
 Terms follow [`CONTEXT.md`](../CONTEXT.md), which gains **Refusal**,
 **Action group**, **Menu** and **Comparison**.
@@ -236,7 +241,30 @@ window:
 - It travels with a preset's `window:`. It's allowed on http and exec;
   on exec it only decides which columns are sortable.
 
-## 9. Validation
+## 9. Surfaces
+
+Added after the map closed, with the tuilib v0.40.0 bump (B4), which
+replaced border shapes with surfaces.
+
+- `app.surface:` picks the starting surface by built-in name
+  (`outlined`, `filled`, `banded`, `elevated`, `accented`); an unknown
+  name is a load error. The start is the `TUI_BUILDER_SURFACE` env var,
+  then `app.surface`, then the user's tuilib `surface:`, then
+  `outlined`.
+- `app.surface_key` (default `T`, `-` pins it) cycles all five, starting
+  from the chosen one. It's a shell key like `theme_key`.
+- `app.borders.active` / `overlay` shape the `outlined` surface wherever
+  it's drawn; `slot_brackets` and `glyphs.rule` apply to every surface.
+  `app.borders.inactive` is a load error: a surface draws the same lines
+  focused or not.
+- `app.colors: auto | truecolor | 256 | 16` (default `auto`) forces the
+  colour depth, for terminals that support more than they say (tmux
+  often hides `COLORTERM`). `TUI_BUILDER_COLORS` overrides it for one
+  run. It's set before anything is drawn, so surfaces resolve against
+  it too. An unknown value is a load error.
+- Not here: a per-component `surface:`.
+
+## 10. Validation
 
 Each PR adds its own rows. All are load errors unless marked.
 
@@ -253,6 +281,10 @@ Each PR adds its own rows. All are load errors unless marked.
 | `window.filter_ops` (expanded) | the same title with different `value:` keys across bound tables; a rule covering no column |
 | `window.sort_fields` | without `sort_param` (exec: without `${window.sort}`); on an Anchored window; an empty field |
 | `columns[].sortable` | `true` on a column `sort_fields` doesn't match |
+| `app.surface` | not a built-in surface name |
+| `app.colors` | not one of `auto`, `truecolor`, `256`, `16` |
+| `app.surface_key` | collides with another shell key |
+| `app.borders.inactive` | set at all |
 
 ## Implementation order
 
@@ -276,6 +308,7 @@ tuilib is at v0.39.0; tui-builder is pinned to v0.35.0.
 | B6 | tui-builder | **Action groups**: `group:`, defaults, `app.action_groups`, theme colours | 3 | B4 |
 | B7 | tui-builder | **Menu component** | 5 | B1, B6 |
 | B8 | tui-builder | **Filter rule**: `filter_ops`, `filter_except`, per-op `filters:`, the unsupported-op notice | 7 | B4 |
+| B9 | tui-builder | **Surfaces**: `app.surface`, `app.surface_key`, `app.colors`, chrome on every surface | 9 | B4 |
 
 B1, B2 and B3 don't need the release and can start at once, alongside
 the tuilib PRs. B4 does nothing but the bump and the form title, so that
@@ -286,6 +319,89 @@ for requests; screen tests for notices, menus and groups),
 `docs/reference/*.md` rows (`TestReferenceDocumentsEveryField`), and
 `--describe` lines for its fields. tuilib PRs carry their own tests and
 changelog entries.
+
+## What changed while building it
+
+**tuilib releases.** T1–T6 shipped together in v0.40.0. Four follow-ups
+came out of building on it, each a tuilib issue and a release:
+[#131](https://github.com/jsdrews/tuilib/issues/131) (v0.41.0) shell
+glyphs, `ActionGroupStyle` and `Palette.Warning`;
+[#133](https://github.com/jsdrews/tuilib/issues/133) (v0.42.0) filled
+field forms for inputs, toggles and the filter bar;
+[#134](https://github.com/jsdrews/tuilib/issues/134) (v0.42.1) modal
+forms drawn with the overlay surface;
+[#135](https://github.com/jsdrews/tuilib/issues/135) (v0.43.0) group
+headers as thin dividers. tui-builder is on v0.43.0.
+
+**B4 was a migration, not a bump.** v0.39 replaced border shapes with
+surfaces in a clean break, so B4 moved tui-builder onto palettes and a
+surface:
+- `app.borders.active` / `overlay`, `slot_brackets` and `glyphs.rule`
+  now build one Outlined surface (`build.ChromeSurface`).
+- **`app.borders.inactive` is a load error.** A surface draws the same
+  lines focused or not, so an unfocused shape can't be honoured; nothing
+  used it.
+- `app.glyphs` first had to be re-applied on every screen's `SetTheme`
+  (the shell composed themes without glyphs); since v0.41.0 they're
+  passed as `app.Options.Glyphs` and reach the shell's overlays too.
+- The startup prompt form is titled with `app.title`, or **"Settings"**
+  when there's none (the plan named only the action form's title).
+
+**§9 Surfaces was added during the build** (B9), with `app.colors` to
+force the colour depth, since tmux often hides `COLORTERM`.
+
+**§2 Sort refusal.** The data layer can't import tuilib, so
+`HTTPError.Refusal()` reports a 400 / 422 and the screen layer wraps it
+with `remote.Refused`. The notice keeps the column title as written
+(`can't sort by Title: …`).
+
+**§3 Action groups: no per-group colours.** The plan drew the `write`
+heading in the warning colour and the rest muted. Built that way (v0.41.0
+made it possible), it read as noise, and bold headings as distracting.
+tui-builder passes no group style now; tuilib draws every heading as a
+thin divider (`── write ──`), the same for every group. An http action
+with no `method:` is POST, so it lands in `write`; a templated method
+does too.
+
+**§4 Env from a file or a command.**
+- `timeout:` with `file:` is an error (it only bounds a command).
+- `--describe` showing where a value comes from wasn't built: nothing
+  describes `app.env` today.
+
+**§5 Menu.**
+- `bind:` keys aren't checked against the destination's parameters at
+  load, the same as push bindings: keys no source declares are ignored,
+  and a missing required parameter fails at push time. Checking it means
+  following the destination's pipelines back to their sources; worth
+  doing for menus and pushes together if it bites.
+- The menu is always filterable, and a screen-wide `enter` binding
+  doesn't fire while a menu has focus.
+- A menu's `items:` are maps, a list's strings, so `Component` decodes
+  `items:` by `type:`.
+
+**§7 Filter rule.**
+- A rule that covers no column reports that, rather than the generic
+  "filterable has nowhere to go".
+- `filter_except` without `filter_ops` is an error.
+- A comparison is sent with its value as typed (case kept); `contains`
+  keeps today's lowercased value.
+- The unsupported-comparison notice is shown per committed query, beside
+  the bare-terms notice.
+- `filters:` map entries share the key with string entries, so
+  `WindowConfig` decodes `filters:` itself.
+
+**The example launcher** needed fixing to show any of this:
+- it never bound the action menu's key, so `a` did nothing under
+  `task examples`;
+- it ignored each example's `surface:` (it now switches the shell's
+  surface as an example opens, and binds `T`);
+- loading an example wrote env warnings to stderr over the running TUI.
+  `cfg.LoadTo` sends them to a writer; the launcher posts them to the
+  output console, and wires `datasource.Notify` as tui-builder does.
+
+**Examples.** Every example sets `surface: filled`, and the offline
+examples' bindings carry `group:` (headings show on `action_prompts` and
+`marking`). `examples/menu.yaml` is new.
 
 ## Out of scope
 

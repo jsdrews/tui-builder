@@ -24,6 +24,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // envTokenRe matches `${env.NAME}` occurrences in a templated
@@ -47,7 +48,10 @@ var envTokenRe = regexp.MustCompile(`\$\{env\.([A-Za-z0-9_]+)\}`)
 //     so users can trace where the reference lives.
 //
 // stderr is io.Writer via package-level for testability.
-func checkEnv(c *Config) error {
+func checkEnv(c *Config) error { return checkEnvTo(c, stderr) }
+
+// checkEnvTo is checkEnv with its warnings written to w.
+func checkEnvTo(c *Config, w io.Writer) error {
 	if err := validateEnvSpecs(c.App.Env); err != nil {
 		return err
 	}
@@ -75,8 +79,10 @@ func checkEnv(c *Config) error {
 	}
 	// Collect required-but-unset. Sort for stable error output.
 	var missing []EnvSpec
+	// A `from:` var counts as provided here, like a prompt key: its
+	// value arrives in ResolveEnv, which also enforces its required:.
 	for _, spec := range c.App.Env {
-		if spec.Required && os.Getenv(spec.Name) == "" {
+		if spec.Required && spec.From == nil && os.Getenv(spec.Name) == "" {
 			missing = append(missing, spec)
 		}
 	}
@@ -98,11 +104,11 @@ func checkEnv(c *Config) error {
 	}
 	if len(undeclared) > 0 {
 		sort.Strings(undeclared)
-		fmt.Fprintf(stderr, "warning: %s references %d env var(s) that are unset and not declared under `app.env:`:\n", c.App.Title, len(undeclared))
+		fmt.Fprintf(w, "warning: %s references %d env var(s) that are unset and not declared under `app.env:`:\n", c.App.Title, len(undeclared))
 		for _, name := range undeclared {
-			fmt.Fprintf(stderr, "  ${env.%s}\n", name)
+			fmt.Fprintf(w, "  ${env.%s}\n", name)
 		}
-		fmt.Fprintf(stderr, "Substitution will produce empty strings. Add them under `app.env:` (with required/default/description) to silence this or fail loudly.\n")
+		fmt.Fprintf(w, "Substitution will produce empty strings. Add them under `app.env:` (with required/default/description) to silence this or fail loudly.\n")
 	}
 	return nil
 }
@@ -144,6 +150,27 @@ func validateEnvSpecs(specs []EnvSpec) error {
 		seen[spec.Name] = true
 		if spec.Required && spec.Default != "" {
 			return fmt.Errorf("app.env[%d].%s: `required: true` and `default:` are mutually exclusive — defaults imply optional", i, spec.Name)
+		}
+		if f := spec.From; f != nil {
+			path := fmt.Sprintf("app.env[%d].%s.from", i, spec.Name)
+			if spec.Default != "" {
+				return fmt.Errorf("%s: not with `default:` — a fallback would hide a broken file or command", path)
+			}
+			hasFile, hasCmd := f.File != "", len(f.Command) > 0
+			if hasFile == hasCmd {
+				return fmt.Errorf("%s: set exactly one of `file:` or `command:`", path)
+			}
+			if hasCmd && strings.TrimSpace(f.Command[0]) == "" {
+				return fmt.Errorf("%s.command: the first element is the program to run and can't be empty", path)
+			}
+			if f.Timeout != "" {
+				if hasFile {
+					return fmt.Errorf("%s.timeout: only applies to `command:`", path)
+				}
+				if d, err := time.ParseDuration(f.Timeout); err != nil || d <= 0 {
+					return fmt.Errorf("%s.timeout: %q is not a positive duration (e.g. 90s)", path, f.Timeout)
+				}
+			}
 		}
 	}
 	return nil
@@ -269,6 +296,16 @@ func walkTemplates(c *Config, fn func(*string)) {
 		fn(&comp.InitialQuery)
 		fn(&comp.RootLabel)
 		visitSlice(comp.Items)
+		for i := range comp.MenuItems {
+			it := &comp.MenuItems[i]
+			fn(&it.Label)
+			fn(&it.Description)
+			for k, v := range it.Bind {
+				str := v
+				fn(&str)
+				it.Bind[k] = str
+			}
+		}
 		visitSlice(comp.Lines)
 		for i := range comp.Columns {
 			fn(&comp.Columns[i].Title)

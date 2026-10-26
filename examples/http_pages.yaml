@@ -38,6 +38,7 @@
 #   task wrangl -- examples/http_pages.yaml posts | jq 'length'
 
 app:
+  surface: filled
   title: JSONPlaceholder
 
 data:

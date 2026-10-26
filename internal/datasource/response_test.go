@@ -191,3 +191,13 @@ func TestLinkRel(t *testing.T) {
 		t.Errorf("first = %q", got)
 	}
 }
+
+// Only "understood, won't serve" counts as a refusal; anything that
+// might work if asked again is a failure.
+func TestHTTPErrorRefusal(t *testing.T) {
+	for status, want := range map[int]bool{400: true, 422: true, 401: false, 403: false, 404: false, 429: false, 500: false, 503: false} {
+		if got := (&HTTPError{Status: status}).Refusal(); got != want {
+			t.Errorf("status %d: Refusal() = %v, want %v", status, got, want)
+		}
+	}
+}
