@@ -30,6 +30,7 @@
 #       growing: {source: job, while: 'status in ["pending", "waiting", "running"]'}
 #       follow_every: 2s
 app:
+  surface: filled
   title: Job log
   theme: nord
 data:

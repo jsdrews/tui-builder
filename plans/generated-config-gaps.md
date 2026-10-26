@@ -14,6 +14,11 @@ Each section links the ticket that holds its detail and reasoning.
 Six tuilib PRs and a release come first, then nine tui-builder PRs, in
 the [order at the bottom](#implementation-order).
 
+**All of it is built**, on tuilib v0.43.0. What follows is the record of
+what was decided; where the build departed from it, or found something
+the plan didn't foresee, is under
+[What changed while building it](#what-changed-while-building-it).
+
 Terms follow [`CONTEXT.md`](../CONTEXT.md), which gains **Refusal**,
 **Action group**, **Menu** and **Comparison**.
 
@@ -314,6 +319,89 @@ for requests; screen tests for notices, menus and groups),
 `docs/reference/*.md` rows (`TestReferenceDocumentsEveryField`), and
 `--describe` lines for its fields. tuilib PRs carry their own tests and
 changelog entries.
+
+## What changed while building it
+
+**tuilib releases.** T1–T6 shipped together in v0.40.0. Four follow-ups
+came out of building on it, each a tuilib issue and a release:
+[#131](https://github.com/jsdrews/tuilib/issues/131) (v0.41.0) shell
+glyphs, `ActionGroupStyle` and `Palette.Warning`;
+[#133](https://github.com/jsdrews/tuilib/issues/133) (v0.42.0) filled
+field forms for inputs, toggles and the filter bar;
+[#134](https://github.com/jsdrews/tuilib/issues/134) (v0.42.1) modal
+forms drawn with the overlay surface;
+[#135](https://github.com/jsdrews/tuilib/issues/135) (v0.43.0) group
+headers as thin dividers. tui-builder is on v0.43.0.
+
+**B4 was a migration, not a bump.** v0.39 replaced border shapes with
+surfaces in a clean break, so B4 moved tui-builder onto palettes and a
+surface:
+- `app.borders.active` / `overlay`, `slot_brackets` and `glyphs.rule`
+  now build one Outlined surface (`build.ChromeSurface`).
+- **`app.borders.inactive` is a load error.** A surface draws the same
+  lines focused or not, so an unfocused shape can't be honoured; nothing
+  used it.
+- `app.glyphs` first had to be re-applied on every screen's `SetTheme`
+  (the shell composed themes without glyphs); since v0.41.0 they're
+  passed as `app.Options.Glyphs` and reach the shell's overlays too.
+- The startup prompt form is titled with `app.title`, or **"Settings"**
+  when there's none (the plan named only the action form's title).
+
+**§9 Surfaces was added during the build** (B9), with `app.colors` to
+force the colour depth, since tmux often hides `COLORTERM`.
+
+**§2 Sort refusal.** The data layer can't import tuilib, so
+`HTTPError.Refusal()` reports a 400 / 422 and the screen layer wraps it
+with `remote.Refused`. The notice keeps the column title as written
+(`can't sort by Title: …`).
+
+**§3 Action groups: no per-group colours.** The plan drew the `write`
+heading in the warning colour and the rest muted. Built that way (v0.41.0
+made it possible), it read as noise, and bold headings as distracting.
+tui-builder passes no group style now; tuilib draws every heading as a
+thin divider (`── write ──`), the same for every group. An http action
+with no `method:` is POST, so it lands in `write`; a templated method
+does too.
+
+**§4 Env from a file or a command.**
+- `timeout:` with `file:` is an error (it only bounds a command).
+- `--describe` showing where a value comes from wasn't built: nothing
+  describes `app.env` today.
+
+**§5 Menu.**
+- `bind:` keys aren't checked against the destination's parameters at
+  load, the same as push bindings: keys no source declares are ignored,
+  and a missing required parameter fails at push time. Checking it means
+  following the destination's pipelines back to their sources; worth
+  doing for menus and pushes together if it bites.
+- The menu is always filterable, and a screen-wide `enter` binding
+  doesn't fire while a menu has focus.
+- A menu's `items:` are maps, a list's strings, so `Component` decodes
+  `items:` by `type:`.
+
+**§7 Filter rule.**
+- A rule that covers no column reports that, rather than the generic
+  "filterable has nowhere to go".
+- `filter_except` without `filter_ops` is an error.
+- A comparison is sent with its value as typed (case kept); `contains`
+  keeps today's lowercased value.
+- The unsupported-comparison notice is shown per committed query, beside
+  the bare-terms notice.
+- `filters:` map entries share the key with string entries, so
+  `WindowConfig` decodes `filters:` itself.
+
+**The example launcher** needed fixing to show any of this:
+- it never bound the action menu's key, so `a` did nothing under
+  `task examples`;
+- it ignored each example's `surface:` (it now switches the shell's
+  surface as an example opens, and binds `T`);
+- loading an example wrote env warnings to stderr over the running TUI.
+  `cfg.LoadTo` sends them to a writer; the launcher posts them to the
+  output console, and wires `datasource.Notify` as tui-builder does.
+
+**Examples.** Every example sets `surface: filled`, and the offline
+examples' bindings carry `group:` (headings show on `action_prompts` and
+`marking`). `examples/menu.yaml` is new.
 
 ## Out of scope
 

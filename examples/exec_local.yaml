@@ -9,6 +9,7 @@
 # This example calls `git log` once on screen activate to render the
 # repo's last 20 commits — no network, no auth, works in this repo.
 app:
+  surface: filled
   title: Recent commits (exec)
   theme: nord
 

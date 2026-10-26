@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -16,8 +17,15 @@ import (
 	"github.com/jsdrews/tui-builder/internal/expr"
 )
 
-// Load reads a YAML file at path and returns a validated Config.
-func Load(path string) (*Config, error) {
+// Load reads a YAML file at path and returns a validated Config. Load-time
+// warnings (an env var referenced but unset and undeclared) go to stderr,
+// which is right before a TUI has the screen and wrong after: see LoadTo.
+func Load(path string) (*Config, error) { return LoadTo(path, stderr) }
+
+// LoadTo is Load with its warnings written to warn instead of stderr —
+// for a caller that loads while a TUI owns the terminal, where a stray
+// stderr line paints over the screen. The example launcher is one.
+func LoadTo(path string, warn io.Writer) (*Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
@@ -71,7 +79,7 @@ func Load(path string) (*Config, error) {
 	// Env-var check runs after Validate so schema errors surface
 	// first. Applies defaults, errors on missing required vars,
 	// warns on undeclared-and-unset references.
-	if err := checkEnv(&c); err != nil {
+	if err := checkEnvTo(&c, warn); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	c.dir = filepath.Dir(path)

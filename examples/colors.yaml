@@ -27,6 +27,7 @@
 # Tab between panes — every component has a different override scheme to
 # show what each token affects.
 app:
+  surface: filled
   title: Color overrides
   theme: nord
 

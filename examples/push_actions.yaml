@@ -33,6 +33,7 @@
 # A double click on a row is the mouse spelling of enter, so both
 # drilldowns work from the mouse too.
 app:
+  surface: filled
   title: GitHub (key pushes)
   theme: nord
 

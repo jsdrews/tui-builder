@@ -95,11 +95,24 @@ func (l *Launcher) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 				return l, nil
 			}
 			path := l.paths[idx]
-			child, err := loadScreen(path, l.th)
+			child, surf, warnings, err := loadScreen(path, l.th)
 			if err != nil {
 				return l, app.Error(fmt.Sprintf("%s: %v", filepath.Base(path), err))
 			}
-			return l, tscreen.Push(child)
+			// Load-time warnings go to the console: the TUI owns the
+			// terminal, and a line written to stderr would paint over it.
+			var warn tea.Cmd
+			if warnings != "" {
+				head, _, _ := strings.Cut(warnings, "\n")
+				warn = app.InfoDetail(fmt.Sprintf("%s: %s", filepath.Base(path), strings.TrimPrefix(head, "warning: ")), warnings)
+			}
+			// The launcher owns the shell, so an example's `surface:`
+			// becomes a switch of the shell's surface as it opens. It
+			// stays switched after esc; `T` cycles it.
+			if surf != "" {
+				return l, tea.Batch(warn, tea.Sequence(tscreen.Push(child), app.SetSurface(surf)))
+			}
+			return l, tea.Batch(warn, tscreen.Push(child))
 		}
 	}
 	m, cmd := l.list.Update(msg)
@@ -108,12 +121,16 @@ func (l *Launcher) Update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 }
 
 // loadScreen reads a YAML file and builds the screen.Screen for it,
-// honouring multi-screen mode when the config declares `screens:`.
-func loadScreen(path string, th theme.Theme) (tscreen.Screen, error) {
-	c, err := cfg.Load(path)
+// honouring multi-screen mode when the config declares `screens:`. surf
+// is the config's `app.surface`, "" when it names none; warnings are
+// what loading it would have printed to stderr.
+func loadScreen(path string, th theme.Theme) (s tscreen.Screen, surf, warnings string, err error) {
+	var warn strings.Builder
+	c, err := cfg.LoadTo(path, &warn)
 	if err != nil {
-		return nil, err
+		return nil, "", "", err
 	}
+	warnings = strings.TrimSpace(warn.String())
 	// The example's keymap, form spacing and mask reach inside its
 	// components and forms, so they can follow it here. Its shell
 	// settings (keys, mouse, title) can't: the launcher owns the shell.
@@ -125,7 +142,9 @@ func loadScreen(path string, th theme.Theme) (tscreen.Screen, error) {
 			Sources:    c.Data.Sources,
 			Actions:    c.Actions,
 		}
-		return tqscreen.BuildMulti(c.TUI.Initial, multi, build.Selection{}, nil, th)
+		s, err = tqscreen.BuildMulti(c.TUI.Initial, multi, build.Selection{}, nil, th)
+		return s, c.App.Surface, warnings, err
 	}
-	return tqscreen.Build(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, th)
+	s, err = tqscreen.Build(&c.TUI.Screen, c.TUI.Components, c.Data.Sources, c.Actions, th)
+	return s, c.App.Surface, warnings, err
 }

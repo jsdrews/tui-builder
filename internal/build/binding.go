@@ -211,12 +211,12 @@ func ApplyData(c *Component, data any, th theme.Theme) {
 // builder sources emit:
 //
 //   - string       — format:text bodies (kubectl describe / help pages
-//                    / raw markdown) pass through verbatim.
+//     / raw markdown) pass through verbatim.
 //   - []byte       — same as string.
 //   - []any strings — joined with '\n' (matches logview's []any-of-string
-//                    convention so a source can back either).
+//     convention so a source can back either).
 //   - anything else — fmt.Sprint fallback (rare; declared JSON should
-//                    prefer type: inspector auto).
+//     prefer type: inspector auto).
 //
 // tuilib's textview handles its own word-wrap + search + scroll, so we
 // don't preprocess the string beyond turning it into a stringified

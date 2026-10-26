@@ -38,6 +38,7 @@
 #   task wrangl -- examples/http_window.yaml books | jq 'length'
 
 app:
+  surface: filled
   title: Open Library
 
 data:

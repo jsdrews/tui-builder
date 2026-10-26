@@ -24,6 +24,7 @@
 # The paired example below stacks a static help pane on top of a live
 # `date`-emitting exec pane, so you can see both modes side by side.
 app:
+  surface: filled
   title: Textview demo
   theme: nord
 

@@ -14,6 +14,7 @@
 #   filter_mode:     start in filter mode (only matching lines visible)
 #   initial_query:   pre-populate the search query
 app:
+  surface: filled
   title: Logview Demo
   theme: nord
 

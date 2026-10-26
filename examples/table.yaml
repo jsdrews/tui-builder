@@ -17,6 +17,7 @@
 #   region:~^euro    regex scoped to one column
 #   a b c            space-separated AND-ed
 app:
+  surface: filled
   title: Table Demo
   theme: nord
 

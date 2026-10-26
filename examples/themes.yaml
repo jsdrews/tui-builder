@@ -9,6 +9,7 @@
 # Press `t` to cycle through every loaded theme live.
 # Unknown names fall back silently to the first theme in the list.
 app:
+  surface: filled
   title: Theme Picker
   theme: gruvbox        # change me and re-run; or press `t` at runtime
 

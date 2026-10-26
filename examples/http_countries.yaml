@@ -26,6 +26,7 @@
 #   components.countries.columns[].value dot-path per cell, evaluated per
 #                                        element of the iterable root
 app:
+  surface: filled
   title: Countries
   theme: nord
 data:

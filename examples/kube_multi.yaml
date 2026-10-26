@@ -24,6 +24,7 @@
 # its `cluster` / `cluster_url` tags. Detail/logs sources need no
 # changes — they're cluster-agnostic.
 app:
+  surface: filled
   title: Pods across clusters
   theme: nord
 

@@ -31,6 +31,7 @@
 #     it takes the pane shape (`active`). The distinction is the whole
 #     reason `overlay` is its own knob.
 app:
+  surface: filled
   title: Chrome
   theme: nord
 

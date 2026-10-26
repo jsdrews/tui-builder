@@ -14,6 +14,7 @@
 # every commit. The same token works in actions: `enter` on a row echoes
 # the current search alongside the pod's name.
 app:
+  surface: filled
   title: Inputs
   theme: nord
 
@@ -82,4 +83,4 @@ tui:
           fixed: 3
         - {component: pods_table}
     actions:
-      - {key: enter, action: note, from: pods_table, bind: {name: "${selection}"}}
+      - {key: enter, action: note, from: pods_table, bind: {name: "${selection}"}, group: write}

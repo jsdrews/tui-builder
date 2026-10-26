@@ -23,6 +23,7 @@
 # while you sort, but cursor + sort survive every refresh because
 # tuilib's SetRows is in-place.
 app:
+  surface: filled
   title: Live BTC/USD trades
   theme: nord
 

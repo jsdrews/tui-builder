@@ -15,6 +15,7 @@
 #   \                filter mode — hides non-matching subtrees, keeps ancestors
 #   ← / →            horizontal scroll long values
 app:
+  surface: filled
   title: Inspector Demo
   theme: nord
 

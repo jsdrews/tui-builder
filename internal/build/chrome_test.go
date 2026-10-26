@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/jsdrews/tuilib/pkg/glyph"
 	"github.com/jsdrews/tuilib/pkg/palette"
@@ -269,20 +270,22 @@ func TestSurfacesStartFirstWithChrome(t *testing.T) {
 	}
 }
 
-// The write heading takes the palette's warning colour, every other one
-// its muted colour, for each palette the shell can swap to.
-func TestActionGroupStyle(t *testing.T) {
-	for _, p := range palette.All() {
-		th := theme.New(p)
-		if th.Warning == nil {
-			t.Fatalf("%s: no warning colour", p.Name)
-		}
-		if got := ActionGroupStyle("write", th).GetForeground(); got != th.Warning {
-			t.Errorf("%s: write heading = %v, want the warning colour %v", p.Name, got, th.Warning)
-		}
-		for _, g := range []string{"read", "other", "tools"} {
-			if got := ActionGroupStyle(g, th).GetForeground(); got != th.Muted {
-				t.Errorf("%s: %s heading = %v, want muted %v", p.Name, g, got, th.Muted)
+// The filled surfaces carry a filled field form for inputs, toggles and
+// the filter bar; the config's chrome must keep it rather than leave
+// them drawing an outlined box under a filled card.
+func TestChromeKeepsFilledFieldForms(t *testing.T) {
+	caps := surface.Caps{Profile: termenv.TrueColor, BlockGlyphs: true}
+	a := &cfg.App{Borders: cfg.Borders{Active: "rounded", SlotBrackets: "tees"}, Glyphs: cfg.Glyphs{Rule: "="}}
+	for _, s := range Surfaces(a, "") {
+		f := theme.Compose(palette.Nord(), s, caps).Input().Surface.Surface()
+		switch s.Name {
+		case "filled", "banded", "elevated":
+			if !f.Filled() {
+				t.Errorf("%s: input field form %q isn't filled", s.Name, f.Name)
+			}
+		case "outlined":
+			if b, lined := f.Lined(); !lined || !sameLines(b, lipgloss.RoundedBorder()) {
+				t.Errorf("outlined: input field should be its own rounded lines, got %q", f.Name)
 			}
 		}
 	}

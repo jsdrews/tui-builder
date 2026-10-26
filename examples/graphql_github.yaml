@@ -13,6 +13,7 @@
 #
 #   task wrangl -- examples/graphql_github.yaml repos | jq length
 app:
+  surface: filled
   title: GitHub (GraphQL)
   theme: nord
   env:

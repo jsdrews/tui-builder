@@ -20,6 +20,7 @@
 #
 # Public API: jsonplaceholder.typicode.com — no auth, stable, 10 users.
 app:
+  surface: filled
   title: Params Demo
 data:
   sources:

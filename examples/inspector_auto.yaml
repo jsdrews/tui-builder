@@ -23,6 +23,7 @@
 # because the response has strings, numbers, booleans, nested objects
 # (`owner`, `license`, `permissions`), and arrays (`topics`).
 app:
+  surface: filled
   title: Inspector auto-derive
   theme: nord
 

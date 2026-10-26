@@ -48,7 +48,10 @@ var envTokenRe = regexp.MustCompile(`\$\{env\.([A-Za-z0-9_]+)\}`)
 //     so users can trace where the reference lives.
 //
 // stderr is io.Writer via package-level for testability.
-func checkEnv(c *Config) error {
+func checkEnv(c *Config) error { return checkEnvTo(c, stderr) }
+
+// checkEnvTo is checkEnv with its warnings written to w.
+func checkEnvTo(c *Config, w io.Writer) error {
 	if err := validateEnvSpecs(c.App.Env); err != nil {
 		return err
 	}
@@ -101,11 +104,11 @@ func checkEnv(c *Config) error {
 	}
 	if len(undeclared) > 0 {
 		sort.Strings(undeclared)
-		fmt.Fprintf(stderr, "warning: %s references %d env var(s) that are unset and not declared under `app.env:`:\n", c.App.Title, len(undeclared))
+		fmt.Fprintf(w, "warning: %s references %d env var(s) that are unset and not declared under `app.env:`:\n", c.App.Title, len(undeclared))
 		for _, name := range undeclared {
-			fmt.Fprintf(stderr, "  ${env.%s}\n", name)
+			fmt.Fprintf(w, "  ${env.%s}\n", name)
 		}
-		fmt.Fprintf(stderr, "Substitution will produce empty strings. Add them under `app.env:` (with required/default/description) to silence this or fail loudly.\n")
+		fmt.Fprintf(w, "Substitution will produce empty strings. Add them under `app.env:` (with required/default/description) to silence this or fail loudly.\n")
 	}
 	return nil
 }

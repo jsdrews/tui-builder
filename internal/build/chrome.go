@@ -5,7 +5,6 @@ import (
 
 	"github.com/jsdrews/tuilib/pkg/glyph"
 	"github.com/jsdrews/tuilib/pkg/surface"
-	"github.com/jsdrews/tuilib/pkg/theme"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
 )
@@ -86,17 +85,6 @@ func ChromeSurface(base surface.Surface, a *cfg.App) surface.Surface {
 // which puts it on every theme it composes — the screens' and its own
 // overlays' alike. Unset fields stay empty and fall back to glyph.Default.
 func Glyphs(a *cfg.App) glyph.Set { return overrideGlyphs(glyph.Set{}, &a.Glyphs) }
-
-// ActionGroupStyle styles the action menu's group headings: `write` in
-// the palette's warning colour, so the headings over verbs that change
-// things stand out, and every other group muted. The shell calls it
-// again on every palette swap.
-func ActionGroupStyle(group string, t theme.Theme) lipgloss.Style {
-	if group == "write" {
-		return lipgloss.NewStyle().Bold(true).Foreground(t.Warning)
-	}
-	return lipgloss.NewStyle().Bold(true).Foreground(t.Muted)
-}
 
 // overrideGlyphs copies the non-empty fields of o over base. Empty
 // means "leave it", never "blank it" — a config that sets one arrow

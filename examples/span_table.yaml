@@ -12,6 +12,7 @@
 # The order is the walk's, so columns can't be sorted; `/` filters on the
 # "server" (the script) and re-walks from the newest matching row.
 app:
+  surface: filled
   title: Requests
   theme: nord
 data:
@@ -69,6 +70,7 @@ tui:
       component: requests_table
     actions:
       - action: show_marked
+        group: read
         label: show marked
         from: requests_table
         bind: {id: "${selection.Id}"}

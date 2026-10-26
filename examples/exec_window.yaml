@@ -39,6 +39,7 @@
 #   task wrangl -- examples/exec_window.yaml commits | jq 'length'
 
 app:
+  surface: filled
   title: Commit log (windowed exec)
 
 data:

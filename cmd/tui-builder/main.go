@@ -166,8 +166,6 @@ func run() error {
 		// this is bound. The screen supplies verbs by implementing
 		// action.Provider.
 		ActionsKey: keyBinding(c.App.ActionMenuKey(), "actions"),
-		// The menu's group headings: write in the warning colour.
-		ActionGroupStyle: build.ActionGroupStyle,
 		// Every component we build (list / table / tree / logview /
 		// inspector / textview) hit-tests mouse events against its
 		// own rect, so clicking is uniformly useful. The cost is the

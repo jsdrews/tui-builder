@@ -32,6 +32,7 @@
 #   - `from:` on the stage operator is forbidden — input is implicit.
 
 app:
+  surface: filled
   title: Inline pipe demo
 data:
   sources:

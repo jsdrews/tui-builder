@@ -21,6 +21,10 @@ import (
 	"github.com/jsdrews/tuilib/pkg/app"
 	"github.com/jsdrews/tuilib/pkg/palette"
 	"github.com/jsdrews/tuilib/pkg/theme"
+
+	"github.com/jsdrews/tui-builder/internal/build"
+	cfg "github.com/jsdrews/tui-builder/internal/config"
+	"github.com/jsdrews/tui-builder/internal/datasource"
 )
 
 func main() {
@@ -54,6 +58,15 @@ func run() error {
 		app.New(app.Options{
 			Root:     root,
 			Palettes: palettes,
+			// Every built-in surface, so an example's `surface:` can be
+			// switched to as it opens, and `T` cycles them as in
+			// tui-builder.
+			Surfaces:   build.Surfaces(&cfg.App{}, ""),
+			SurfaceKey: key.NewBinding(key.WithKeys("T"), key.WithHelp("T", "surface")),
+			// tuilib's action menu, on `a` as in tui-builder: every
+			// example's bindings, grouped read / write. Without a binding
+			// the shell never opens it, so `a` did nothing here.
+			ActionsKey: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "actions")),
 			// Same default as tui-builder: `t` cycles the palette.
 			// Without a binding the Palettes list above is inert.
 			ThemeKey: key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "theme")),
@@ -71,6 +84,11 @@ func run() error {
 		}),
 		tea.WithAltScreen(),
 	)
+	// A source's passing notices (a retry, a walk stopped early) go to the
+	// output console, as under tui-builder. Send is safe from the fetch
+	// goroutines.
+	datasource.Notify = func(msg string) { prog.Send(app.StatusInfoMsg{Text: msg}) }
+	defer func() { datasource.Notify = nil }()
 	_, err = prog.Run()
 	return err
 }

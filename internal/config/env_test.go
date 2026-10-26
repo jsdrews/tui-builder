@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -257,5 +258,31 @@ func TestCollectEnvRefsWalksAllTemplatedFields(t *testing.T) {
 		if _, ok := refs[w]; !ok {
 			t.Errorf("expected %q in refs; got %v", w, refs)
 		}
+	}
+}
+
+// LoadTo sends load-time warnings to the writer it's given and nothing
+// to stderr: a caller loading while a TUI owns the terminal (the example
+// launcher) would otherwise get a line painted over its screen.
+func TestLoadToKeepsWarningsOffStderr(t *testing.T) {
+	clearEnv(t, "TEST_LOADTO_UNSET")
+	errs := swapStderr(t)
+	path := filepath.Join(t.TempDir(), "c.yaml")
+	os.WriteFile(path, []byte(`
+app: {title: W}
+tui:
+  components:
+    t: {type: textview, title: "${env.TEST_LOADTO_UNSET}", content: x}
+  screen: {layout: {component: t}}
+`), 0o644)
+	var warn bytes.Buffer
+	if _, err := LoadTo(path, &warn); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(warn.String(), "${env.TEST_LOADTO_UNSET}") {
+		t.Errorf("warning not written to the given writer: %q", warn.String())
+	}
+	if errs.Len() != 0 {
+		t.Errorf("LoadTo wrote to stderr: %q", errs.String())
 	}
 }

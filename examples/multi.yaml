@@ -13,6 +13,7 @@
 # target screen's config as ${selection} (and ${selection.COLNAME} or
 # ${selection.N} for table sources).
 app:
+  surface: filled
   title: World Atlas
   theme: nord
 

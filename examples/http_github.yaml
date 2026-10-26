@@ -15,6 +15,7 @@
 # initially (each new push is a fresh fetch anyway). Press `r` to refresh
 # the current screen on demand.
 app:
+  surface: filled
   title: GitHub Explorer
   theme: nord
 

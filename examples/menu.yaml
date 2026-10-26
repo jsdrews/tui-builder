@@ -8,6 +8,7 @@
 # "other". Each item's bind: fills the destination's source parameters,
 # with literals or ${env.*} — a menu has no selection to read.
 app:
+  surface: filled
   title: Sections
 
 data:

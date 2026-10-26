@@ -14,6 +14,7 @@
 # hidden). The breadcrumb stays "Cluster": switching tabs
 # isn't moving between screens.
 app:
+  surface: filled
   title: Tabs
   theme: nord
 
@@ -85,7 +86,7 @@ tui:
             - {flex: 2, component: pods_table}
             - {flex: 1, component: pod_detail}
         actions:
-          - {key: enter, action: describe, from: pods_table, bind: {name: "${selection}"}}
+          - {key: enter, action: describe, from: pods_table, bind: {name: "${selection}"}, group: read}
       - label: Services
         layout: {component: services_table}
       - label: Events
