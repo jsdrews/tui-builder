@@ -61,46 +61,35 @@ Check what you have with `tui-builder --version` or `wrangl --version`.
 
 ## A first config
 
-Save this as `hello.yaml`:
-
-```yaml
-app:
-  title: Cities
-  theme: nord
-
-tui:
-  components:
-    cities:
-      type: table
-      filterable: true
-      columns:
-        - {title: City,   sortable: true}
-        - {title: Region, sortable: true}
-        - {title: Pop,    sortable: true, sort: si, align: right}
-      rows:
-        - [London,    Europe, "9M"]
-        - [Tokyo,     Asia,   "37M"]
-        - [Reykjavík, Europe, "130K"]
-  screen:
-    layout:
-      component: cities
-```
-
-Run it:
+Write a starter config in an empty directory:
 
 ```sh
-tui-builder hello.yaml
+mkdir my-project && cd my-project
+tui-builder init        # writes tui-builder.yaml
+tui-builder tui-builder.yaml
 ```
 
-Try `/` to filter (`region:europe` scopes to a column), `]` to sort,
-`?` for every key, and `q` to quit. The mouse works too: click to focus
-and select, scroll with the wheel.
+It runs offline. Try `/` to filter (`status:running` scopes to a
+column), `]` to sort, `?` for every key, and `q` to quit. The mouse
+works too: click to focus and select, scroll with the wheel.
+
+This is the file, with `app.title` taken from the directory's name:
+
+```yaml
+--8<-- "internal/scaffold/testdata/starter.golden.yaml"
+```
+
+It has both layers of every config. The `data:` block says where items
+come from; here a `static` source holds them inline. The `tui:` block
+says how they're shown: a table whose columns each take a value from an
+item by path, laid out on one screen. `wrangl tui-builder.yaml items`
+prints the source's data without the UI.
 
 ## Live data
 
-Replace the static rows with a source. Components bind to sources by
-name, and each column plucks its value from the item with a dot-path.
-Save this as `users.yaml`:
+Swap the static source for one that fetches: this is the starter's
+commented-out http source, with a table to match. Save it as
+`users.yaml`:
 
 ```yaml
 app:

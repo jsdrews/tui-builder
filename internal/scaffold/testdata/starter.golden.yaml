@@ -1,0 +1,55 @@
+# A starter config from `tui-builder init`. Run it with
+#   tui-builder <this file>
+# Every field is listed at https://jsdrews.github.io/tui-builder/reference/
+
+# The app shell: title, theme, keys.
+# https://jsdrews.github.io/tui-builder/reference/app/#app
+app:
+  title: my-project
+
+# Where data comes from. Components bind to a source by name, and
+# `wrangl <this file> items` prints this one without the UI.
+# https://jsdrews.github.io/tui-builder/reference/sources/
+data:
+  sources:
+    items:
+      type: static
+      data:
+        - {name: api,    status: running, region: eu-west, replicas: 3}
+        - {name: worker, status: running, region: eu-west, replicas: 2}
+        - {name: web,    status: pending, region: us-east, replicas: 1}
+        - {name: cron,   status: stopped, region: us-east, replicas: 0}
+
+    # Next: fetch over HTTP, then point the table's `source:` at it.
+    # https://jsdrews.github.io/tui-builder/reference/sources/#http
+    # users:
+    #   type: http
+    #   url: https://jsonplaceholder.typicode.com/users
+    #   refresh: 1m
+
+    # Or run a command and read the JSON it prints.
+    # https://jsdrews.github.io/tui-builder/reference/sources/#exec
+    # pods:
+    #   type: exec
+    #   command: [kubectl, get, pods, -o, json]
+    #   root: items
+
+tui:
+  # Components show data; each column takes a value from an item by path.
+  # https://jsdrews.github.io/tui-builder/reference/components/#table
+  components:
+    items:
+      type: table
+      source: items
+      filterable: true
+      columns:
+        - {title: Name,     value: name, sortable: true}
+        - {title: Status,   value: status}
+        - {title: Region,   value: region}
+        - {title: Replicas, value: replicas, align: right}
+
+  # A screen lays components out.
+  # https://jsdrews.github.io/tui-builder/reference/app/#screens
+  screen:
+    layout:
+      component: items

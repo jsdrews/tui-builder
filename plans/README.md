@@ -44,3 +44,17 @@ section in the plan gets trimmed or deleted.
   [Map: tuilib table bugs and tui-builder gaps from generated configs](https://github.com/jsdrews/tui-builder/issues/105);
   six tuilib PRs and a release, then nine tui-builder PRs. **All
   built**, on tuilib v0.43.0; what changed is recorded in the plan.
+- [`scaffolding.md`](scaffolding.md) — the locked spec for
+  `tui-builder init` and `tui-builder add exec -- <command>`: Cobra
+  subcommands, the offline starter, sampling a command and inferring a
+  source, columns, ranking and status colours, streams, windows and
+  eventlogs, and splicing into an existing config. Decided on
+  [Map: Scaffolding — init and exec sources from a command](https://github.com/jsdrews/tui-builder/issues/127);
+  eight PRs, all built and uncommitted.
+- [`openapi-generator.md`](openapi-generator.md) — the locked spec for
+  `tui-builder gen <spec>`: parsing with kin-openapi, the preset,
+  servers and auth, operations to screens, tabs or a menu, windows,
+  columns, actions, and an overrides file for what the spec can't say,
+  tested against the `internal/fixture/things` stub. Decided on
+  [Map: OpenAPI → tui-builder config generator](https://github.com/jsdrews/tui-builder/issues/113);
+  seven PRs after the scaffolding plan's PR 1, not started.

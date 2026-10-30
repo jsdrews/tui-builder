@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -157,6 +158,11 @@ func (s *execSource) run(ctx context.Context, argv []string) ([]byte, error) {
 func (s *execSource) parseJSON(raw []byte) (any, error) {
 	var out any
 	if err := json.Unmarshal(raw, &out); err != nil {
+		// NDJSON: one value per line (`docker ps --format json`, `jq -c`)
+		// reads as the list of them.
+		if values, ok := jsonValues(raw); ok {
+			return values, nil
+		}
 		preview := string(raw)
 		if len(preview) > 120 {
 			preview = preview[:120] + "…"
@@ -164,6 +170,24 @@ func (s *execSource) parseJSON(raw []byte) (any, error) {
 		return nil, fmt.Errorf("parse json: %w (preview: %q)", err, preview)
 	}
 	return out, nil
+}
+
+// jsonValues decodes raw as two or more concatenated JSON values. ok is
+// false when it isn't that: one value, or anything that doesn't parse.
+func jsonValues(raw []byte) ([]any, bool) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	var values []any
+	for {
+		var v any
+		err := dec.Decode(&v)
+		if errors.Is(err, io.EOF) {
+			return values, len(values) > 1
+		}
+		if err != nil {
+			return nil, false
+		}
+		values = append(values, v)
+	}
 }
 
 // pageSize is the configured window size, or the default.

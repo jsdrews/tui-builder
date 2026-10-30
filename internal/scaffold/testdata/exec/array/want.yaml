@@ -1,0 +1,27 @@
+# Written by `tui-builder add exec -- docker images --format json`.
+app:
+  title: Images
+data:
+  sources:
+    images:
+      type: exec
+      command: [docker, images, --format, json]
+tui:
+  components:
+    images:
+      type: table
+      title: Images
+      source: images
+      filterable: true
+      markable: true
+      mark_key: ID
+      columns:
+        - {title: Id, value: ID, sortable: true, bold: true, flex: 1}
+        - {title: Created at, value: CreatedAt, sortable: true, align: right}
+        - {title: Size, value: Size, sortable: true, sort: si, align: right}
+        - {title: Containers, value: Containers, sortable: true, sort: number, align: right}
+        - {title: Repository, value: Repository, sortable: true}
+        - {title: Tag, value: Tag, sortable: true}
+  screen:
+    layout:
+      component: images

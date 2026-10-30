@@ -1,0 +1,1 @@
+{"hosts": [{"name": "a"}], "checks": [{"name": "disk", "ok": true}], "notes": ["x"]}

@@ -1,0 +1,56 @@
+# Written by `tui-builder add exec -- gh run list --json name,status`.
+app:
+  title: Run
+data:
+  sources:
+    run:
+      type: exec
+      command: [gh, run, list, --json, 'name,status']
+tui:
+  components:
+    run:
+      type: table
+      title: Run
+      source: run
+      filterable: true
+      columns:
+        - {title: Name, value: name, sortable: true, bold: true}
+        - title: Status
+          value: status
+          sortable: true
+          max_width: 20
+          color_rules:
+            - {when: completed, color: 'theme:success'}
+            - {when: ~(fail|error|crash|backoff|unhealthy|fatal|critical|denied|reject|oom|evict), color: 'theme:error'}
+            - {when: ~(pend|wait|progress|degrad|unknown|warn|terminat|queue|retry), color: 'theme:warning'}
+        - title: Conclusion
+          value: conclusion
+          sortable: true
+          max_width: 20
+          color_rules:
+            - {when: success, color: 'theme:success'}
+            - {when: failure, color: 'theme:error'}
+            - {when: ~(fail|error|crash|backoff|unhealthy|fatal|critical|denied|reject|oom|evict), color: 'theme:error'}
+            - {when: ~(pend|wait|progress|degrad|unknown|warn|terminat|queue|retry), color: 'theme:warning'}
+        - {title: Head branch, value: headBranch, sortable: true, max_width: 20}
+        - {title: Cached, value: cached, sortable: true, max_width: 20}
+        - title: Ready
+          value: ready
+          sortable: true
+          max_width: 20
+          color_rules:
+            - {when: "true", color: 'theme:success'}
+            - {when: "false", color: 'theme:error'}
+        - {title: Created at, value: createdAt, sortable: true, align: right}
+        - {title: Display title, value: displayTitle, sortable: true, flex: 1}
+        # More fields from the sample; uncomment one to add it:
+        # - {title: Updated at, value: updatedAt, sortable: true}
+        # - {title: Database id, value: databaseId, sortable: true, sort: number}
+        # - {title: Attempt, value: attempt, sortable: true, sort: number}
+        # - {title: Failures, value: failures, sortable: true, sort: number}
+        # - {title: Event, value: event, sortable: true}
+        # - {title: Head sha, value: headSha, sortable: true}
+        # - {title: Url, value: url, sortable: true}
+  screen:
+    layout:
+      component: run

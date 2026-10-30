@@ -122,13 +122,13 @@ rejects `sortable` columns, `initial_sort` and `sort_debounce`;
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
 | `title` | template | — | required | Header text. Also the name used by `${selection.Title}`, `${cursor.Title}`, `title:value` filter terms and `window.filters`. |
-| `value` | path | — | required when source-bound | Dot-path to the cell value in each item. A list of paths is tried in order and the first non-empty wins. |
+| `value` | path | — | required when source-bound | Dot-path to the cell value in each item. A list of paths is tried in order and the first non-empty wins. A list of plain values shows joined with `, ` (`web, prod`). |
 | `width` | int | `0` | — | `0` sizes to content; a positive number is a fixed width. |
 | `flex` | int | `0` | — | Share of leftover width. |
 | `max_width` | int | — | — | Caps a flex or auto column. |
 | `align` | string | `left` | — | `left`, `right` or `center`. |
 | `sortable` | bool | `false`, or `true` when a windowed source's `sort_fields` lists the column | — | The column can be sorted from the keyboard. `false` opts out of `sort_fields`. |
-| `sort` | string | `string` | `sortable` | Comparator: `string` (case-insensitive), `number` (commas stripped), `si` (number with K/M/B/G/T suffix). |
+| `sort` | string | `string` | `sortable` | Comparator: `string` (case-insensitive), `number` (commas stripped), `si` (a number with a unit: K, M, G or T in any case, binary as in `12Ki` or `2GiB`, bytes as in `900kB` or `187MB`; a bare B is billions, as in `1.2B`). |
 | `hidden` | bool | `false` | — | Not drawn, but still in the row: it matches filters and resolves in `${selection.*}` / `${cursor.*}`. For identity columns a drilldown needs. |
 | `distinct` | list or map | — | windowed tables | The values this column's filter suggests and completes, which otherwise come only from the page that's loaded. A list (`[Running, Pending, Failed]`), or `{source: NAME}` for a source that returns a list of strings; it's fetched and polled alongside the table. The source can't be windowed. |
 | `color_rules` | list | — | — | Colors each cell by its value. See [color rules](#color-rules). |

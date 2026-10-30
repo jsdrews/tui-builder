@@ -65,6 +65,38 @@ func TestExecSourceJSON(t *testing.T) {
 	}
 }
 
+// A one-shot command printing one JSON value per line reads as the list
+// of them; a single value is unchanged, and a
+// broken line is still a parse error.
+func TestExecSourceNDJSON(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires sh")
+	}
+	fetch := func(script, root string) (any, error) {
+		t.Helper()
+		live, err := Build(map[string]*cfg.Source{
+			"e": cfg.NewEntry(&cfg.Source{Type: "exec", Command: []string{"sh", "-c", script}, Root: root}),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return live["e"].Fetch(context.Background())
+	}
+	got, err := fetch(`printf '{"x":1}\n{"x":2}\n\n{"x":3}\n'`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items := Iter(got); len(items) != 3 || String(items[2], "x") != "3" {
+		t.Errorf("NDJSON → %v, want 3 items", got)
+	}
+	if got, err := fetch(`echo '{"x":1}'`, ""); err != nil || String(got, "x") != "1" {
+		t.Errorf("one object → %v, %v", got, err)
+	}
+	if _, err := fetch(`printf '{"x":1}\n{"x":\n'`, ""); err == nil || !strings.Contains(err.Error(), "parse json") {
+		t.Errorf("a broken line → %v, want a parse error", err)
+	}
+}
+
 // TestMergeSourceFanout exercises the cross-source composer: two
 // children, tag injection, union semantics, and stable ordering by
 // cfg.Sources position.

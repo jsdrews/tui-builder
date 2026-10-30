@@ -393,6 +393,9 @@ a source (`kubectl get -o json`, `gh api`, scripts); with
 `follow: true`, any command that streams lines (`kubectl logs -f`,
 `tail -f`).
 
+A command that prints one JSON value per line (NDJSON, as from
+`docker ps --format json` or `jq -c`) reads as the list of those values.
+
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
 | `command` | list of template | — | required | The argv. The first element is looked up in `$PATH`. Not run through a shell: use `[sh, -c, "…"]` when you want one. |

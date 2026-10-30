@@ -56,14 +56,28 @@ func FirstString(v any, paths []string) string {
 }
 
 // String resolves a path and renders the result as a display string.
-// Strings pass through, numbers / booleans format predictably, nested
-// values fall back to fmt.Sprint.
+// Strings pass through, numbers / booleans format predictably, a list of
+// scalars is joined with ", ", other nested values fall back to
+// fmt.Sprint.
 func String(v any, path string) string {
-	r := Get(v, path)
+	return scalarString(Get(v, path))
+}
+
+func scalarString(r any) string {
 	if r == nil {
 		return ""
 	}
 	switch x := r.(type) {
+	case []any:
+		parts := make([]string, len(x))
+		for i, e := range x {
+			switch e.(type) {
+			case map[string]any, []any:
+				return fmt.Sprint(r)
+			}
+			parts[i] = scalarString(e)
+		}
+		return strings.Join(parts, ", ")
 	case string:
 		return x
 	case bool:

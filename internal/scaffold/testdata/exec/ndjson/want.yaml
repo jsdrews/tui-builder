@@ -1,0 +1,34 @@
+# Written by `tui-builder add exec -- docker ps --format json`.
+app:
+  title: Ps
+data:
+  sources:
+    ps:
+      type: exec
+      command: [docker, ps, --format, json]
+tui:
+  components:
+    ps:
+      type: table
+      title: Ps
+      source: ps
+      filterable: true
+      markable: true
+      mark_key: ID
+      columns:
+        - {title: Id, value: ID, sortable: true, bold: true, flex: 1}
+        - title: State
+          value: State
+          sortable: true
+          max_width: 20
+          color_rules:
+            - {when: running, color: 'theme:success'}
+            - {when: ~(fail|error|crash|backoff|unhealthy|fatal|critical|denied|reject|oom|evict), color: 'theme:error'}
+            - {when: ~(pend|wait|progress|degrad|unknown|warn|terminat|queue|retry), color: 'theme:warning'}
+        - {title: Status, value: Status, sortable: true, max_width: 20}
+        - {title: Ports, value: Ports, sortable: true, max_width: 20}
+        - {title: Names, value: Names, sortable: true}
+        - {title: Image, value: Image, sortable: true}
+  screen:
+    layout:
+      component: ps

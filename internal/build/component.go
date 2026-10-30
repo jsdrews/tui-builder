@@ -5,6 +5,8 @@ package build
 
 import (
 	"fmt"
+	"math"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -874,7 +876,7 @@ func applyPaneColors(active, inactive *lipgloss.TerminalColor, spinner *lipgloss
 //
 // Recognised theme tokens: accent, current, muted, subtle, key,
 // border-active, border-inactive, bar-bg, bar-fg, info-bg, info-fg,
-// error-bg, error-fg.
+// error-bg, error-fg, success, warning, error.
 //
 // Returns nil when the spec is empty / unrecognised so callers can leave
 // the theme default in place.
@@ -951,6 +953,15 @@ func resolveThemeToken(name string, th theme.Theme) lipgloss.TerminalColor {
 		return th.ErrorBG
 	case "error-fg":
 		return th.ErrorFG
+	// Foregrounds for a status value: a good outcome, one short of an
+	// error, and an error. error is the error band's colour (ErrorBG),
+	// which is the one that reads as a foreground on the screen.
+	case "success":
+		return th.Success
+	case "warning":
+		return th.Warning
+	case "error":
+		return th.ErrorBG
 	}
 	return nil
 }
@@ -1027,28 +1038,31 @@ func parseNumber(s string) float64 {
 // K/M/B/G/T suffix. Unrecognized suffixes leave the multiplier at 1.
 func parseSI(s string) float64 {
 	s = strings.TrimSpace(xansi.Strip(s))
-	if s == "" {
-		return 0
+	m := siValue.FindStringSubmatch(s)
+	if m == nil {
+		f, _ := strconv.ParseFloat(s, 64)
+		return f
 	}
-	mult := 1.0
-	last := s[len(s)-1]
-	switch last {
-	case 'K', 'k':
-		mult = 1e3
-		s = s[:len(s)-1]
-	case 'M', 'm':
-		mult = 1e6
-		s = s[:len(s)-1]
-	case 'B', 'b', 'G', 'g':
-		mult = 1e9
-		s = s[:len(s)-1]
-	case 'T', 't':
-		mult = 1e12
-		s = s[:len(s)-1]
+	f, _ := strconv.ParseFloat(m[1], 64)
+	unit := m[2]
+	if strings.EqualFold(unit, "b") {
+		return f * 1e9 // a bare B is billions, as in 1.2B
 	}
-	f, _ := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	return f * mult
+	if unit == "" {
+		return f
+	}
+	exp := strings.Index("kmgt", strings.ToLower(unit[:1])) + 1
+	base := 1000.0
+	if len(unit) > 1 && unit[1] == 'i' {
+		base = 1024 // Ki, MiB: binary units
+	}
+	return f * math.Pow(base, float64(exp))
 }
+
+// siValue is a number with an optional unit: K, M, G or T (any case),
+// optionally binary (Ki, Mi…) and optionally bytes (KB, MiB, kB), or a
+// bare B for billions.
+var siValue = regexp.MustCompile(`^(-?[0-9]*\.?[0-9]+)\s?([kKmMgGtT]i?[bB]?|[bB])?$`)
 
 // ------------------------------------------------------- input / toggle ---
 
