@@ -79,7 +79,7 @@ func genHarnessWith(t *testing.T, token, overrides string) (*windowHarness, *rec
 	srv := httptest.NewServer(rec)
 	t.Cleanup(srv.Close)
 	res, err := gen.Generate(context.Background(), gen.Options{
-		Input: gen.Input{Spec: filepath.Join("..", "fixture", "things", "things.yaml")},
+		Input:     gen.Input{Spec: filepath.Join("..", "fixture", "things", "things.yaml")},
 		Doc:       gen.DocOptions{BaseURL: srv.URL},
 		Overrides: overrides,
 	})

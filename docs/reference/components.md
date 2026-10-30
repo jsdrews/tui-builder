@@ -23,14 +23,14 @@ These apply to every kind unless the column says otherwise.
 
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
-| `type` | string | — | required | The kind: `list`, `table`, `logview`, `textview`, `tree`, `inspector` or `eventlog`. |
+| `type` | string | — | required | The kind: `list`, `table`, `logview`, `textview`, `tree`, `inspector`, `eventlog`, `input`, `toggle` or `menu`. |
 | `title` | template | — | — | Shown on the pane border. |
-| `source` | string | — | — | The `data.sources` entry that populates this component. When set, static content (`items`, `rows`, `lines`, `content`, `root`, `fields` values) is ignored. |
+| `source` | string | — | not input, toggle or menu | The `data.sources` entry that populates this component. When set, static content (`items`, `rows`, `lines`, `content`, `root`, `fields` values) is ignored. |
 | `colors` | map | — | — | Per-component color overrides. See [`colors`](#colors). |
 | `color_rules` | list | — | list, logview, eventlog, auto inspector (with `path:`) | Colors each item or line by its value; on an `auto: true` inspector, each leaf value, scoped by the rule's `path:`. Tables put rules on each column and declared inspectors on each field. See [color rules](#color-rules). |
 | `filterable` | bool | `false` | list, table, inspector, eventlog | `/` opens a filter that narrows the rows (`f` on an eventlog, where `/` is search). |
 | `searchable` | bool | `false` | logview, textview, tree, eventlog | `/` opens a search that highlights matches; `n` / `N` move between them. |
-| `filter_placeholder` | template | — | any filterable or searchable kind | Hint shown inside the empty filter or search input. |
+| `filter_placeholder` | template | — | list, table, inspector, logview, textview, tree, eventlog | Hint shown inside the empty filter or search input. |
 | `initial_filter` | template | — | list, table | Starts with this filter applied. |
 | `initial_query` | template | — | logview, textview, tree, inspector | Starts with this search or filter query applied. |
 | `initial_cursor` | int | `0` | list, table, tree, inspector | Row the cursor starts on. |

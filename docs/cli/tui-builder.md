@@ -54,7 +54,7 @@ Each has its own `--help`.
 ### `tui-builder init`
 
 ```sh
-tui-builder init [-o FILE] [--title TITLE] [--dry-run] [--force]
+tui-builder init [kind] [-o FILE] [--title TITLE] [--dry-run] [--force]
 ```
 
 Writes a small commented config that runs straight away, offline: a
@@ -73,6 +73,54 @@ flags are the only choices. The file it writes is shown in the
 
 After writing, it prints the command that runs the file:
 `run: tui-builder tui-builder.yaml`.
+
+#### `tui-builder init <kind>`
+
+With a kind, `init` writes an example of that one component kind or
+source type instead: a small config built around it that runs as
+written, with every field the kind takes below it, commented out. It's
+a way to start from any kind, and a list of everything that kind can
+do.
+
+| Kinds | |
+|---|---|
+| Components | `list`, `table`, `logview`, `textview`, `tree`, `inspector`, `eventlog`, `input`, `toggle`, `menu` |
+| Sources | `http`, `exec`, `file`, `websocket`, `static`, `merge` |
+
+```sh
+tui-builder init table                 # writes tui-builder.yaml
+tui-builder init http --dry-run | less # or read it first
+```
+
+- **Each commented line is one field:** its default where the docs give
+  a literal one (else an empty value of its type, which loads as
+  unset), then the first sentence of what it does, and where it's
+  valid when that limits it, as in "(not with `busy_when`)". Uncommenting a
+  line changes nothing until you edit its value.
+- **Fields are grouped** as the reference groups them, common fields
+  first, each group headed by its reference link.
+- **Blocks are written out whole:** columns, `colors:`, `color_rules:`,
+  `activity:`, `on_cursor:`, `window:`, `paginate:`, `auth:` (every
+  scheme), `retry:` and the rest, so delete what you don't need. A
+  field that replaces something the example sets says so: a list's
+  `items:` is "Instead of source, item."
+- **The `#` sits at the block's indent** on every line, so deleting
+  `# ` leaves a line where it belongs.
+- **`init file`** also writes the `services.json` it reads, beside the
+  config; both are checked first, so `--force` or nothing.
+- **`init http` and `init websocket`** read the things fixture API.
+  In a clone of tui-builder, start it with `go run
+  ./internal/fixture/things/thingsd`; or set `THINGS_API_URL` (or
+  `THINGS_EVENTS_URL`) and `THINGS_API_TOKEN` and change the path and
+  columns to read another API.
+- **An unknown kind** is a usage error (exit 2) that lists the kinds and
+  suggests the nearest: `no kind "tabel" (did you mean table?)`.
+
+The field lines come from the tables in
+[the config reference](../reference/README.md), so they say what the
+reference says. A test loads every example, and every field in it
+uncommented on its own, so a field the docs list that the code would
+refuse fails the build.
 
 ### `tui-builder gen`
 

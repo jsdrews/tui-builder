@@ -174,7 +174,7 @@ func StatusRules(values []string) []Rule {
 }
 
 var (
-	statusName  = regexp.MustCompile(`(?i)^(status|state|phase|health|level|severity|result|ready|condition|outcome|conclusion)$`)
+	statusName = regexp.MustCompile(`(?i)^(status|state|phase|health|level|severity|result|ready|condition|outcome|conclusion)$`)
 	// timeName is a whole word or a snake_case suffix, any case;
 	// timeSuffix a camelCase one, so "format" isn't read as …At.
 	timeName    = regexp.MustCompile(`(?i)^@?(time|timestamp|ts|date|datetime|created|updated|modified|deleted|started|finished|expires|seen)$|(?i)_(at|on|time|timestamp|date|ts)$`)

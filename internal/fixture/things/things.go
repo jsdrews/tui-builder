@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coder/websocket"
 	"gopkg.in/yaml.v3"
 )
 
@@ -159,6 +160,51 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /owners", auth(s.listOwners))
 	s.mux.HandleFunc("GET /owners/{owner_id}", auth(s.getOwner))
 	s.mux.HandleFunc("GET /owners/{owner_id}/things", auth(s.listOwnerThings))
+	s.mux.HandleFunc("GET /events", s.events)
+}
+
+// EventEvery is how often /events sends a frame.
+var EventEvery = time.Second
+
+// events is a websocket that sends one thing's new status as JSON,
+// {name, status, at}, straight away and then every EventEvery, cycling
+// through the things and statuses. It changes nothing, and it isn't in
+// the spec: it's for `tui-builder init websocket`.
+func (s *Server) events(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Authorization") != "Bearer "+Token {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		writeJSON(w, http.StatusUnauthorized, detail("Not authenticated"))
+		return
+	}
+	c, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer c.CloseNow()
+	ctx := r.Context()
+	tick := time.NewTicker(EventEvery)
+	defer tick.Stop()
+	for i := 0; ; i++ {
+		s.mu.Lock()
+		var name string
+		if n := len(s.things); n > 0 {
+			name = s.things[i%n].Name
+		}
+		s.mu.Unlock()
+		b, _ := json.Marshal(map[string]string{
+			"name":   name,
+			"status": Statuses[(i/len(Statuses)+i)%len(Statuses)],
+			"at":     time.Now().UTC().Format(time.RFC3339),
+		})
+		if err := c.Write(ctx, websocket.MessageText, b); err != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
 }
 
 func (s *Server) listThings(w http.ResponseWriter, r *http.Request) {

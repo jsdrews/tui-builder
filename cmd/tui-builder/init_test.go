@@ -86,12 +86,70 @@ func TestInitDryRun(t *testing.T) {
 
 func TestInitUsageErrors(t *testing.T) {
 	chdir(t, "x")
-	for _, args := range [][]string{{"init", "extra"}, {"init", "--bogus"}} {
+	for _, args := range [][]string{{"init", "extra"}, {"init", "table", "extra"}, {"init", "--bogus"}} {
 		if code, _, _ := run(t, args...); code != exitUsage {
 			t.Errorf("%q → %d, want %d", args, code, exitUsage)
 		}
 	}
 	if code, _, _ := run(t, "init", "-o", "missing/dir/app.yaml"); code != exitError {
 		t.Errorf("init into a missing directory → %d, want %d", code, exitError)
+	}
+}
+
+func TestInitKind(t *testing.T) {
+	chdir(t, "inventory")
+	code, stdout, stderr := run(t, "init", "table", "-o", "table.yaml")
+	if code != exitOK || stdout != "run: tui-builder table.yaml\n" || stderr != "" {
+		t.Fatalf("init table → %d %q %q", code, stdout, stderr)
+	}
+	c, err := cfg.Load("table.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.App.Title != "inventory" || c.TUI.Components["services"] == nil {
+		t.Errorf("init table: title %q", c.App.Title)
+	}
+	want, _ := scaffold.Kind("menu", "My app", ".")
+	if code, stdout, _ := run(t, "init", "menu", "--dry-run", "--title", "My app"); code != exitOK || stdout != string(want.Config) {
+		t.Errorf("init menu --dry-run → %d, stdout isn't the menu example", code)
+	}
+}
+
+func TestInitUnknownKind(t *testing.T) {
+	chdir(t, "x")
+	code, _, stderr := run(t, "init", "tabel")
+	if code != exitUsage || !strings.Contains(stderr, `no kind "tabel" (did you mean table?)`) || !strings.Contains(stderr, "list, table, logview") || !strings.Contains(stderr, "the sources http, exec") {
+		t.Errorf("init tabel → %d %q", code, stderr)
+	}
+	if _, err := os.Stat("tui-builder.yaml"); err == nil {
+		t.Error("an unknown kind wrote a file")
+	}
+}
+
+// init file writes the JSON beside the config, refusing first when
+// either exists.
+func TestInitFileWritesItsData(t *testing.T) {
+	chdir(t, "x")
+	os.Mkdir("sub", 0o755)
+	code, stdout, stderr := run(t, "init", "file", "-o", "sub/app.yaml")
+	if code != exitOK || stdout != "wrote sub/services.json\nrun: tui-builder sub/app.yaml\n" {
+		t.Fatalf("init file → %d %q %q", code, stdout, stderr)
+	}
+	if _, err := cfg.Load("sub/app.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile("sub/services.json"); !strings.Contains(string(b), `"cron"`) {
+		t.Errorf("services.json: %q", b)
+	}
+	os.Remove("sub/app.yaml")
+	code, _, stderr = run(t, "init", "file", "-o", "sub/app.yaml")
+	if code != exitError || !strings.Contains(stderr, "sub/services.json already exists") {
+		t.Errorf("init file over services.json → %d %q", code, stderr)
+	}
+	if _, err := os.Stat("sub/app.yaml"); err == nil {
+		t.Error("the refusal wrote the config")
+	}
+	if code, _, stderr := run(t, "init", "file", "-o", "sub/app.yaml", "--force"); code != exitOK {
+		t.Errorf("--force → %d %q", code, stderr)
 	}
 }

@@ -1,0 +1,47 @@
+# An example textview from `tui-builder init textview`. Run it with
+#   tui-builder <this file>
+# Every field a textview takes is below, commented out: uncomment a line to
+# use it. A line shows the field's default where it has one; a block
+# shows every field it takes, so keep the ones you need.
+# https://jsdrews.github.io/tui-builder/reference/components/#textview
+
+app:
+  title: demo
+
+tui:
+  components:
+    notes:
+      type: textview
+      title: Notes
+      content: |
+        A textview shows a block of text: notes, help, a file's contents.
+        Press / to search it.
+
+      # Common fields: https://jsdrews.github.io/tui-builder/reference/components/#common-fields
+      # source: ""                      # The `data.sources` entry that populates this component.
+      # colors:                         # Per-component color overrides.
+      #   border_active: ""             # Border color when focused.
+      #   border_inactive: ""           # Border color when unfocused.
+      #   spinner: ""                   # The loading spinner.
+      # searchable: false               # `/` opens a search that highlights matches; `n` / `N` move
+      #                                 # between them.
+      # filter_placeholder: ""          # Hint shown inside the empty filter or search input.
+      # initial_query: ""               # Starts with this search or filter query applied.
+      # on_cursor:                      # Refetches this component's source as another component's
+      #                                 # cursor moves.
+      #   source: other_table           # The driver: a table, list or tree on the same screen.
+      #                                 # (required)
+      #   bind: {}                      # Maps this component's source parameters to templates over
+      #                                 # the driver's focused row: `${cursor}`, `${cursor.N}`,
+      #                                 # `${cursor.Title}`, `${cursor.path}`, plus `${env.*}`.
+      # on_input:                       # Refetches this component's source when an input or toggle
+      #                                 # on the screen commits.
+      #   bind: {q: "${input.search}"}  # Maps source parameters to templates over `${input.NAME}`,
+      #                                 # plus `${env.*}`. (required)
+
+      # Textview fields: https://jsdrews.github.io/tui-builder/reference/components/#textview
+      # wrap: false                     # Word-wrap.
+
+  screen:
+    layout:
+      component: notes

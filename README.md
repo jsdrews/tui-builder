@@ -130,36 +130,19 @@ never import any TUI code.
 
 ## A first config
 
-```yaml
-# hello.yaml
-app:
-  title: Cities
-  theme: nord
-
-tui:
-  components:
-    cities:
-      type: table
-      filterable: true
-      columns:
-        - {title: City,   width: 16, sortable: true}
-        - {title: Region, width: 14, sortable: true}
-        - {title: Pop,    width: 8,  sortable: true, sort: si, align: right}
-      rows:
-        - [London,    Europe,   "9M"]
-        - [Tokyo,     Asia,     "37M"]
-        - [Reykjavík, Europe,   "130K"]
-
-  screen:
-    layout:
-      component: cities
-```
-
 ```sh
-bin/tui-builder hello.yaml
+mkdir my-project && cd my-project
+tui-builder init              # writes tui-builder.yaml
+tui-builder tui-builder.yaml
 ```
 
-That's it — `tab` cycles focus, `/` filters, `[`/`]`/`s` step the sort
+`init` writes a small commented config that runs offline: a `static`
+source of four rows, a filterable table bound to it, and one screen,
+with an http source and an exec source commented out as next steps.
+Each section links its reference page. The whole file is shown in the
+[quick start](https://jsdrews.github.io/tui-builder/quickstart/#a-first-config).
+
+In the app, `tab` cycles focus, `/` filters, `[`/`]`/`s` step the sort
 column, `q` quits, and `o` opens the output console.
 
 The mouse works too: click a pane to focus it, click a row to move its
@@ -168,6 +151,14 @@ same action the keyboard fires. Right-click a row opens the action
 menu against THAT row — one gesture, not click-then-press-`a`.
 Mouse reporting takes over the terminal's own click-drag text selection —
 hold `shift` (or `alt` in iTerm2) while dragging to select text for a copy.
+
+`tui-builder init <kind>` writes an example of any one component or
+source instead, `init table` or `init http`, with every field it takes
+commented out underneath.
+
+From there, `tui-builder add exec -- <command>` writes a config for any
+command that prints JSON, and `tui-builder gen <openapi spec>` one for an
+HTTP API.
 
 ## Tour by feature
 

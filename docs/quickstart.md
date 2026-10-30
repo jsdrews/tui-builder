@@ -85,6 +85,10 @@ says how they're shown: a table whose columns each take a value from an
 item by path, laid out on one screen. `wrangl tui-builder.yaml items`
 prints the source's data without the UI.
 
+To see everything one kind can do, `tui-builder init <kind>` writes an
+example of it with every field commented out: `tui-builder init table
+--dry-run | less`. See [`init <kind>`](cli/tui-builder.md#tui-builder-init-kind).
+
 ## Live data
 
 Swap the static source for one that fetches: this is the starter's

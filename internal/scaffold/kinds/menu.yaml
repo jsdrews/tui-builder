@@ -1,0 +1,44 @@
+app:
+  title: __TITLE__
+
+data:
+  sources:
+    services:
+      type: static
+      data:
+        - {name: api, status: running}
+        - {name: web, status: pending}
+
+tui:
+  components:
+    home:
+      type: menu
+      title: Sections
+      items:
+        - {label: Services, screen: services}
+        - {label: About,    screen: about}
+        # @fields items
+      # @fields
+    services:
+      type: table
+      title: Services
+      source: services
+      columns:
+        - {title: Name,   value: name}
+        - {title: Status, value: status}
+    about:
+      type: textview
+      title: About
+      content: Opened from the menu; esc goes back.
+
+  initial: home
+  screens:
+    home:
+      layout:
+        component: home
+    services:
+      layout:
+        component: services
+    about:
+      layout:
+        component: about

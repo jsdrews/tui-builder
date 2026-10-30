@@ -27,7 +27,7 @@ const (
 type read struct {
 	op   op
 	kind kind
-	root string            // where the rows are, for a list
+	root string           // where the rows are, for a list
 	item *openapi3.Schema // a list's row schema
 	// parent is the list a detail or sub-list is pushed from, and param
 	// the path parameter the parent's row fills.

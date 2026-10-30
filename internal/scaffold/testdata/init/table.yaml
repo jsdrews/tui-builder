@@ -1,0 +1,144 @@
+# An example table from `tui-builder init table`. Run it with
+#   tui-builder <this file>
+# Every field a table takes is below, commented out: uncomment a line to
+# use it. A line shows the field's default where it has one; a block
+# shows every field it takes, so keep the ones you need.
+# https://jsdrews.github.io/tui-builder/reference/components/#table
+
+app:
+  title: demo
+
+data:
+  sources:
+    services:
+      type: static
+      data:
+        - {name: api,    status: running, region: eu-west, replicas: 3}
+        - {name: worker, status: running, region: eu-west, replicas: 2}
+        - {name: web,    status: pending, region: us-east, replicas: 1}
+        - {name: cron,   status: stopped, region: us-east, replicas: 0}
+
+tui:
+  components:
+    services:
+      type: table
+      title: Services
+      source: services
+      columns:
+        - {title: Name,     value: name}
+        - {title: Status,   value: status}
+        - {title: Region,   value: region}
+        - {title: Replicas, value: replicas, align: right}
+
+        # Every column field: https://jsdrews.github.io/tui-builder/reference/components/#columns
+        # - title: Title                # Header text. (required)
+        #   value: name                 # Dot-path to the cell value in each item. (required when
+        #                               # source-bound)
+        #   width: 0                    # `0` sizes to content; a positive number is a fixed width.
+        #   flex: 0                     # Share of leftover width.
+        #   max_width: 0                # Caps a flex or auto column.
+        #   align: left                 # `left`, `right` or `center`.
+        #   sortable: false             # The column can be sorted from the keyboard.
+        #   sort: string                # Comparator: `string` (case-insensitive), `number` (commas
+        #                               # stripped), `si` (a number with a unit: K, M, G or T in any
+        #                               # case, binary as in `12Ki` or `2GiB`, bytes as in `900kB`
+        #                               # or `187MB`; a bare B is billions, as in `1.2B`).
+        #                               # (`sortable`)
+        #   hidden: false               # Not drawn, but still in the row: it matches filters and
+        #                               # resolves in `${selection.*}` / `${cursor.*}`.
+        #   distinct: []                # The values this column's filter suggests and completes,
+        #                               # which otherwise come only from the page that's loaded.
+        #                               # (windowed tables)
+        #   color_rules:                # Colors each cell by its value.
+        #     - color: red              # See color values. (required)
+        #       when: stopped           # Exact text (case-insensitive), `~regex`
+        #                               # (case-insensitive), or a numeric comparison: `> 5`, `<=
+        #                               # 10`, `== 0`, `!= 0`, with an optional K/M/B/G/T suffix on
+        #                               # the number.
+        #       path: ""                # The fields the rule applies to: a dot-path from the record
+        #                               # root (`status`, `spec.replicas`, `items.0.state`), where
+        #                               # `*` matches any one key or index (`items.*.state`). (an
+        #                               # `auto: true` inspector's own `color_rules`)
+        #   bold: false                 # Cells render bold; combines with `color_rules`, and the
+        #                               # selected-row background passes through. (not with
+        #                               # `metric`)
+        #   metric:                     # Draws the cell as a badge, ratio, progress bar or
+        #                               # sparkline. (source-bound tables; not with `value`,
+        #                               # `color_rules`, `sortable` or `bold`)
+        #     badge: []                 # Status counts, ok / warn / down: `12✓ 3⚠ 1✗`. (one
+        #                               # kind key)
+        #     ratio: []                 # Done / total, `3/5`: green when complete, yellow partway,
+        #                               # red at zero. (one kind key)
+        #     bar: ""                   # A value drawn as a progress bar against `max`. (one kind
+        #                               # key)
+        #     spark: ""                 # A list of numbers drawn as a sparkline. (one kind key)
+        #     max: 0                    # The bar's full value. (`bar`, required)
+        #     width: 0                  # Width in cells. (`bar`, `spark`)
+        #     color: ""                 # A fixed color: a name or a 0–255 index. (`bar`, `spark`)
+
+      # Common fields: https://jsdrews.github.io/tui-builder/reference/components/#common-fields
+      # colors:                         # Per-component color overrides.
+      #   border_active: ""             # Border color when focused.
+      #   border_inactive: ""           # Border color when unfocused.
+      #   spinner: ""                   # The loading spinner.
+      #   selected_fg: ""               # Focused row text.
+      #   selected_bg: ""               # Focused row background.
+      #   header: ""                    # Header text.
+      #   cell: ""                      # Ordinary cell text.
+      #   column_separator: ""          # The line between columns.
+      #   header_rule: ""               # The line under the header.
+      #   mark: ""                      # The ✓ on a marked row that isn't under the cursor.
+      # filterable: false               # `/` opens a filter that narrows the rows (`f` on an
+      #                                 # eventlog, where `/` is search).
+      # filter_placeholder: ""          # Hint shown inside the empty filter or search input.
+      # initial_filter: ""              # Starts with this filter applied.
+      # initial_cursor: 0               # Row the cursor starts on.
+      # loading_label: ""               # Shown beside the spinner while the component has no data
+      #                                 # yet, e.g. `loading pods…`.
+      # markable: false                 # Multi-select: adds a mark gutter and binds `x` (toggle),
+      #                                 # `X` (extend from the last mark), `A` (all), `D` (none).
+      # mark_key: name                  # The stable identity marks and activity are held by, read
+      #                                 # from the source item (not the rendered cells), e.g.
+      #                                 # `metadata.uid`.
+      # activity:                       # Shows a spinner on rows the data says are being worked on.
+      #   status: status                # The field that says what a row is doing. (required)
+      #   busy: [pending]               # The `status` values that mean busy, matched exactly. (not
+      #                                 # with `busy_when`)
+      #   busy_when: ""                 # An expression over the row's item, true while it's busy,
+      #                                 # for when busy-ness isn't one field's value:
+      #                                 # `status.observedGeneration < generation`. (not with
+      #                                 # `busy`)
+      #   column: ""                    # The column the spinner draws in. (table)
+      #   revision: ""                  # A value that moves when work on the row finishes, e.g.
+      #                                 # `metadata.resourceVersion`.
+      # on_cursor:                      # Refetches this component's source as another component's
+      #                                 # cursor moves.
+      #   source: other_table           # The driver: a table, list or tree on the same screen.
+      #                                 # (required)
+      #   bind: {}                      # Maps this component's source parameters to templates over
+      #                                 # the driver's focused row: `${cursor}`, `${cursor.N}`,
+      #                                 # `${cursor.Title}`, `${cursor.path}`, plus `${env.*}`.
+      # on_input:                       # Refetches this component's source when an input or toggle
+      #                                 # on the screen commits.
+      #   bind: {q: "${input.search}"}  # Maps source parameters to templates over `${input.NAME}`,
+      #                                 # plus `${env.*}`. (required)
+
+      # Table fields: https://jsdrews.github.io/tui-builder/reference/components/#table
+      # rows: []                        # Each row is a list of cells. (static) Instead of source.
+      # initial_sort: {}                # Sort to start with: `column` (a column title,
+      #                                 # case-insensitive prefix, or a 1-based number) and `desc`
+      #                                 # (bool).
+      # max_items: 5000                 # Rows held at once; the end furthest from the view is
+      #                                 # trimmed. (span table)
+      # sort_debounce: ""               # How long sort input must go quiet before the source is
+      #                                 # asked for the new order, so stepping through columns with
+      #                                 # `[` / `]` sends one request. (windowed source)
+      # max_rows: 100                   # Ring-buffer size: each arriving event is prepended as a
+      #                                 # row and the oldest drop past this size. (streaming source,
+      #                                 # no `row_key`)
+      # row_key: ""                     # Keyed-upsert mode: an event whose key matches a row
+      #                                 # updates it in place; a new key appends. (streaming source)
+
+  screen:
+    layout:
+      component: services

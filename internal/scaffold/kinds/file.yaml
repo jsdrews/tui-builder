@@ -1,0 +1,25 @@
+app:
+  title: __TITLE__
+
+data:
+  sources:
+    services:
+      # Reads a JSON file. init writes services.json beside this config;
+      # the path is from where you run tui-builder.
+      type: file
+      path: __DIR__services.json
+      # @fields
+
+tui:
+  components:
+    services:
+      type: table
+      title: Services
+      source: services
+      columns:
+        - {title: Name,   value: name}
+        - {title: Status, value: status}
+
+  screen:
+    layout:
+      component: services

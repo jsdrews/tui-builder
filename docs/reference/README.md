@@ -8,7 +8,7 @@ complete, runnable configs, browse [`examples/`](https://github.com/jsdrews/tui-
 | Page | Covers |
 |---|---|
 | [app.md](app.md) | The top-level shape, `app:` (title, theme, glyphs, borders, keys, boot prompts, env), `tui.screen` / `tui.screens`, and layout nodes |
-| [components.md](components.md) | Every component kind: list, table, logview, textview, tree, inspector, eventlog, input, toggle, plus columns, metrics, color rules, colors, `activity:`, `on_cursor:` and `on_input:` |
+| [components.md](components.md) | Every component kind: list, table, logview, textview, tree, inspector, eventlog, input, toggle, menu, plus columns, metrics, color rules, colors, `activity:`, `on_cursor:` and `on_input:` |
 | [sources.md](sources.md) | Leaf sources: http, exec, file, websocket, static, merge, plus `parameters:`, `paginate:`, `window:` and `cache:` |
 | [pipelines.md](pipelines.md) | Operator sources: passthrough, filter, project, derive, sort, union, compose, join, cache, and inline `pipe:` chains |
 | [actions.md](actions.md) | The `actions:` registry, screen action bindings, inputs and generated forms, reserved keys |
@@ -33,3 +33,8 @@ complete, runnable configs, browse [`examples/`](https://github.com/jsdrews/tui-
 A test (`internal/config/reference_test.go`) fails when a config field
 has no row in these pages, so a schema change and its documentation land
 together.
+
+`tui-builder init <kind>` prints an example of any component kind or
+source type with every field these pages list for it, commented out, so
+you can see a kind's options in a config rather than a table. See
+[the CLI page](../cli/tui-builder.md#tui-builder-init-kind).

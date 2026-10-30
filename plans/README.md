@@ -59,3 +59,8 @@ section in the plan gets trimmed or deleted.
   [Map: OpenAPI → tui-builder config generator](https://github.com/jsdrews/tui-builder/issues/113);
   seven PRs after the scaffolding plan's PR 1; all seven PRs
   built and uncommitted.
+- [`init-kinds.md`](init-kinds.md) — `tui-builder init <kind>`: a
+  running example of any component kind or source type, with every
+  field valid on it commented out, defaults and descriptions generated
+  from the `docs/reference` tables. Four PRs, all built and
+  uncommitted.

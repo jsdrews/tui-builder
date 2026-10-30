@@ -3,8 +3,9 @@
 //
 //	go run ./internal/fixture/things/thingsd -addr localhost:8765
 //
-// The spec is at /openapi.yaml and /openapi.json; every other route
-// wants `Authorization: Bearer fixture-token`.
+// The spec is at /openapi.yaml and /openapi.json, and a websocket of
+// status changes at /events; every route but the spec wants
+// `Authorization: Bearer fixture-token`.
 package main
 
 import (

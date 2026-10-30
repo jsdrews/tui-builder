@@ -1,0 +1,59 @@
+# An example static from `tui-builder init static`. Run it with
+#   tui-builder <this file>
+# Every field a static takes is below, commented out: uncomment a line to
+# use it. A line shows the field's default where it has one; a block
+# shows every field it takes, so keep the ones you need.
+# https://jsdrews.github.io/tui-builder/reference/sources/#static
+
+app:
+  title: demo
+
+data:
+  sources:
+    services:
+      # Data written in the config: for fixtures, lookup tables and
+      # trying a layout before pointing it at a real source.
+      type: static
+      data:
+        - {name: api,  status: running}
+        - {name: web,  status: pending}
+        - {name: cron, status: stopped}
+
+      # Common fields: https://jsdrews.github.io/tui-builder/reference/sources/#fields-shared-by-leaf-sources
+      # parameters:                     # Typed inputs the source references as `${params.NAME}`.
+      #   q:                            # One entry, named q.
+      #     type: string                # `string`, `int`, `bool` or `duration`.
+      #     required: false             # The source can't run until a caller supplies a value. (not
+      #                                 # with `default`)
+      #     default: ""                 # Used when no caller supplies one. (not with `required`)
+      #     description: ""             # One-line summary, shown by `wrangl --describe`.
+      #     segment: false              # The value is one URL path segment: in a `url:` path it's
+      #                                 # fully escaped, `/` included (`a/b` → `a%2Fb`).
+      # root: ""                        # Dot-path selecting the iterable inside the response, e.g.
+      #                                 # `items` or `data.results`.
+      # format: json                    # `json` parses the response; `text` keeps it as a raw
+      #                                 # string (for logs and plain-text endpoints).
+      # refresh: ""                     # Poll interval.
+      # poll_hidden: false              # Keeps polling while the source's tab is hidden or its
+      #                                 # screen is covered by a push.
+      # cache:                          # Memoises fetches per parameter combination.
+      #   ttl: 30s                      # How long an entry stays fresh. (required)
+      #   size: 100                     # Maximum entries; the least recently used is evicted.
+      # pipe: []                        # Transform stages applied to this source's output.
+      # extends: ""                     # The preset this source inherits fields from.
+      # unset: []                       # Inherited fields to drop, by name: `unset: [paginate,
+      #                                 # refresh]`.
+
+tui:
+  components:
+    services:
+      type: table
+      title: Services
+      source: services
+      columns:
+        - {title: Name,   value: name}
+        - {title: Status, value: status}
+
+  screen:
+    layout:
+      component: services

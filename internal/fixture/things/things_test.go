@@ -1,6 +1,7 @@
 package things
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/coder/websocket"
 	"gopkg.in/yaml.v3"
 )
 
@@ -194,5 +196,29 @@ func TestWrites(t *testing.T) {
 	}
 	if _, p := do(t, New(), "GET", "/things", ""); p["total"] != float64(seedThings) {
 		t.Error("a write leaked into a fresh Server")
+	}
+}
+
+// /events sends a thing's status as JSON at once, and wants the token.
+func TestEvents(t *testing.T) {
+	srv := httptest.NewServer(New())
+	defer srv.Close()
+	url := "ws" + strings.TrimPrefix(srv.URL, "http") + "/events"
+	ctx := context.Background()
+	if _, resp, err := websocket.Dial(ctx, url, nil); err == nil || resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no token: %v %v", resp, err)
+	}
+	c, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + Token}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+	_, b, err := c.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ev map[string]string
+	if err := json.Unmarshal(b, &ev); err != nil || ev["name"] != "thing-001" || !slices.Contains(Statuses, ev["status"]) || ev["at"] == "" {
+		t.Errorf("first event %s: %v", b, err)
 	}
 }

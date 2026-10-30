@@ -1,0 +1,29 @@
+app:
+  title: __TITLE__
+
+data:
+  sources:
+    services:
+      # Runs a command and reads the JSON it prints. This one prints a
+      # fixed list; try [kubectl, get, pods, -o, json] with root: items.
+      type: exec
+      command:
+        - sh
+        - -c
+        - |
+          printf '[{"name":"api","status":"running"},{"name":"web","status":"pending"},{"name":"cron","status":"stopped"}]'
+      # @fields
+
+tui:
+  components:
+    services:
+      type: table
+      title: Services
+      source: services
+      columns:
+        - {title: Name,   value: name}
+        - {title: Status, value: status}
+
+  screen:
+    layout:
+      component: services

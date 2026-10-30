@@ -1,0 +1,106 @@
+# An example exec from `tui-builder init exec`. Run it with
+#   tui-builder <this file>
+# Every field a exec takes is below, commented out: uncomment a line to
+# use it. A line shows the field's default where it has one; a block
+# shows every field it takes, so keep the ones you need.
+# https://jsdrews.github.io/tui-builder/reference/sources/#exec
+
+app:
+  title: demo
+
+data:
+  sources:
+    services:
+      # Runs a command and reads the JSON it prints. This one prints a
+      # fixed list; try [kubectl, get, pods, -o, json] with root: items.
+      type: exec
+      command:
+        - sh
+        - -c
+        - |
+          printf '[{"name":"api","status":"running"},{"name":"web","status":"pending"},{"name":"cron","status":"stopped"}]'
+
+      # Common fields: https://jsdrews.github.io/tui-builder/reference/sources/#fields-shared-by-leaf-sources
+      # parameters:                     # Typed inputs the source references as `${params.NAME}`.
+      #   q:                            # One entry, named q.
+      #     type: string                # `string`, `int`, `bool` or `duration`.
+      #     required: false             # The source can't run until a caller supplies a value. (not
+      #                                 # with `default`)
+      #     default: ""                 # Used when no caller supplies one. (not with `required`)
+      #     description: ""             # One-line summary, shown by `wrangl --describe`.
+      #     segment: false              # The value is one URL path segment: in a `url:` path it's
+      #                                 # fully escaped, `/` included (`a/b` → `a%2Fb`).
+      # root: ""                        # Dot-path selecting the iterable inside the response, e.g.
+      #                                 # `items` or `data.results`.
+      # format: json                    # `json` parses the response; `text` keeps it as a raw
+      #                                 # string (for logs and plain-text endpoints).
+      # refresh: ""                     # Poll interval.
+      # poll_hidden: false              # Keeps polling while the source's tab is hidden or its
+      #                                 # screen is covered by a push.
+      # timeout: 10s                    # Per-fetch limit.
+      # cache:                          # Memoises fetches per parameter combination.
+      #   ttl: 30s                      # How long an entry stays fresh. (required)
+      #   size: 100                     # Maximum entries; the least recently used is evicted.
+      # pipe: []                        # Transform stages applied to this source's output.
+      # extends: ""                     # The preset this source inherits fields from.
+      # unset: []                       # Inherited fields to drop, by name: `unset: [paginate,
+      #                                 # refresh]`.
+      # resume:                         # Reconnects exactly: tracks each line's timestamp, resumes
+      #                                 # from the last one and skips repeats.
+      #   timestamp: '^(\S+)'           # A regular expression whose first capture group is each
+      #                                 # line's timestamp, in RFC 3339 (fractional seconds
+      #                                 # allowed). (required)
+      #   granularity: 1s               # The resolution the source's "since" parameter honours.
+
+      # Exec fields: https://jsdrews.github.io/tui-builder/reference/sources/#exec
+      # env: {}                         # Variables added to (or overriding) the inherited
+      #                                 # environment.
+      # follow: false                   # Streams: reads stdout line by line as it arrives. (not
+      #                                 # with `window`)
+      # window:                         # Runs one command per window of a larger set, with offset,
+      #                                 # limit, filter and sort templated into the argv. (json; not
+      #                                 # with `follow`)
+      #   page_size: 100                # Rows per request.
+      #   prefetch: 0                   # Extra pages fetched beyond the screen.
+      #   total_path: total             # Where the total match count is: a dot-path into the raw
+      #                                 # response (before `root:`), or a header such as
+      #                                 # `header:X-Total-Count`. (required, except with `cursor`)
+      #   filters: {}                   # Maps a column **title** to where a scoped `title:value`
+      #                                 # filter term goes: a query parameter on http, a
+      #                                 # `${window.filters.NAME}` token name on exec. (exec, http;
+      #                                 # a map value: http only)
+      #   filter_except: []             # Column titles `filter_ops` leaves alone: numbers, ids,
+      #                                 # enums the API can't match on. (needs `filter_ops`)
+      #   page_start: 1                 # The first page's number; `0` for zero-based APIs. (with
+      #                                 # `page_param`)
+      #   sort_fields: []               # The sort fields the API accepts, e.g. an `order_by` enum.
+      #                                 # (http: needs `sort_param`; exec: `command:` references
+      #                                 # `${window.sort}`; not Anchored)
+      #   cursor: ""                    # Makes the source **Anchored**: walked from an edge instead
+      #                                 # of paged by offset. (eventlog and span-table sources)
+      #   anchor: newest                # Where an Anchored view starts: `newest` (and follows),
+      #                                 # `oldest` (and walks newer as you scroll down), or a
+      #                                 # template that resolves to a cursor, `${input.jump_to}`, to
+      #                                 # jump there. (with `cursor`)
+      #   viewport_delay: ""            # How long scrolling must pause before rows are requested.
+      #   growing:                      # The set is still gaining items at its newest end.
+      #                                 # (eventlog only; not with `refresh`)
+      #     source: services            # The entry whose value decides, e.g. the job a list of
+      #                                 # events belongs to. (required)
+      #     while: "${item.status} == running"  # True while items are still arriving, over that
+      #                                         # source's value. (required)
+      #   follow_every: 2s              # Poll interval while growing. (needs `growing`)
+
+tui:
+  components:
+    services:
+      type: table
+      title: Services
+      source: services
+      columns:
+        - {title: Name,   value: name}
+        - {title: Status, value: status}
+
+  screen:
+    layout:
+      component: services

@@ -1,0 +1,37 @@
+app:
+  title: __TITLE__
+
+data:
+  sources:
+    services:
+      # The input's value reaches this source as ${params.q}.
+      type: exec
+      parameters:
+        q: {type: string, default: ""}
+      command:
+        - sh
+        - -c
+        - |
+          printf 'api\nworker\nweb\ncron\n' | grep -i -- "${params.q}" \
+            | awk 'BEGIN{printf "["} {printf "%s{\"name\":\"%s\"}", (NR>1?",":""), $1} END{print "]"}'
+
+tui:
+  components:
+    search:
+      type: input
+      title: Search
+      # @fields
+    services:
+      type: table
+      title: Services
+      source: services
+      on_input:
+        bind: {q: "${input.search}"}
+      columns:
+        - {title: Name, value: name}
+
+  screen:
+    layout:
+      vstack:
+        - {fixed: 3, component: search}
+        - {component: services}

@@ -1,0 +1,19 @@
+app:
+  title: __TITLE__
+
+tui:
+  components:
+    log:
+      type: logview
+      title: app.log
+      lines:
+        - "08:00:01 INFO  app starting up"
+        - "08:00:02 INFO  connected to the database"
+        - "08:02:31 WARN  slow query 312ms"
+        - "08:03:00 ERROR panic: nil pointer dereference"
+        - "08:04:05 INFO  reconnected"
+      # @fields
+
+  screen:
+    layout:
+      component: log

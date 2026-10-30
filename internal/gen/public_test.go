@@ -2,10 +2,10 @@ package gen
 
 import (
 	"context"
-	"regexp"
-	"strconv"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"

@@ -83,10 +83,10 @@ gen:
 	}
 	out := string(res.Config)
 	for _, want := range []string{
-		"stuff:\n      type: http",             // gen.name
-		"type: menu",                           // gen.layout
-		"label: Owners, screen: owners",        // listed before things
-		"group: stock, label: Inventory",       // title and group
+		"stuff:\n      type: http",       // gen.name
+		"type: menu",                     // gen.layout
+		"label: Owners, screen: owners",  // listed before things
+		"group: stock, label: Inventory", // title and group
 		"- {title: Name, value: name, bold: true, flex: 1}\n        - {title: Size, value: size, align: right}\n        - {title: Id, value: id, hidden: true}\n        # More fields from the schema; uncomment one to add it:\n        # - {title: Status", // columns, the bound id hidden, the rest by rank
 		"title: Owned",
 		"confirm: 'Really create one?'",

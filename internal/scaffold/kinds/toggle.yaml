@@ -1,0 +1,39 @@
+app:
+  title: __TITLE__
+
+data:
+  sources:
+    services:
+      # The toggle's value reaches this source as ${params.stopped}.
+      type: exec
+      parameters:
+        stopped: {type: bool, default: "false"}
+      command:
+        - sh
+        - -c
+        - |
+          printf 'api running\nweb running\ncron stopped\n' \
+            | { if [ "${params.stopped}" = true ]; then cat; else grep -v stopped; fi; } \
+            | awk 'BEGIN{printf "["} {printf "%s{\"name\":\"%s\",\"status\":\"%s\"}", (NR>1?",":""), $1, $2} END{print "]"}'
+
+tui:
+  components:
+    stopped:
+      type: toggle
+      title: Stopped services
+      # @fields
+    services:
+      type: table
+      title: Services
+      source: services
+      on_input:
+        bind: {stopped: "${input.stopped}"}
+      columns:
+        - {title: Name,   value: name}
+        - {title: Status, value: status}
+
+  screen:
+    layout:
+      vstack:
+        - {fixed: 3, component: stopped}
+        - {component: services}

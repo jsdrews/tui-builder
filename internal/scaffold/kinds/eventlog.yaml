@@ -1,0 +1,37 @@
+app:
+  title: __TITLE__
+
+data:
+  sources:
+    events:
+      # An eventlog reads a window: one page of a bigger set. This command
+      # prints the page the window asks for, out of 500 events.
+      type: exec
+      command:
+        - sh
+        - -c
+        - |
+          awk -v off="${window.offset}" -v lim="${window.limit}" 'BEGIN {
+            out = ""
+            for (i = off; i < off + lim && i < 500; i++)
+              out = out (out == "" ? "" : ",") sprintf("{\"id\":%d,\"at\":\"10:%02d:%02d\",\"text\":\"event %d\"}", i, int(i / 60) % 60, i % 60, i)
+            printf "{\"total\":500,\"items\":[%s]}", out
+          }'
+      root: items
+      window:
+        page_size: 100
+        total_path: total
+
+tui:
+  components:
+    events:
+      type: eventlog
+      title: Events
+      source: events
+      key: id
+      text: text
+      # @fields
+
+  screen:
+    layout:
+      component: events

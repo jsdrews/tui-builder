@@ -43,17 +43,17 @@ type genHints struct {
 
 // opHints change what one operation generates.
 type opHints struct {
-	Title      string     `yaml:"title"`
-	Group      string     `yaml:"group"`
-	Hide       bool       `yaml:"hide"`
-	Skip       bool       `yaml:"skip"`
-	Root       string     `yaml:"root"`
-	MaxPages   int        `yaml:"max_pages"`
-	Columns    []string   `yaml:"columns"`
-	Window     yaml.Node  `yaml:"window"`
-	SortRefuse []string   `yaml:"sort_refuse"`
-	Anchored   yaml.Node  `yaml:"anchored"`
-	Confirm    yaml.Node  `yaml:"confirm"`
+	Title      string    `yaml:"title"`
+	Group      string    `yaml:"group"`
+	Hide       bool      `yaml:"hide"`
+	Skip       bool      `yaml:"skip"`
+	Root       string    `yaml:"root"`
+	MaxPages   int       `yaml:"max_pages"`
+	Columns    []string  `yaml:"columns"`
+	Window     yaml.Node `yaml:"window"`
+	SortRefuse []string  `yaml:"sort_refuse"`
+	Anchored   yaml.Node `yaml:"anchored"`
+	Confirm    yaml.Node `yaml:"confirm"`
 	// key is how the file named it; op is the operation it resolved to.
 	key  string
 	op   op
