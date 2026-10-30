@@ -1,0 +1,5 @@
+skipped POST /jobs/{job_id}/logs: a multipart body (a file upload), which gen doesn't send
+skipped DELETE /jobs/{job_id}/tags/{tag}: needs a second path parameter, and a row fills only one: add it in overrides
+skipped PUT /jobs/{job_id}/schedule: `cron` is an object, which an input can't fill: add it in overrides
+skipped POST /login: no list to attach it to
+2 screens, 2 sources, 5 actions; skipped 4 operations

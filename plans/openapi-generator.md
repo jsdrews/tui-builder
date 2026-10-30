@@ -522,32 +522,133 @@ package both use, and the other reuses it.
    screens with `auto` inspectors, so the output has something to show
    (a spec with none exits 1 until PR 2). The golden harness with
    `-update`.
+   *As built:* PR 1 also writes the basic layout (one screen; two to
+   five as tabs; six or more as a menu grouped by tag, in the spec's
+   `tags:` order), since several singletons need one; PR 3 adds
+   `--layout`, the title rules, orphan sub-lists and the huge-spec hints.
+   Until overrides land (PR 7) the header says to change the flags and
+   regenerate. Only the final skip reasons are reported (non-JSON,
+   header or cookie parameters, deprecated, webhooks); lists, details and
+   writes are left silently for the PRs that map them. Webhooks aren't
+   listed when `--tag` / `--operation` narrow. When a requirement names
+   several schemes, every env var is named for its scheme
+   (`KEYED_APP_ID_API_KEY`). `--quiet` keeps warnings. Flags that shape
+   the output are registered by `internal/gen` itself, so the goldens
+   parse the same flags as the CLI.
 2. **Lists, details and sub-lists** (section 4): list detection and
    `root:`, detail pairing and the `enter` push, sub-lists pushed from
    the parent row, startup prompts for required query params, skip
    reasons, screen names. One-request sources and plain columns (every
    scalar property, schema order) until PRs 4 and 5. The e2e test
    starts here: list, detail.
+   *As built:* a list of strings is one column with `value: "."` (the row
+   itself, which `config.Load` accepts where `""` isn't; pinned by a
+   datasource test and documented). A detail's parameter also matches the
+   row's property named like the parameter less `<singular>_`
+   (`report_slug` → `slug`), and a list of strings fills it with the row.
+   A second detail of one list goes in the action menu only. Sub-list
+   keys are action-menu shortcuts, which is how the runtime treats every
+   key but `enter`; they skip the shell's, the menu's and a table's keys
+   and `n` / `e` / `d`. An object under an item (`/reports/{slug}/raw`)
+   is skipped as neither a list nor a detail. A detail or sub-list whose
+   list isn't generated (absent, or excluded by `--tag`) is skipped until
+   PR 3's orphan rule. Properties sort by where their key is written
+   (a `$ref`'s own origin), ties by name, so output is the same every run.
 3. **Navigation** (section 5): the 1 / tabs / menu layout and
    `--layout`; menu items and groups from tags; titles; orphan
    sub-lists; huge-spec hints; `action_groups`. The public-spec
    assertions (Petstore, GitHub, the mid-size one) land here, since this
    is where scale shows.
+   *As built:* labels two top-level screens share (GitHub has three
+   "Issues") become each screen's name in words, then its method and
+   path, since tab labels must be unique. A spec with no tags gets an
+   `--operation` hint instead of `--tag`. A list whose rows have no plain
+   field is skipped with a reason rather than failing the run (Stripe has
+   one). `app.action_groups` waits for PR 6: nothing writes yet, so no
+   screen has both groups. The large public specs are pinned to a commit
+   and fetched by `go generate ./internal/gen` into a git-ignored
+   `testdata/public/.cache/`; Petstore is vendored. On this machine
+   GitHub's (1,254 operations) generates in about 2.3 s and Stripe's in
+   about 1.4 s.
 4. **Windows** (section 6): window, walk or one request; paging, sort,
    search, filter and range recognition; `distinct`; `filterable`.
    E2e: paging, sort, the refused sort.
+   *As built:* walks also cover a cursor sent back in `cursor`,
+   `page_token`, `pageToken` or `after`, Stripe's `starting_after` +
+   `has_more` (`cursor_path: last:id`), a `links.next` body field, and
+   page or offset with no page-size parameter. `max_pages: 20` is written
+   on every walk so it can be found. Notes many lists share collapse to
+   one line ("20 lists (…): the response has no total …"). On a window,
+   columns carry no `sortable:` at all (`sort_fields` decides) and enum
+   columns get `distinct:`. The end-to-end test pages the fixture past
+   100 rows (`G` asks for page 2), sorts by name on the server, sees the
+   refused `status` sort revert with "can't sort by Status", sorts by
+   size next, and filters `status:failed` as `?status=failed`. GitHub's
+   spec gives 30 windows and 90 walks.
 5. **Columns and style** (section 7): ranking with the long-text slot,
    the 8 cap and commented-out rest, the bound column, titles,
    sort/align, colour rules, widths, the detail inspector's rules,
    `mark_key`.
+   *As built:* uses `internal/columns` (Pick, Styles, StatusRules)
+   with schema evidence, as `add exec` uses it with a sample. The
+   identity prefers a name-like field over the id a detail binds, which
+   is what the fixture expectation implies (Name bold, Id among the
+   numbers); with none, the bound id (`slug`) is it. Booleans rank as
+   states. Nested fields are titled by their last segment unless two
+   clash, so the fixture's labels are "Team" and "Env". `mark_key`
+   comes with `markable: true`, which the runtime requires. The
+   commented-out rest is written through the same placeholder lines as
+   `app.env`'s `from:` examples. The fixture's things table is exactly
+   the plan's list, checked by a test, and the end-to-end sort now steps
+   name → status (refused) → created at → size.
 6. **Actions** (section 8): collection and item actions, inputs and
    their workarounds, edits, confirm, names and keys, messages, `multi`,
    skips, `--read-only`. E2e: create / edit / delete.
+   *As built:* integer fields are `type: int` inputs (the runtime has
+   int; a JSON body token keeps the input's type, so `owner_id` goes out
+   as `2`); only non-integer numbers are typed as text. A select can't
+   show a placeholder, so an enum's or bool's spec default goes in its
+   label ("Status (default: pending)"). Optional enums get a blank first
+   option so nothing is sent unless picked. Inputs carry `order:` so the
+   form follows the schema (forms otherwise sort alphabetically). Writes
+   below an item (`POST /owners/{id}/things`) are item actions on the
+   parent's row; collection writes on an orphan list read its startup
+   parameter. A preset whose title-derived name equals a source's
+   (`Jobs`, `/jobs`) gets an `_api` suffix; presets and sources share a
+   namespace. The end-to-end test creates, edits (sending only
+   `status`) and deletes (after the confirm) against the stub; the
+   harness now skips cursor blinks, which had made each form cost 70 s.
 7. **Overrides** (section 9): the file, `gen:` hints, the merge patch
    with keyed lists and `$drop`, precedence and conflict errors, drift
    and `--prune-overrides`, `--init-overrides`. `filter_except` derived
    when `filter_ops` is set. E2e: the `__icontains` filter, the
    refused sort made unsortable.
+
+   *As built (PR 7):* the config fragment uses the config's own shape
+   (`app`, `data`, `actions`, `tui`, with presets and sources under
+   `data:`), not top-level `presets:` / `sources:`. Global `gen:` keys
+   mirror the flags by name (`tag`, `exclude_tag`, `operation`,
+   `exclude_operation`, `read_only`, `include_deprecated`,
+   `prompt_server`, `timeout`); a flag on the command line wins.
+   `--init-overrides FILE` writes only the starter (with `-o` it's a
+   usage error). `anchored:` takes the window's anchored fields
+   (`cursor`, `older`, `newer`, `anchor`), drops the paging, total and
+   sort fields, and makes the table a span table keyed by the row's id.
+   A `columns:` hint keeps the rest commented out, in rank order, and
+   the bound id still goes in hidden. Hints that don't fit what an
+   operation became are errors; hints for an operation nothing was
+   generated from are warnings. The end-to-end test runs the fixture
+   with the overrides golden's file: `name:thing-01` goes out as
+   `?name__icontains=thing-01`, and the sort cycle skips `status`.
+   New operations: a footer comment at the end of the generated file
+   lists every operation in the spec (all of it, so a different `--tag`
+   doesn't make operations look new), wrapped as comma-separated lines;
+   at the end rather than in the header, so a big spec's list doesn't
+   push the config down. When `-o`
+   replaces a config, gen reads that list first and reports `new in the
+   spec:` and `gone from the spec:` lines; a file with no list (not one
+   gen wrote) reports nothing. GitHub's spec makes the list about 1,100
+   lines.
 
 ## Follow-ups
 

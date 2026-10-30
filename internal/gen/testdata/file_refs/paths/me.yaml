@@ -1,0 +1,6 @@
+get:
+  summary: Me
+  responses:
+    "200":
+      description: OK
+      content: {application/json: {schema: {$ref: "../components/user.yaml"}}}

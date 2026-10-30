@@ -57,4 +57,5 @@ section in the plan gets trimmed or deleted.
   columns, actions, and an overrides file for what the spec can't say,
   tested against the `internal/fixture/things` stub. Decided on
   [Map: OpenAPI → tui-builder config generator](https://github.com/jsdrews/tui-builder/issues/113);
-  seven PRs after the scaffolding plan's PR 1, not started.
+  seven PRs after the scaffolding plan's PR 1; all seven PRs
+  built and uncommitted.

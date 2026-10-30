@@ -1,0 +1,50 @@
+openapi: 3.0.3
+info: {title: Edges, version: "1"}
+servers: [{url: "https://edges.example.com"}]
+paths:
+  /tags:
+    get:
+      summary: Tags
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: array, items: {type: string}}}}}}
+  /mixed:
+    get:
+      summary: Two lists, neither named
+      responses:
+        "200":
+          description: OK
+          content: {application/json: {schema: {type: object, properties: {hosts: {type: array, items: {type: object, properties: {h: {type: string}}}}, checks: {type: array, items: {type: object, properties: {c: {type: string}}}}}}}}
+  /reports:
+    get:
+      summary: Reports
+      parameters:
+        - {name: kind, in: query, required: true, schema: {type: string, enum: [daily, weekly]}, description: Which report.}
+        - {name: limit, in: query, required: true, schema: {type: integer}}
+        - {name: since, in: query, schema: {type: string}}
+      responses:
+        "200":
+          description: OK
+          content: {application/json: {schema: {type: object, properties: {data: {type: array, items: {type: object, properties: {slug: {type: string}, title: {type: string}}}}, other: {type: array, items: {type: object, properties: {x: {type: string}}}}}}}}
+  /reports/{report_slug}:
+    get:
+      summary: Report
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {slug: {type: string}}}}}}}
+  /reports/{report_slug}/raw:
+    get:
+      summary: Raw report
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {raw: {type: string}}}}}}}
+  /count:
+    get:
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: integer}}}}}
+  /ping:
+    get:
+      responses: {"204": {description: No content}}
+  /orgs/{org}/members:
+    get:
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: array, items: {type: object, properties: {login: {type: string}}}}}}}}
+  /orgs/{org}/repos/{repo}:
+    get:
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {name: {type: string}}}}}}}
+  /tags/{tag}:
+    get:
+      summary: Tag
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {name: {type: string}}}}}}}

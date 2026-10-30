@@ -42,6 +42,7 @@ func usageArgs(check cobra.PositionalArgs) cobra.PositionalArgs {
 // execute runs the command line and returns the exit code. Cobra prints
 // nothing on failure; the error goes to stderr here, once.
 func execute(args []string, stdout, stderr io.Writer) int {
+	commandLine = args
 	root := newRoot()
 	root.SetArgs(args)
 	root.SetOut(stdout)
@@ -97,7 +98,7 @@ file called "init" as ./init.`,
 	// root that takes a file never reaches.
 	root.SuggestionsMinimumDistance = 2
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError{err} })
-	root.AddCommand(newInitCmd(), newVersionCmd(), newAddCmd())
+	root.AddCommand(newInitCmd(), newGenCmd(), newVersionCmd(), newAddCmd())
 	return root
 }
 

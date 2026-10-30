@@ -24,3 +24,14 @@ func TestStringJoinsScalarLists(t *testing.T) {
 		}
 	}
 }
+
+// "." is the item itself: a table column over a list of strings reads
+// it, and gen writes it.
+func TestDotIsTheItem(t *testing.T) {
+	if got := String("web", "."); got != "web" {
+		t.Errorf(`String("web", ".") = %q`, got)
+	}
+	if got := Get(map[string]any{"a": 1}, "."); got.(map[string]any)["a"] != 1 {
+		t.Errorf("Get(obj, \".\") = %v", got)
+	}
+}

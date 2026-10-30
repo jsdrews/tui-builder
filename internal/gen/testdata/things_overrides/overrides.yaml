@@ -1,0 +1,19 @@
+gen:
+  operations:
+    "GET /things":
+      window:
+        search_param: name__icontains
+        filter_ops: {contains: "${column.value}__icontains"}
+      sort_refuse: [status]
+    list_owners_owners_get:
+      title: People
+    "DELETE /things/{thing_id}":
+      confirm: false
+app:
+  env:
+    - {name: THINGS_API_TOKEN, from: {command: [pass, show, things-api/token]}}
+tui:
+  components:
+    things:
+      columns:
+        - {title: Description, $drop: true}

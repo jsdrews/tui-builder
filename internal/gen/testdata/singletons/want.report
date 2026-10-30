@@ -1,0 +1,5 @@
+skipped GET /report.csv: answers text/csv, not JSON
+skipped GET /legacy: deprecated (keep it with --include-deprecated)
+skipped GET /tenant: needs the header parameter "X-Tenant", which gen can't fill
+skipped webhook incident: the API calls it, not the other way round
+4 screens, 4 sources; skipped 4 operations

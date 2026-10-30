@@ -1,0 +1,1 @@
+the server URL "/api/v3" is relative, and the spec wasn't fetched from a URL to resolve it against: pass --base-url
