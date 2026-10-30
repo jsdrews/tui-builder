@@ -1,0 +1,6 @@
+skipped GET /mixed: the response has several lists and none is named entries, items, data or results: set root in overrides
+skipped GET /reports/{report_slug}/raw: one object under an item, neither a list nor the item itself: gen pushes lists and details
+skipped GET /count: answers a single value, not an object or a list
+skipped GET /ping: no response schema
+skipped GET /orgs/{org}/repos/{repo}: `{org}` and `{repo}` need a list to pick each from, and a push can carry only one: add it in overrides
+5 screens, 5 sources; skipped 5 operations

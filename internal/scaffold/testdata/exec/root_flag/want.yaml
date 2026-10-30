@@ -1,0 +1,30 @@
+# Written by `tui-builder add exec -- some-tool report`.
+app:
+  title: Report
+data:
+  sources:
+    report:
+      type: exec
+      command: [some-tool, report]
+      root: checks
+tui:
+  components:
+    report:
+      type: table
+      title: Report
+      source: report
+      filterable: true
+      markable: true
+      mark_key: name
+      columns:
+        - {title: Name, value: name, sortable: true, bold: true, flex: 1}
+        - title: Ok
+          value: ok
+          sortable: true
+          max_width: 20
+          color_rules:
+            - {when: "true", color: 'theme:success'}
+            - {when: "false", color: 'theme:error'}
+  screen:
+    layout:
+      component: report

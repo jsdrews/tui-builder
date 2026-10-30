@@ -1,0 +1,35 @@
+# This one reads the things fixture API's event stream. In a clone of
+# tui-builder, start it in another terminal first:
+#   go run ./internal/fixture/things/thingsd
+# Each frame is one thing's new status; the table updates that row.
+app:
+  title: __TITLE__
+  env:
+    - {name: THINGS_EVENTS_URL, default: "ws://localhost:8765/events"}
+    - {name: THINGS_API_TOKEN, default: fixture-token}
+
+data:
+  sources:
+    events:
+      type: websocket
+      url: ${env.THINGS_EVENTS_URL}
+      auth:
+        bearer: ${env.THINGS_API_TOKEN}
+        # @fields auth
+      # @fields
+
+tui:
+  components:
+    events:
+      type: table
+      title: Thing statuses
+      source: events
+      row_key: name
+      columns:
+        - {title: Name,   value: name}
+        - {title: Status, value: status}
+        - {title: At,     value: at}
+
+  screen:
+    layout:
+      component: events

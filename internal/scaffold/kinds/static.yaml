@@ -1,0 +1,28 @@
+app:
+  title: __TITLE__
+
+data:
+  sources:
+    services:
+      # Data written in the config: for fixtures, lookup tables and
+      # trying a layout before pointing it at a real source.
+      type: static
+      data:
+        - {name: api,  status: running}
+        - {name: web,  status: pending}
+        - {name: cron, status: stopped}
+      # @fields
+
+tui:
+  components:
+    services:
+      type: table
+      title: Services
+      source: services
+      columns:
+        - {title: Name,   value: name}
+        - {title: Status, value: status}
+
+  screen:
+    layout:
+      component: services

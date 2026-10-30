@@ -1,0 +1,26 @@
+app:
+  title: __TITLE__
+
+data:
+  sources:
+    people:
+      type: static
+      data:
+        - {name: Ada,   team: platform}
+        - {name: Grace, team: platform}
+        - {name: Linus, team: kernel}
+        - {name: Ken,   team: kernel}
+
+tui:
+  components:
+    people:
+      type: tree
+      title: People
+      source: people
+      group_by: team
+      label: name
+      # @fields
+
+  screen:
+    layout:
+      component: people

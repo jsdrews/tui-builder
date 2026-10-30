@@ -393,6 +393,9 @@ a source (`kubectl get -o json`, `gh api`, scripts); with
 `follow: true`, any command that streams lines (`kubectl logs -f`,
 `tail -f`).
 
+A command that prints one JSON value per line (NDJSON, as from
+`docker ps --format json` or `jq -c`) reads as the list of those values.
+
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
 | `command` | list of template | — | required | The argv. The first element is looked up in `$PATH`. Not run through a shell: use `[sh, -c, "…"]` when you want one. |
@@ -631,7 +634,7 @@ Supported on `http` (the request goes in the query string) and `exec`
 | `page_size` | int | `100` | — | Rows per request. |
 | `prefetch` | int | `0` | — | Extra pages fetched beyond the screen. `1` hides the placeholder flash at page boundaries, for one extra request. |
 | `total_path` | [locator](#locators) | — | required, except with `cursor` | Where the total match count is: a dot-path into the raw response (before `root:`), or a header such as `header:X-Total-Count`. Without a total the table never scrolls past its first window, so it's required; a response that lacks it posts one notice. |
-| `filters` | map of string, or of map | — | a map value: http only | Maps a column **title** to where a scoped `title:value` filter term goes: a query parameter on http, a `${window.filters.NAME}` token name on exec. On http a value can instead be a map of [comparisons](#filter-rules) to params, `{gte: year_from, lte: year_to}`. An entry here replaces `filter_ops` for that column. Terms on unmapped columns are treated as bare terms. Without `search_param` (or `${window.search}` on exec), bare terms aren't sent: the table says so and its placeholder shows the column syntax. |
+| `filters` | map of string, or of map | — | exec, http; a map value: http only | Maps a column **title** to where a scoped `title:value` filter term goes: a query parameter on http, a `${window.filters.NAME}` token name on exec. On http a value can instead be a map of [comparisons](#filter-rules) to params, `{gte: year_from, lte: year_to}`. An entry here replaces `filter_ops` for that column. Terms on unmapped columns are treated as bare terms. Without `search_param` (or `${window.search}` on exec), bare terms aren't sent: the table says so and its placeholder shows the column syntax. |
 | `filter_ops` | map of string | — | http only | One [filter rule](#filter-rules) for every column instead of a `filters:` entry each: a param template per comparison, each using `${column.value}`. |
 | `filter_except` | list of string | — | needs `filter_ops` | Column titles `filter_ops` leaves alone: numbers, ids, enums the API can't match on. |
 | `offset_param` | string | — | http: this or `page_param`; not on exec | Query parameter for the first row wanted (`offset`, `_start`, `skip`). |

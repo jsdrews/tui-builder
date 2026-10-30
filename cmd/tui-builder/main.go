@@ -2,6 +2,9 @@
 //
 //	tui-builder <config.yaml>
 //
+// It also has subcommands (see cli.go); a subcommand's name wins over a
+// config file of the same name.
+//
 // The config schema is described in internal/config. See examples/ for
 // sample configurations, or run `example-launcher` for a TUI that lists
 // every example and lets you pick one.
@@ -35,26 +38,15 @@ import (
 	cfg "github.com/jsdrews/tui-builder/internal/config"
 	"github.com/jsdrews/tui-builder/internal/datasource"
 	tqscreen "github.com/jsdrews/tui-builder/internal/screen"
-	"github.com/jsdrews/tui-builder/internal/version"
 )
 
 func main() {
-	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	os.Exit(execute(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func run() error {
-	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: tui-builder <config.yaml>")
-	}
-	if os.Args[1] == "--version" || os.Args[1] == "-v" {
-		fmt.Println("tui-builder version", version.String())
-		return nil
-	}
-
-	c, err := cfg.Load(os.Args[1])
+// runConfig is the run form: load the config at path and show it.
+func runConfig(path string) error {
+	c, err := cfg.Load(path)
 	if err != nil {
 		return err
 	}

@@ -1,0 +1,37 @@
+# Written by `tui-builder add exec -- kubectl get pods -o json`.
+app:
+  title: Pods
+data:
+  sources:
+    pods:
+      type: exec
+      command: [kubectl, get, pods, -o, json]
+      root: items
+tui:
+  components:
+    pods:
+      type: table
+      title: Pods
+      source: pods
+      filterable: true
+      markable: true
+      mark_key: metadata.uid
+      columns:
+        - {title: Name, value: metadata.name, sortable: true, bold: true, flex: 1}
+        - title: Phase
+          value: status.phase
+          sortable: true
+          max_width: 20
+          color_rules:
+            - {when: Running, color: 'theme:success'}
+            - {when: Pending, color: 'theme:warning'}
+            - {when: ~(fail|error|crash|backoff|unhealthy|fatal|critical|denied|reject|oom|evict), color: 'theme:error'}
+            - {when: ~(pend|wait|progress|degrad|unknown|warn|terminat|queue|retry), color: 'theme:warning'}
+        - {title: Creation timestamp, value: metadata.creationTimestamp, sortable: true, align: right}
+        - {title: Namespace, value: metadata.namespace, sortable: true}
+        - {title: Uid, value: metadata.uid, sortable: true}
+        - {title: Node name, value: spec.nodeName, sortable: true}
+        - {title: Pod ip, value: status.podIP, sortable: true}
+  screen:
+    layout:
+      component: pods

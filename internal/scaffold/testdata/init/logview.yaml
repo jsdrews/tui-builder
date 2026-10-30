@@ -1,0 +1,68 @@
+# An example logview from `tui-builder init logview`. Run it with
+#   tui-builder <this file>
+# Every field a logview takes is below, commented out: uncomment a line to
+# use it. A line shows the field's default where it has one; a block
+# shows every field it takes, so keep the ones you need.
+# https://jsdrews.github.io/tui-builder/reference/components/#logview
+
+app:
+  title: demo
+
+tui:
+  components:
+    log:
+      type: logview
+      title: app.log
+      lines:
+        - "08:00:01 INFO  app starting up"
+        - "08:00:02 INFO  connected to the database"
+        - "08:02:31 WARN  slow query 312ms"
+        - "08:03:00 ERROR panic: nil pointer dereference"
+        - "08:04:05 INFO  reconnected"
+
+      # Common fields: https://jsdrews.github.io/tui-builder/reference/components/#common-fields
+      # source: ""                      # The `data.sources` entry that populates this component.
+      #                                 # Instead of lines.
+      # colors:                         # Per-component color overrides.
+      #   border_active: ""             # Border color when focused.
+      #   border_inactive: ""           # Border color when unfocused.
+      #   spinner: ""                   # The loading spinner.
+      #   match: ""                     # Search-match highlight.
+      #   current_line_bg: ""           # Background of the cursor line.
+      #   gutter: ""                    # The line-number or position gutter.
+      # color_rules:                    # Colors each item or line by its value; on an `auto: true`
+      #                                 # inspector, each leaf value, scoped by the rule's `path:`.
+      #   - color: red                  # See color values. (required)
+      #     when: stopped               # Exact text (case-insensitive), `~regex`
+      #                                 # (case-insensitive), or a numeric comparison: `> 5`, `<=
+      #                                 # 10`, `== 0`, `!= 0`, with an optional K/M/B/G/T suffix on
+      #                                 # the number.
+      #     path: ""                    # The fields the rule applies to: a dot-path from the record
+      #                                 # root (`status`, `spec.replicas`, `items.0.state`), where
+      #                                 # `*` matches any one key or index (`items.*.state`). (an
+      #                                 # `auto: true` inspector's own `color_rules`)
+      # searchable: false               # `/` opens a search that highlights matches; `n` / `N` move
+      #                                 # between them.
+      # filter_placeholder: ""          # Hint shown inside the empty filter or search input.
+      # initial_query: ""               # Starts with this search or filter query applied.
+      # on_cursor:                      # Refetches this component's source as another component's
+      #                                 # cursor moves.
+      #   source: other_table           # The driver: a table, list or tree on the same screen.
+      #                                 # (required)
+      #   bind: {}                      # Maps this component's source parameters to templates over
+      #                                 # the driver's focused row: `${cursor}`, `${cursor.N}`,
+      #                                 # `${cursor.Title}`, `${cursor.path}`, plus `${env.*}`.
+      # on_input:                       # Refetches this component's source when an input or toggle
+      #                                 # on the screen commits.
+      #   bind: {q: "${input.search}"}  # Maps source parameters to templates over `${input.NAME}`,
+      #                                 # plus `${env.*}`. (required)
+
+      # Logview fields: https://jsdrews.github.io/tui-builder/reference/components/#logview
+      # max_lines: 10000                # Lines kept before the oldest drop.
+      # filter_mode: false              # Starts in filter mode: the search hides non-matching lines
+      #                                 # instead of highlighting matches. (`searchable`)
+      # line_numbers: false             # Numbers lines in a gutter, from the start of what's held.
+
+  screen:
+    layout:
+      component: log

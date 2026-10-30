@@ -1,0 +1,64 @@
+# An example menu from `tui-builder init menu`. Run it with
+#   tui-builder <this file>
+# Every field a menu takes is below, commented out: uncomment a line to
+# use it. A line shows the field's default where it has one; a block
+# shows every field it takes, so keep the ones you need.
+# https://jsdrews.github.io/tui-builder/reference/components/#menu
+
+app:
+  title: demo
+
+data:
+  sources:
+    services:
+      type: static
+      data:
+        - {name: api, status: running}
+        - {name: web, status: pending}
+
+tui:
+  components:
+    home:
+      type: menu
+      title: Sections
+      items:
+        - {label: Services, screen: services}
+        - {label: About,    screen: about}
+
+        # Every menu item field: https://jsdrews.github.io/tui-builder/reference/components/#menu
+        # - label: Label                # The item's text. (required)
+        #   screen: services            # The screen in `tui.screens` the item opens. (required)
+        #   group: ""                   # The heading the item sits under.
+        #   description: ""             # Drawn dimmed beside the label, cut off when space runs
+        #                               # out.
+        #   bind: {}                    # Fills the destination's source `parameters:`, as a push
+        #                               # binding's `bind:` does.
+
+      # Common fields: https://jsdrews.github.io/tui-builder/reference/components/#common-fields
+      # colors:                         # Per-component color overrides.
+      #   border_active: ""             # Border color when focused.
+      #   border_inactive: ""           # Border color when unfocused.
+      #   spinner: ""                   # The loading spinner.
+    services:
+      type: table
+      title: Services
+      source: services
+      columns:
+        - {title: Name,   value: name}
+        - {title: Status, value: status}
+    about:
+      type: textview
+      title: About
+      content: Opened from the menu; esc goes back.
+
+  initial: home
+  screens:
+    home:
+      layout:
+        component: home
+    services:
+      layout:
+        component: services
+    about:
+      layout:
+        component: about

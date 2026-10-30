@@ -1,0 +1,18 @@
+# Written by `tui-builder add exec -- gh api user`.
+app:
+  title: User
+data:
+  sources:
+    user:
+      type: exec
+      command: [gh, api, user]
+tui:
+  components:
+    user:
+      type: inspector
+      title: User
+      source: user
+      auto: true
+  screen:
+    layout:
+      component: user

@@ -1,0 +1,83 @@
+# An example tree from `tui-builder init tree`. Run it with
+#   tui-builder <this file>
+# Every field a tree takes is below, commented out: uncomment a line to
+# use it. A line shows the field's default where it has one; a block
+# shows every field it takes, so keep the ones you need.
+# https://jsdrews.github.io/tui-builder/reference/components/#tree
+
+app:
+  title: demo
+
+data:
+  sources:
+    people:
+      type: static
+      data:
+        - {name: Ada,   team: platform}
+        - {name: Grace, team: platform}
+        - {name: Linus, team: kernel}
+        - {name: Ken,   team: kernel}
+
+tui:
+  components:
+    people:
+      type: tree
+      title: People
+      source: people
+      group_by: team
+      label: name
+
+      # Common fields: https://jsdrews.github.io/tui-builder/reference/components/#common-fields
+      # colors:                         # Per-component color overrides.
+      #   border_active: ""             # Border color when focused.
+      #   border_inactive: ""           # Border color when unfocused.
+      #   spinner: ""                   # The loading spinner.
+      #   match: ""                     # Search-match highlight.
+      #   current_line_bg: ""           # Background of the cursor line.
+      #   mark: ""                      # The ✓ on a marked row that isn't under the cursor.
+      # searchable: false               # `/` opens a search that highlights matches; `n` / `N` move
+      #                                 # between them.
+      # filter_placeholder: ""          # Hint shown inside the empty filter or search input.
+      # initial_query: ""               # Starts with this search or filter query applied.
+      # initial_cursor: 0               # Row the cursor starts on.
+      # loading_label: ""               # Shown beside the spinner while the component has no data
+      #                                 # yet, e.g. `loading pods…`.
+      # markable: false                 # Multi-select: adds a mark gutter and binds `x` (toggle),
+      #                                 # `X` (extend from the last mark), `A` (all), `D` (none).
+      # activity:                       # Shows a spinner on rows the data says are being worked on.
+      #   status: status                # The field that says what a row is doing. (required)
+      #   busy: [pending]               # The `status` values that mean busy, matched exactly. (not
+      #                                 # with `busy_when`)
+      #   busy_when: ""                 # An expression over the row's item, true while it's busy,
+      #                                 # for when busy-ness isn't one field's value:
+      #                                 # `status.observedGeneration < generation`. (not with
+      #                                 # `busy`)
+      #   column: ""                    # The column the spinner draws in. (table)
+      #   revision: ""                  # A value that moves when work on the row finishes, e.g.
+      #                                 # `metadata.resourceVersion`.
+      # on_cursor:                      # Refetches this component's source as another component's
+      #                                 # cursor moves.
+      #   source: other_table           # The driver: a table, list or tree on the same screen.
+      #                                 # (required)
+      #   bind: {}                      # Maps this component's source parameters to templates over
+      #                                 # the driver's focused row: `${cursor}`, `${cursor.N}`,
+      #                                 # `${cursor.Title}`, `${cursor.path}`, plus `${env.*}`.
+      # on_input:                       # Refetches this component's source when an input or toggle
+      #                                 # on the screen commits.
+      #   bind: {q: "${input.search}"}  # Maps source parameters to templates over `${input.NAME}`,
+      #                                 # plus `${env.*}`. (required)
+
+      # Tree fields: https://jsdrews.github.io/tui-builder/reference/components/#tree
+      # root: {}                        # The root node: `label` (template) and `children` (a list
+      #                                 # of nodes). (required when static) Instead of source,
+      #                                 # group_by, label.
+      # children: ""                    # Dot-path on each node to its list of child nodes, for
+      #                                 # nested data (filesystem trees, org charts). (source-bound;
+      #                                 # not with `group_by`) Instead of group_by.
+      # root_label: ""                  # Label of the root node. (source-bound)
+      # initial_depth: 0                # Expands every node shallower than this: `0` root only, `1`
+      #                                 # root expanded, `2` one level more.
+
+  screen:
+    layout:
+      component: people

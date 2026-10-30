@@ -1,0 +1,36 @@
+# This one reads the things fixture API. In a clone of tui-builder, start
+# it in another terminal first:
+#   go run ./internal/fixture/things/thingsd
+# Or set THINGS_API_URL and THINGS_API_TOKEN, and change the path and
+# columns, to read another API.
+app:
+  title: __TITLE__
+  env:
+    - {name: THINGS_API_URL, default: "http://localhost:8765"}
+    - {name: THINGS_API_TOKEN, default: fixture-token}
+
+data:
+  sources:
+    things:
+      type: http
+      url: ${env.THINGS_API_URL}/things
+      auth:
+        bearer: ${env.THINGS_API_TOKEN}
+        # @fields auth
+      root: entries
+      # @fields
+
+tui:
+  components:
+    things:
+      type: table
+      title: Things
+      source: things
+      columns:
+        - {title: Name,   value: name}
+        - {title: Status, value: status}
+        - {title: Size,   value: size, align: right}
+
+  screen:
+    layout:
+      component: things

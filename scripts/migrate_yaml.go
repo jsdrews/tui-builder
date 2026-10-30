@@ -9,14 +9,14 @@
 // Per-file transforms:
 //
 //   - For each entry in `data.pipelines:`:
-//     - Identify the operator (from / filter / project / derive / sort /
-//       union / compose / join / cache). `from:` alone → passthrough.
-//     - Lift the operator's sub-fields up onto the entry.
-//     - Add `type: <op>` at the head of the entry.
-//     - Move the entry into `data.sources:`.
+//   - Identify the operator (from / filter / project / derive / sort /
+//     union / compose / join / cache). `from:` alone → passthrough.
+//   - Lift the operator's sub-fields up onto the entry.
+//   - Add `type: <op>` at the head of the entry.
+//   - Move the entry into `data.sources:`.
 //   - For inline `pipe:` stages on any entry:
-//     - Convert `{filter: {where: X}}` → `{type: filter, where: X}` (same
-//       lift + type-prepend).
+//   - Convert `{filter: {where: X}}` → `{type: filter, where: X}` (same
+//     lift + type-prepend).
 //   - For components: rename `pipeline: X` → `source: X`.
 //   - Delete the `data.pipelines:` block entirely.
 //

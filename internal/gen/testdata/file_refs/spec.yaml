@@ -1,0 +1,6 @@
+openapi: 3.0.3
+info: {title: Split, version: "1"}
+servers: [{url: "https://split.example.com"}]
+paths:
+  /me:
+    $ref: "paths/me.yaml"

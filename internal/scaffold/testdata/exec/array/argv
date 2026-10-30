@@ -1,0 +1,4 @@
+docker
+images
+--format
+json

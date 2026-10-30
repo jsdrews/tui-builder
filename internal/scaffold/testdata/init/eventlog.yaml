@@ -1,0 +1,91 @@
+# An example eventlog from `tui-builder init eventlog`. Run it with
+#   tui-builder <this file>
+# Every field a eventlog takes is below, commented out: uncomment a line to
+# use it. A line shows the field's default where it has one; a block
+# shows every field it takes, so keep the ones you need.
+# https://jsdrews.github.io/tui-builder/reference/components/#eventlog
+
+app:
+  title: demo
+
+data:
+  sources:
+    events:
+      # An eventlog reads a window: one page of a bigger set. This command
+      # prints the page the window asks for, out of 500 events.
+      type: exec
+      command:
+        - sh
+        - -c
+        - |
+          awk -v off="${window.offset}" -v lim="${window.limit}" 'BEGIN {
+            out = ""
+            for (i = off; i < off + lim && i < 500; i++)
+              out = out (out == "" ? "" : ",") sprintf("{\"id\":%d,\"at\":\"10:%02d:%02d\",\"text\":\"event %d\"}", i, int(i / 60) % 60, i % 60, i)
+            printf "{\"total\":500,\"items\":[%s]}", out
+          }'
+      root: items
+      window:
+        page_size: 100
+        total_path: total
+
+tui:
+  components:
+    events:
+      type: eventlog
+      title: Events
+      source: events
+      key: id
+      text: text
+
+      # Common fields: https://jsdrews.github.io/tui-builder/reference/components/#common-fields
+      # colors:                         # Per-component color overrides.
+      #   border_active: ""             # Border color when focused.
+      #   border_inactive: ""           # Border color when unfocused.
+      #   spinner: ""                   # The loading spinner.
+      #   selected_fg: ""               # Focused row text.
+      #   selected_bg: ""               # Focused row background.
+      #   cell: ""                      # Ordinary cell text.
+      #   gutter: ""                    # The line-number or position gutter.
+      #   new: ""                       # Positions of items that just loaded.
+      # color_rules:                    # Colors each item or line by its value; on an `auto: true`
+      #                                 # inspector, each leaf value, scoped by the rule's `path:`.
+      #   - color: red                  # See color values. (required)
+      #     when: stopped               # Exact text (case-insensitive), `~regex`
+      #                                 # (case-insensitive), or a numeric comparison: `> 5`, `<=
+      #                                 # 10`, `== 0`, `!= 0`, with an optional K/M/B/G/T suffix on
+      #                                 # the number.
+      #     path: ""                    # The fields the rule applies to: a dot-path from the record
+      #                                 # root (`status`, `spec.replicas`, `items.0.state`), where
+      #                                 # `*` matches any one key or index (`items.*.state`). (an
+      #                                 # `auto: true` inspector's own `color_rules`)
+      # filterable: false               # `/` opens a filter that narrows the rows (`f` on an
+      #                                 # eventlog, where `/` is search).
+      # searchable: false               # `/` opens a search that highlights matches; `n` / `N` move
+      #                                 # between them.
+      # filter_placeholder: ""          # Hint shown inside the empty filter or search input.
+      # on_cursor:                      # Refetches this component's source as another component's
+      #                                 # cursor moves.
+      #   source: other_table           # The driver: a table, list or tree on the same screen.
+      #                                 # (required)
+      #   bind: {}                      # Maps this component's source parameters to templates over
+      #                                 # the driver's focused row: `${cursor}`, `${cursor.N}`,
+      #                                 # `${cursor.Title}`, `${cursor.path}`, plus `${env.*}`.
+      # on_input:                       # Refetches this component's source when an input or toggle
+      #                                 # on the screen commits.
+      #   bind: {q: "${input.search}"}  # Maps source parameters to templates over `${input.NAME}`,
+      #                                 # plus `${env.*}`. (required)
+
+      # Eventlog fields: https://jsdrews.github.io/tui-builder/reference/components/#eventlog
+      # mark: ""                        # Shown as-is in the gutter, normally the server's
+      #                                 # timestamp.
+      # start: oldest                   # Where the view opens once the source isn't growing:
+      #                                 # `oldest` or `newest`. (paged (not Anchored) sources)
+      # max_items: 0                    # Items held at once; the end furthest from the view is
+      #                                 # trimmed.
+      # gutter: true                    # The gutter of positions down the left.
+      # new_for: 2s                     # How long items that just loaded stay marked in the gutter.
+
+  screen:
+    layout:
+      component: events

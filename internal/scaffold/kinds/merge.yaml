@@ -1,0 +1,37 @@
+app:
+  title: __TITLE__
+
+data:
+  sources:
+    eu:
+      type: static
+      data:
+        - {name: api, status: running}
+        - {name: web, status: pending}
+    us:
+      type: static
+      data:
+        - {name: api,  status: running}
+        - {name: cron, status: stopped}
+    services:
+      # Concatenates other sources, tagging each row with the one it came
+      # from (under _meta, by default).
+      type: merge
+      sources: [eu, us]
+      tag_field: region
+      # @fields
+
+tui:
+  components:
+    services:
+      type: table
+      title: Services
+      source: services
+      columns:
+        - {title: Name,   value: name}
+        - {title: Status, value: status}
+        - {title: Region, value: _meta.region}
+
+  screen:
+    layout:
+      component: services

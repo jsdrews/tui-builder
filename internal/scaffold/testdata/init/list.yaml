@@ -1,0 +1,84 @@
+# An example list from `tui-builder init list`. Run it with
+#   tui-builder <this file>
+# Every field a list takes is below, commented out: uncomment a line to
+# use it. A line shows the field's default where it has one; a block
+# shows every field it takes, so keep the ones you need.
+# https://jsdrews.github.io/tui-builder/reference/components/#list
+
+app:
+  title: demo
+
+data:
+  sources:
+    services:
+      type: static
+      data:
+        - {name: api,    status: running}
+        - {name: worker, status: running}
+        - {name: web,    status: pending}
+        - {name: cron,   status: stopped}
+
+tui:
+  components:
+    services:
+      type: list
+      title: Services
+      source: services
+      item: name
+
+      # Common fields: https://jsdrews.github.io/tui-builder/reference/components/#common-fields
+      # colors:                         # Per-component color overrides.
+      #   border_active: ""             # Border color when focused.
+      #   border_inactive: ""           # Border color when unfocused.
+      #   spinner: ""                   # The loading spinner.
+      #   selected: ""                  # The focused item.
+      #   mark: ""                      # The ✓ on a marked row that isn't under the cursor.
+      # color_rules:                    # Colors each item or line by its value; on an `auto: true`
+      #                                 # inspector, each leaf value, scoped by the rule's `path:`.
+      #   - color: red                  # See color values. (required)
+      #     when: stopped               # Exact text (case-insensitive), `~regex`
+      #                                 # (case-insensitive), or a numeric comparison: `> 5`, `<=
+      #                                 # 10`, `== 0`, `!= 0`, with an optional K/M/B/G/T suffix on
+      #                                 # the number.
+      #     path: ""                    # The fields the rule applies to: a dot-path from the record
+      #                                 # root (`status`, `spec.replicas`, `items.0.state`), where
+      #                                 # `*` matches any one key or index (`items.*.state`). (an
+      #                                 # `auto: true` inspector's own `color_rules`)
+      # filterable: false               # `/` opens a filter that narrows the rows (`f` on an
+      #                                 # eventlog, where `/` is search).
+      # filter_placeholder: ""          # Hint shown inside the empty filter or search input.
+      # initial_filter: ""              # Starts with this filter applied.
+      # initial_cursor: 0               # Row the cursor starts on.
+      # loading_label: ""               # Shown beside the spinner while the component has no data
+      #                                 # yet, e.g. `loading pods…`.
+      # markable: false                 # Multi-select: adds a mark gutter and binds `x` (toggle),
+      #                                 # `X` (extend from the last mark), `A` (all), `D` (none).
+      # activity:                       # Shows a spinner on rows the data says are being worked on.
+      #   status: status                # The field that says what a row is doing. (required)
+      #   busy: [pending]               # The `status` values that mean busy, matched exactly. (not
+      #                                 # with `busy_when`)
+      #   busy_when: ""                 # An expression over the row's item, true while it's busy,
+      #                                 # for when busy-ness isn't one field's value:
+      #                                 # `status.observedGeneration < generation`. (not with
+      #                                 # `busy`)
+      #   column: ""                    # The column the spinner draws in. (table)
+      #   revision: ""                  # A value that moves when work on the row finishes, e.g.
+      #                                 # `metadata.resourceVersion`.
+      # on_cursor:                      # Refetches this component's source as another component's
+      #                                 # cursor moves.
+      #   source: other_table           # The driver: a table, list or tree on the same screen.
+      #                                 # (required)
+      #   bind: {}                      # Maps this component's source parameters to templates over
+      #                                 # the driver's focused row: `${cursor}`, `${cursor.N}`,
+      #                                 # `${cursor.Title}`, `${cursor.path}`, plus `${env.*}`.
+      # on_input:                       # Refetches this component's source when an input or toggle
+      #                                 # on the screen commits.
+      #   bind: {q: "${input.search}"}  # Maps source parameters to templates over `${input.NAME}`,
+      #                                 # plus `${env.*}`. (required)
+
+      # List fields: https://jsdrews.github.io/tui-builder/reference/components/#list
+      # items: []                       # The rows. (static) Instead of source, item.
+
+  screen:
+    layout:
+      component: services

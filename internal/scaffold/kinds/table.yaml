@@ -1,0 +1,30 @@
+app:
+  title: __TITLE__
+
+data:
+  sources:
+    services:
+      type: static
+      data:
+        - {name: api,    status: running, region: eu-west, replicas: 3}
+        - {name: worker, status: running, region: eu-west, replicas: 2}
+        - {name: web,    status: pending, region: us-east, replicas: 1}
+        - {name: cron,   status: stopped, region: us-east, replicas: 0}
+
+tui:
+  components:
+    services:
+      type: table
+      title: Services
+      source: services
+      columns:
+        - {title: Name,     value: name}
+        - {title: Status,   value: status}
+        - {title: Region,   value: region}
+        - {title: Replicas, value: replicas, align: right}
+        # @fields columns
+      # @fields
+
+  screen:
+    layout:
+      component: services

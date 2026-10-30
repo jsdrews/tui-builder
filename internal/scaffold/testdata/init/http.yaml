@@ -1,0 +1,224 @@
+# An example http from `tui-builder init http`. Run it with
+#   tui-builder <this file>
+# Every field a http takes is below, commented out: uncomment a line to
+# use it. A line shows the field's default where it has one; a block
+# shows every field it takes, so keep the ones you need.
+# https://jsdrews.github.io/tui-builder/reference/sources/#http
+
+# This one reads the things fixture API. In a clone of tui-builder, start
+# it in another terminal first:
+#   go run ./internal/fixture/things/thingsd
+# Or set THINGS_API_URL and THINGS_API_TOKEN, and change the path and
+# columns, to read another API.
+app:
+  title: demo
+  env:
+    - {name: THINGS_API_URL, default: "http://localhost:8765"}
+    - {name: THINGS_API_TOKEN, default: fixture-token}
+
+data:
+  sources:
+    things:
+      type: http
+      url: ${env.THINGS_API_URL}/things
+      auth:
+        bearer: ${env.THINGS_API_TOKEN}
+
+        # Every auth field: https://jsdrews.github.io/tui-builder/reference/sources/#auth
+        # basic:                        # HTTP basic auth: `user` and `pass`. Instead of bearer.
+        #   user: me                    # The user name (Stripe-style APIs put the key here and
+        #                               # leave `pass` empty). (`basic`; required)
+        #   pass: ""                    # The password. (`basic`)
+        # api_key:                      # A key sent as `in` / `name` / `value`. Instead of bearer.
+        #   in: header                  # `header`, `query` or `cookie`. (`api_key`; required)
+        #   name: X-API-Key             # The header, query parameter or cookie it goes in.
+        #                               # (`api_key`; required)
+        #   value: ""                   # The key. (`api_key`)
+        # oauth2:                       # The OAuth 2 client-credentials grant: fetches a token and
+        #                               # sends it as a bearer token. (`http` only) Instead of
+        #                               # bearer.
+        #   token_url: https://example.com/oauth/token  # Where to get the token. (`oauth2`;
+        #                                               # required)
+        #   client_id: my-client        # The client ID. (`oauth2`; required)
+        #   client_secret: ${env.CLIENT_SECRET}  # The client secret. (`oauth2`; required)
+        #   scopes: []                  # Scopes to ask for, sent space-separated. (`oauth2`)
+        #   client_auth: body           # How the client proves itself to `token_url`: `body` (in
+        #                               # the form) or `basic`. (`oauth2`)
+      root: entries
+
+      # Common fields: https://jsdrews.github.io/tui-builder/reference/sources/#fields-shared-by-leaf-sources
+      # parameters:                     # Typed inputs the source references as `${params.NAME}`.
+      #   q:                            # One entry, named q.
+      #     type: string                # `string`, `int`, `bool` or `duration`.
+      #     required: false             # The source can't run until a caller supplies a value. (not
+      #                                 # with `default`)
+      #     default: ""                 # Used when no caller supplies one. (not with `required`)
+      #     description: ""             # One-line summary, shown by `wrangl --describe`.
+      #     segment: false              # The value is one URL path segment: in a `url:` path it's
+      #                                 # fully escaped, `/` included (`a/b` → `a%2Fb`).
+      # format: json                    # `json` parses the response; `text` keeps it as a raw
+      #                                 # string (for logs and plain-text endpoints).
+      # refresh: ""                     # Poll interval.
+      # poll_hidden: false              # Keeps polling while the source's tab is hidden or its
+      #                                 # screen is covered by a push.
+      # timeout: 10s                    # Per-fetch limit.
+      # cache:                          # Memoises fetches per parameter combination.
+      #   ttl: 30s                      # How long an entry stays fresh. (required)
+      #   size: 100                     # Maximum entries; the least recently used is evicted.
+      # pipe: []                        # Transform stages applied to this source's output.
+      # extends: ""                     # The preset this source inherits fields from.
+      # unset: []                       # Inherited fields to drop, by name: `unset: [paginate,
+      #                                 # refresh]`.
+      # resume:                         # Reconnects exactly: tracks each line's timestamp, resumes
+      #                                 # from the last one and skips repeats.
+      #   timestamp: '^(\S+)'           # A regular expression whose first capture group is each
+      #                                 # line's timestamp, in RFC 3339 (fractional seconds
+      #                                 # allowed). (required)
+      #   granularity: 1s               # The resolution the source's "since" parameter honours.
+
+      # Http fields: https://jsdrews.github.io/tui-builder/reference/sources/#http
+      # method: ""                      # HTTP method.
+      # headers: {}                     # Request headers.
+      # retry:                          # Tries a failed request again, honouring the server's
+      #                                 # rate-limit headers.
+      #   max: 3                        # Attempts, the first included.
+      #   backoff: 500ms                # The base of the exponential curve: attempt *n* waits a
+      #                                 # random time up to `backoff × 2ⁿ⁻¹`.
+      #   max_backoff: 30s              # Caps the curve.
+      #   max_wait: 60s                 # The longest wait a server can ask for.
+      #   on: [408, 429, 500, 502, 503, 504]  # Replaces the statuses retried. (not `401` or a
+      #                                       # success)
+      # conditional: true               # Conditional GET: send `If-None-Match` /
+      #                                 # `If-Modified-Since`, and keep the last value on a `304`.
+      # max_body: 50MB                  # The largest response read (per page): `512KB`, `200MB`.
+      # query: {}                       # Query parameters, laid over any written in `url`.
+      # json: ""                        # Request body written as YAML and sent as JSON, with
+      #                                 # `Content-Type: application/json`. (not with `form`,
+      #                                 # `body`)
+      # form: {}                        # Request body sent URL-encoded, with `Content-Type:
+      #                                 # application/x-www-form-urlencoded`. (not with `json`,
+      #                                 # `body`)
+      # body: ""                        # Request body, sent as written after substitution. (not
+      #                                 # with `json`, `form`)
+      # graphql:                        # A GraphQL request: `query` and `variables`. (not with
+      #                                 # `json`, `form`, `body`)
+      #   query: "{ things { name } }"  # The GraphQL document, sent exactly as written. (required)
+      #   variables: {}                 # Templated like `json:`: `"${params.first}"` is a number
+      #                                 # for an `int` parameter, and a value that resolves empty is
+      #                                 # left out.
+      # empty_on: []                    # Statuses answered with the empty result (`null`) instead
+      #                                 # of an error, e.g. `[404]` for a lookup. (not a 2xx)
+      # error_path: ""                  # Where an error's message is.
+      # follow: false                   # Streams: holds the response open and emits one event per
+      #                                 # line (kube `?follow=true`, SSE, NDJSON feeds). (not with
+      #                                 # `paginate`, `window`)
+      # paginate:                       # Walks every page up front into one list. (json; not with
+      #                                 # `follow`, `window`)
+      #   strategy: page                # `link`, `cursor`, `offset` or `page`. (required)
+      #   next_path: ""                 # Where the next page's URL is: `next`, `links.next`, or
+      #                                 # `link:next` for the `Link` header (GitHub, GitLab, Okta,
+      #                                 # Shopify, Sentry). (`link`; required)
+      #   cursor_path: ""               # Where the next cursor is: `meta.next_cursor`,
+      #                                 # `header:X-Next-Cursor`, or `last:id` for the last item's
+      #                                 # id (Stripe). (`cursor`; required)
+      #   cursor_param: ""              # The query parameter the cursor goes in. (`cursor`)
+      #   offset_param: ""              # The query parameter for the number of items fetched so
+      #                                 # far. (`offset`)
+      #   page_param: page              # The query parameter for the page number. (`page`)
+      #   page_start: 1                 # The first page's number: `0` for zero-based APIs such as
+      #                                 # Algolia. (`page`)
+      #   limit_param: ""               # The query parameter carrying `page_size`. (not `link`)
+      #   page_size: 100                # Items per page: sent in `limit_param` and
+      #                                 # `${paginate.limit}`, and what `stop_on_short_page`
+      #                                 # compares with.
+      #   total_path: ""                # Where the total item count is; the walk stops once it has
+      #                                 # that many. (`offset`, `page`)
+      #   more_when: ""                 # Evaluated over each raw response; when it's false, the
+      #                                 # walk stops.
+      #   stop_on_short_page: false     # Stop on a page with fewer than `page_size` items
+      #                                 # (Discord).
+      #   patch: {}                     # Merged into every request: into the query string, or into
+      #                                 # `json:` / `form:` when there's a body. (not `link`; not
+      #                                 # with `body`)
+      #   max_pages: 20                 # Caps the walk.
+      #   on_page_error: fail           # `fail` returns the error; `skip` returns the pages fetched
+      #                                 # so far, and posts a notice naming the failed page.
+      # window:                         # Fetches only the rows on screen and lets the server filter
+      #                                 # and sort. (json; not with `follow`, `paginate`)
+      #   page_size: 100                # Rows per request.
+      #   prefetch: 0                   # Extra pages fetched beyond the screen.
+      #   total_path: total             # Where the total match count is: a dot-path into the raw
+      #                                 # response (before `root:`), or a header such as
+      #                                 # `header:X-Total-Count`. (required, except with `cursor`)
+      #   filters: {}                   # Maps a column **title** to where a scoped `title:value`
+      #                                 # filter term goes: a query parameter on http, a
+      #                                 # `${window.filters.NAME}` token name on exec. (exec, http;
+      #                                 # a map value: http only)
+      #   filter_ops: {}                # One filter rule for every column instead of a `filters:`
+      #                                 # entry each: a param template per comparison, each using
+      #                                 # `${column.value}`. (http only)
+      #   filter_except: []             # Column titles `filter_ops` leaves alone: numbers, ids,
+      #                                 # enums the API can't match on. (needs `filter_ops`)
+      #   offset_param: offset          # Query parameter for the first row wanted (`offset`,
+      #                                 # `_start`, `skip`). (http: this or `page_param`; not on
+      #                                 # exec)
+      #   page_param: ""                # Query parameter for a page number, for APIs that page by
+      #                                 # number (`?page=3&per_page=50`). (http: this or
+      #                                 # `offset_param`; not on exec)
+      #   page_start: 1                 # The first page's number; `0` for zero-based APIs. (with
+      #                                 # `page_param`)
+      #   limit_param: limit            # Query parameter for the page size (`limit`, `per_page`).
+      #                                 # (required on http; not on exec)
+      #   search_param: ""              # Query parameter for bare filter terms, joined with spaces.
+      #                                 # (http only)
+      #   sort_param: ""                # Query parameter for the sort field. (http only)
+      #   sorts: {}                     # Maps a column title to the sort field the API expects.
+      #                                 # (http only; needs `sort_param`)
+      #   sort_fields: []               # The sort fields the API accepts, e.g. an `order_by` enum.
+      #                                 # (http: needs `sort_param`; exec: `command:` references
+      #                                 # `${window.sort}`; not Anchored)
+      #   sort_desc_prefix: ""          # Prepended for a descending sort, e.g. `-` for Django REST
+      #                                 # (`ordering=-created`). (http only; needs `sort_param`)
+      #   cursor: ""                    # Makes the source **Anchored**: walked from an edge instead
+      #                                 # of paged by offset. (eventlog and span-table sources)
+      #   older: {}                     # What the request changes to walk towards older items,
+      #                                 # merged into `body:` or set as query parameters. (http,
+      #                                 # with `cursor`)
+      #   newer: {}                     # The same, walking towards newer items. (http, with
+      #                                 # `cursor`)
+      #   anchor: newest                # Where an Anchored view starts: `newest` (and follows),
+      #                                 # `oldest` (and walks newer as you scroll down), or a
+      #                                 # template that resolves to a cursor, `${input.jump_to}`, to
+      #                                 # jump there. (with `cursor`)
+      #   find:                         # Searches past what's loaded: `n` / `N` ask the source
+      #                                 # where the next match is. (http)
+      #     params: {name: "${window.search}"}  # Query parameters set on the search request. (one
+      #                                         # of `params` / `body`)
+      #     body: {}                    # Fields merged into the request's JSON body. (one of
+      #                                 # `params` / `body`)
+      #     position: id                # The path in the matching item to its 0-based position in
+      #                                 # the (filtered) set. (required on a paged source; not on an
+      #                                 # Anchored one)
+      #   viewport_delay: ""            # How long scrolling must pause before rows are requested.
+      #   growing:                      # The set is still gaining items at its newest end.
+      #                                 # (eventlog only; not with `refresh`)
+      #     source: services            # The entry whose value decides, e.g. the job a list of
+      #                                 # events belongs to. (required)
+      #     while: "${item.status} == running"  # True while items are still arriving, over that
+      #                                         # source's value. (required)
+      #   follow_every: 2s              # Poll interval while growing. (needs `growing`)
+
+tui:
+  components:
+    things:
+      type: table
+      title: Things
+      source: things
+      columns:
+        - {title: Name,   value: name}
+        - {title: Status, value: status}
+        - {title: Size,   value: size, align: right}
+
+  screen:
+    layout:
+      component: things

@@ -1,0 +1,104 @@
+# An example inspector from `tui-builder init inspector`. Run it with
+#   tui-builder <this file>
+# Every field a inspector takes is below, commented out: uncomment a line to
+# use it. A line shows the field's default where it has one; a block
+# shows every field it takes, so keep the ones you need.
+# https://jsdrews.github.io/tui-builder/reference/components/#inspector
+
+app:
+  title: demo
+
+data:
+  sources:
+    service:
+      type: static
+      data: {name: api, status: running, region: eu-west, replicas: 3}
+
+tui:
+  components:
+    service:
+      type: inspector
+      title: Service
+      source: service
+      fields:
+        - {label: Name,     path: name}
+        - {label: Status,   path: status}
+        - {label: Region,   path: region}
+        - {label: Replicas, path: replicas}
+
+        # Every inspector field field: https://jsdrews.github.io/tui-builder/reference/components/#inspector-fields
+        # - label: Label                # The left-hand text. (required)
+        #   value: ""                   # Static right-hand text.
+        #   path: ""                    # Dot-path into the source's value; overrides `value`.
+        #                               # (source-bound)
+        #   color_rules:                # Colors the value.
+        #     - color: red              # See color values. (required)
+        #       when: stopped           # Exact text (case-insensitive), `~regex`
+        #                               # (case-insensitive), or a numeric comparison: `> 5`, `<=
+        #                               # 10`, `== 0`, `!= 0`, with an optional K/M/B/G/T suffix on
+        #                               # the number.
+        #       path: ""                # The fields the rule applies to: a dot-path from the record
+        #                               # root (`status`, `spec.replicas`, `items.0.state`), where
+        #                               # `*` matches any one key or index (`items.*.state`). (an
+        #                               # `auto: true` inspector's own `color_rules`)
+        #   children: []                # Nested fields, shown as an expandable group.
+        #   metric:                     # Draws the value as a badge, ratio, bar or sparkline.
+        #                               # (source-bound; not with `value`, `path` or `color_rules`)
+        #     badge: []                 # Status counts, ok / warn / down: `12✓ 3⚠ 1✗`. (one
+        #                               # kind key)
+        #     ratio: []                 # Done / total, `3/5`: green when complete, yellow partway,
+        #                               # red at zero. (one kind key)
+        #     bar: ""                   # A value drawn as a progress bar against `max`. (one kind
+        #                               # key)
+        #     spark: ""                 # A list of numbers drawn as a sparkline. (one kind key)
+        #     max: 0                    # The bar's full value. (`bar`, required)
+        #     width: 0                  # Width in cells. (`bar`, `spark`)
+        #     color: ""                 # A fixed color: a name or a 0–255 index. (`bar`, `spark`)
+
+      # Common fields: https://jsdrews.github.io/tui-builder/reference/components/#common-fields
+      # colors:                         # Per-component color overrides.
+      #   border_active: ""             # Border color when focused.
+      #   border_inactive: ""           # Border color when unfocused.
+      #   spinner: ""                   # The loading spinner.
+      #   label: ""                     # Field labels.
+      #   value: ""                     # Field values.
+      #   match: ""                     # Search-match highlight.
+      #   current_line_bg: ""           # Background of the cursor line.
+      # color_rules:                    # Colors each item or line by its value; on an `auto: true`
+      #                                 # inspector, each leaf value, scoped by the rule's `path:`.
+      #   - color: red                  # See color values. (required)
+      #     when: stopped               # Exact text (case-insensitive), `~regex`
+      #                                 # (case-insensitive), or a numeric comparison: `> 5`, `<=
+      #                                 # 10`, `== 0`, `!= 0`, with an optional K/M/B/G/T suffix on
+      #                                 # the number.
+      #     path: ""                    # The fields the rule applies to: a dot-path from the record
+      #                                 # root (`status`, `spec.replicas`, `items.0.state`), where
+      #                                 # `*` matches any one key or index (`items.*.state`). (an
+      #                                 # `auto: true` inspector's own `color_rules`)
+      # filterable: false               # `/` opens a filter that narrows the rows (`f` on an
+      #                                 # eventlog, where `/` is search).
+      # filter_placeholder: ""          # Hint shown inside the empty filter or search input.
+      # initial_query: ""               # Starts with this search or filter query applied.
+      # initial_cursor: 0               # Row the cursor starts on.
+      # on_cursor:                      # Refetches this component's source as another component's
+      #                                 # cursor moves.
+      #   source: other_table           # The driver: a table, list or tree on the same screen.
+      #                                 # (required)
+      #   bind: {}                      # Maps this component's source parameters to templates over
+      #                                 # the driver's focused row: `${cursor}`, `${cursor.N}`,
+      #                                 # `${cursor.Title}`, `${cursor.path}`, plus `${env.*}`.
+      # on_input:                       # Refetches this component's source when an input or toggle
+      #                                 # on the screen commits.
+      #   bind: {q: "${input.search}"}  # Maps source parameters to templates over `${input.NAME}`,
+      #                                 # plus `${env.*}`. (required)
+
+      # Inspector fields: https://jsdrews.github.io/tui-builder/reference/components/#inspector
+      # auto: false                     # Builds the rows from whatever the source returns: maps
+      #                                 # expand into groups, arrays into `[0]`, `[1]`…, scalars
+      #                                 # render as-is. (source-bound; not with `fields`) Instead of
+      #                                 # fields.
+      # initial_depth: 0                # Expands every group shallower than this.
+
+  screen:
+    layout:
+      component: service

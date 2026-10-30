@@ -1,0 +1,16 @@
+app:
+  title: __TITLE__
+
+tui:
+  components:
+    notes:
+      type: textview
+      title: Notes
+      content: |
+        A textview shows a block of text: notes, help, a file's contents.
+        Press / to search it.
+      # @fields
+
+  screen:
+    layout:
+      component: notes

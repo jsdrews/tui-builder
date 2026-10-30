@@ -1,0 +1,4 @@
+8 screens, 8 sources
+note: GET /pages: the response has no total, so it walks every page rather than windowing
+note: GET /twice: more than one parameter could page it, so it walks rather than windows
+note: 6 lists walk every page, up to 20 (raise max_pages in overrides)

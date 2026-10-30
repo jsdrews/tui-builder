@@ -1,0 +1,13 @@
+openapi: 3.0.3
+info: {title: Keyed, version: "1"}
+servers: [{url: "https://api.example.com"}]
+security: [{AppKey: [], AppId: [], Session: []}]
+paths:
+  /account:
+    get:
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {id: {type: string}}}}}}}
+components:
+  securitySchemes:
+    AppKey: {type: apiKey, in: header, name: X-App-Key}
+    AppId: {type: apiKey, in: query, name: app_id}
+    Session: {type: http, scheme: bearer}

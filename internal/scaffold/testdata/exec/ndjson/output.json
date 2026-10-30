@@ -1,0 +1,3 @@
+{"ID":"3f1c","Names":"web","Image":"nginx:1.27","State":"running","Status":"Up 2 hours","Ports":"0.0.0.0:80->80/tcp"}
+{"ID":"7a2d","Names":"cache","Image":"redis:7","State":"running","Status":"Up 2 hours","Ports":""}
+{"ID":"9e4b","Names":"job","Image":"busybox","State":"exited","Status":"Exited (0) 5 minutes ago","Ports":""}
