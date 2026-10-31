@@ -187,14 +187,14 @@ func TestGeneratedConfigWindow(t *testing.T) {
 	if !strings.Contains(view, "can't sort by Status") || !strings.Contains(view, "thing-") {
 		t.Errorf("the refused sort didn't revert with a notice:\n%s", view)
 	}
-	// The next column the server does sort: Created at, then Size.
-	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
-	if got := strings.TrimPrefix(last().Get("order_by"), "-"); got != "created_at" {
-		t.Errorf("] after the refusal sorted by %q, want created_at", got)
-	}
+	// The next column the server does sort: Size, then Created at.
 	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
 	if got := strings.TrimPrefix(last().Get("order_by"), "-"); got != "size" {
-		t.Errorf("] sorted by %q, want size", got)
+		t.Errorf("] after the refusal sorted by %q, want size", got)
+	}
+	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	if got := strings.TrimPrefix(last().Get("order_by"), "-"); got != "created_at" {
+		t.Errorf("] sorted by %q, want created_at", got)
 	}
 }
 
@@ -208,6 +208,17 @@ func TestGeneratedConfigFilter(t *testing.T) {
 	}
 	if view := h.view(); !strings.Contains(view, "failed") || strings.Contains(view, " active ") {
 		t.Errorf("the filtered rows:\n%s", view)
+	}
+}
+
+// A filter on a hidden column still goes to the server: Owner id is
+// hidden, since an id is minor, and kept for its filter.
+func TestGeneratedConfigFilterHiddenColumn(t *testing.T) {
+	h, rec := genHarnessRec(t, things.Token)
+	h.typeFilter("owner:2") // a key matches a title by prefix
+	q := rec.queries()
+	if got := q[len(q)-1].Get("owner_id"); got != "2" {
+		t.Errorf("owner:2 sent %v", q[len(q)-1])
 	}
 }
 
@@ -264,7 +275,7 @@ func TestGeneratedConfigWithOverrides(t *testing.T) {
 	h, rec = genHarnessWith(t, things.Token, ov)
 	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
-	if got := last().Get("order_by"); got != "created_at" {
+	if got := last().Get("order_by"); got != "size" {
 		t.Errorf("after name, ] sorted by %q; status should be skipped", got)
 	}
 }

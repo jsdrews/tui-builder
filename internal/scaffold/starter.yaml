@@ -6,6 +6,7 @@
 # https://jsdrews.github.io/tui-builder/reference/app/#app
 app:
   title: __TITLE__
+  surface: filled
 
 # Where data comes from. Components bind to a source by name, and
 # `wrangl <this file> items` prints this one without the UI.

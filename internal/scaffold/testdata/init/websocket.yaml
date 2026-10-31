@@ -11,6 +11,7 @@
 # Each frame is one thing's new status; the table updates that row.
 app:
   title: demo
+  surface: filled
   env:
     - {name: THINGS_EVENTS_URL, default: "ws://localhost:8765/events"}
     - {name: THINGS_API_TOKEN, default: fixture-token}
@@ -76,6 +77,7 @@ tui:
     events:
       type: table
       title: Thing statuses
+      filterable: true
       source: events
       row_key: name
       columns:

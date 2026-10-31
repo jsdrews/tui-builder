@@ -3,6 +3,7 @@
 #   tui-builder gen spec.yaml
 app:
   title: Paging
+  surface: filled
   version: "1"
   env:
     - name: PAGING_URL
@@ -70,9 +71,9 @@ tui:
       columns:
         - {title: Name, value: name, bold: true, flex: 1}
         - {title: Kind, value: kind, distinct: [a, b], max_width: 20}
+        - {title: Size, value: size, align: right}
         - {title: Created at, value: createdAt, align: right}
         - {title: Id, value: id, align: right}
-        - {title: Size, value: size, align: right}
     pages:
       type: table
       title: Pages
@@ -81,9 +82,9 @@ tui:
       columns:
         - {title: Name, value: name, sortable: true, bold: true, flex: 1}
         - {title: Kind, value: kind, sortable: true, max_width: 20}
+        - {title: Size, value: size, sortable: true, sort: number, align: right}
         - {title: Created at, value: createdAt, sortable: true, align: right}
         - {title: Id, value: id, sortable: true, sort: number, align: right}
-        - {title: Size, value: size, sortable: true, sort: number, align: right}
     linked:
       type: table
       title: Linked
@@ -92,9 +93,9 @@ tui:
       columns:
         - {title: Name, value: name, sortable: true, bold: true, flex: 1}
         - {title: Kind, value: kind, sortable: true, max_width: 20}
+        - {title: Size, value: size, sortable: true, sort: number, align: right}
         - {title: Created at, value: createdAt, sortable: true, align: right}
         - {title: Id, value: id, sortable: true, sort: number, align: right}
-        - {title: Size, value: size, sortable: true, sort: number, align: right}
     nexted:
       type: table
       title: Nexted
@@ -103,9 +104,9 @@ tui:
       columns:
         - {title: Name, value: name, sortable: true, bold: true, flex: 1}
         - {title: Kind, value: kind, sortable: true, max_width: 20}
+        - {title: Size, value: size, sortable: true, sort: number, align: right}
         - {title: Created at, value: createdAt, sortable: true, align: right}
         - {title: Id, value: id, sortable: true, sort: number, align: right}
-        - {title: Size, value: size, sortable: true, sort: number, align: right}
     cursored:
       type: table
       title: Cursored
@@ -114,9 +115,9 @@ tui:
       columns:
         - {title: Name, value: name, sortable: true, bold: true, flex: 1}
         - {title: Kind, value: kind, sortable: true, max_width: 20}
+        - {title: Size, value: size, sortable: true, sort: number, align: right}
         - {title: Created at, value: createdAt, sortable: true, align: right}
         - {title: Id, value: id, sortable: true, sort: number, align: right}
-        - {title: Size, value: size, sortable: true, sort: number, align: right}
     stripey:
       type: table
       title: Stripey
@@ -125,9 +126,9 @@ tui:
       columns:
         - {title: Name, value: name, sortable: true, bold: true, flex: 1}
         - {title: Kind, value: kind, sortable: true, max_width: 20}
+        - {title: Size, value: size, sortable: true, sort: number, align: right}
         - {title: Created at, value: createdAt, sortable: true, align: right}
         - {title: Id, value: id, sortable: true, sort: number, align: right}
-        - {title: Size, value: size, sortable: true, sort: number, align: right}
     twice:
       type: table
       title: Twice
@@ -136,9 +137,9 @@ tui:
       columns:
         - {title: Name, value: name, sortable: true, bold: true, flex: 1}
         - {title: Kind, value: kind, sortable: true, max_width: 20}
+        - {title: Size, value: size, sortable: true, sort: number, align: right}
         - {title: Created at, value: createdAt, sortable: true, align: right}
         - {title: Id, value: id, sortable: true, sort: number, align: right}
-        - {title: Size, value: size, sortable: true, sort: number, align: right}
     plain:
       type: table
       title: Plain
@@ -147,9 +148,9 @@ tui:
       columns:
         - {title: Name, value: name, sortable: true, bold: true, flex: 1}
         - {title: Kind, value: kind, sortable: true, max_width: 20}
+        - {title: Size, value: size, sortable: true, sort: number, align: right}
         - {title: Created at, value: createdAt, sortable: true, align: right}
         - {title: Id, value: id, sortable: true, sort: number, align: right}
-        - {title: Size, value: size, sortable: true, sort: number, align: right}
     home_menu:
       type: menu
       title: Paging

@@ -77,7 +77,7 @@ func (s *spec) pickColumns(h *opHints, ranked []columns.Column, name string) ([]
 			rest = append(rest, c)
 		}
 	}
-	slices.SortStableFunc(rest, func(a, b columns.Column) int { return int(a.Rank) - int(b.Rank) })
+	columns.SortByRank(rest)
 	s.set("tui", "components", name, "columns")
 	return kept, rest, nil
 }

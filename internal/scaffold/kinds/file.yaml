@@ -1,5 +1,6 @@
 app:
   title: __TITLE__
+  surface: filled
 
 data:
   sources:
@@ -15,6 +16,7 @@ tui:
     services:
       type: table
       title: Services
+      filterable: true
       source: services
       columns:
         - {title: Name,   value: name}

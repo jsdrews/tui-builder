@@ -7,14 +7,14 @@ import (
 	cfg "github.com/jsdrews/tui-builder/internal/config"
 )
 
-// inputKey handles a key on a focused input or toggle. An input edits
-// while it holds focus: enter commits what's typed, esc puts back the
-// committed value and leaves the field (so q and esc reach the app
-// again), and enter on a field already left starts editing it again. A
-// toggle commits on every flip. Tab is left to the screen.
+// inputKey handles a key on a focused input. It edits while it holds
+// focus: enter commits what's typed, esc puts back the committed value
+// and leaves the field (so q and esc reach the app again), and enter on
+// a field already left starts editing it again. Tab is left to the
+// screen.
 func (m *Model) inputKey(k tea.KeyMsg) (tea.Cmd, bool) {
 	c := m.current()
-	if c == nil || (c.Kind != build.KInput && c.Kind != build.KToggle) {
+	if c == nil || c.Kind != build.KInput {
 		return nil, false
 	}
 	switch k.String() {
@@ -22,10 +22,6 @@ func (m *Model) inputKey(k tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, false
 	}
 	name := m.tree.Order[m.focus]
-	if c.Kind == build.KToggle {
-		cmd := updateComponent(c, k)
-		return tea.Batch(cmd, m.commitInput(name)), true
-	}
 	if !c.Input.Focused() {
 		if k.String() == "enter" {
 			return c.Input.Focus(), true

@@ -28,7 +28,8 @@ func TestDocsListEveryFlag(t *testing.T) {
 			t.Errorf("%q has no `## `%s`` section on docs/cli/tui-builder.md", c.CommandPath(), c.CommandPath())
 		}
 		c.LocalNonPersistentFlags().VisitAll(func(f *pflag.Flag) {
-			if f.Name == "help" {
+			// A hidden flag is a removed one, kept to say what replaced it.
+			if f.Name == "help" || f.Hidden {
 				return
 			}
 			if !strings.Contains(doc, "`--"+f.Name) {

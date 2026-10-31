@@ -17,12 +17,11 @@ func TestSubstituteInputValues(t *testing.T) {
 	}
 }
 
-func TestInputAndToggleValues(t *testing.T) {
+func TestInputValue(t *testing.T) {
 	th := theme.New(palette.Nord())
 	in, _ := NewComponent(&cfg.Component{Type: "input", Initial: "web"}, th)
-	tg, _ := NewComponent(&cfg.Component{Type: "toggle", Initial: "true"}, th)
-	if InputValue(in) != "web" || InputValue(tg) != "true" {
-		t.Errorf("values = %q, %q", InputValue(in), InputValue(tg))
+	if InputValue(in) != "web" {
+		t.Errorf("value = %q", InputValue(in))
 	}
 	in.Rebuild(theme.New(palette.Dark()))
 	if InputValue(in) != "web" {

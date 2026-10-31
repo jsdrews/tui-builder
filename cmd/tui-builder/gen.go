@@ -1,9 +1,7 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"net/http"
 	"os"
 	"strings"
@@ -21,7 +19,7 @@ var commandLine []string
 func newGenCmd() *cobra.Command {
 	var (
 		output  string
-		initOv  string
+		initOv  bool
 		force   bool
 		headers []string
 		quiet   bool
@@ -34,7 +32,14 @@ func newGenCmd() *cobra.Command {
 for stdin; JSON or YAML) and writes a tui-builder config for the API: a
 preset with its base URL and auth, and a screen for each operation it can
 show.`,
-		Args: usageArgs(cobra.ExactArgs(1)),
+		Args: func(cmd *cobra.Command, args []string) error {
+			// --init-overrides took a file; now that file is a second
+			// argument.
+			if initOv && len(args) == 2 {
+				return usagef("--init-overrides takes no file now: it prints the overrides file, and -o FILE writes it")
+			}
+			return usageArgs(cobra.ExactArgs(1))(cmd, args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if l := opts.Layout; l != "" && l != "tabs" && l != "menu" {
 				return usagef("--layout %s: want tabs or menu", l)
@@ -48,23 +53,13 @@ show.`,
 				}
 				in.Headers.Add(strings.TrimSpace(k), strings.TrimSpace(v))
 			}
-			if initOv != "" && output != "" {
-				return usagef("--init-overrides writes a starter overrides file, not a config: drop -o")
+			if err := refuseExisting(output, force); err != nil {
+				return err
 			}
-			for _, path := range []string{output, initOv} {
-				if path == "" || force {
-					continue
-				}
-				if _, err := os.Stat(path); err == nil {
-					return fmt.Errorf("%s already exists: pass --force to overwrite it, or name another file", path)
-				} else if !errors.Is(err, fs.ErrNotExist) {
-					return err
-				}
-			}
-			opts.InitOverrides = initOv != ""
+			opts.InitOverrides = initOv
 			// The config being replaced lists the spec's operations
 			// then, so this run can say which are new.
-			if output != "" {
+			if output != "" && !initOv {
 				if b, err := os.ReadFile(output); err == nil {
 					opts.Previous = b
 				}
@@ -84,19 +79,18 @@ show.`,
 			if err != nil {
 				return err
 			}
-			if initOv != "" {
-				if err := os.WriteFile(initOv, res.Starter, 0o644); err != nil {
+			if initOv {
+				if err := writeOutput(cmd, output, res.Starter, force); err != nil {
 					return err
 				}
-				fmt.Fprintf(stderr, "wrote %s: uncomment what you need, then\n  tui-builder gen %s --overrides %s -o <config>\n", initOv, args[0], initOv)
+				file := output
+				if file == "" {
+					file = "<overrides>"
+				}
+				fmt.Fprintf(stderr, "uncomment what you need in the overrides file, then\n  tui-builder gen %s --overrides %s -o <config>\n", args[0], file)
 				return nil
 			}
-			if output == "" {
-				_, err = cmd.OutOrStdout().Write(res.Config)
-			} else {
-				err = os.WriteFile(output, res.Config, 0o644)
-			}
-			if err != nil {
+			if err := writeOutput(cmd, output, res.Config, force); err != nil {
 				return err
 			}
 			if !quiet {
@@ -119,8 +113,8 @@ show.`,
 	}
 	f := cmd.Flags()
 	f.StringVarP(&output, "output", "o", "", "write the config to this file instead of stdout")
-	f.BoolVar(&force, "force", false, "overwrite an existing -o or --init-overrides file")
-	f.StringVar(&initOv, "init-overrides", "", "write a starter overrides file listing every generated operation, instead of the config")
+	f.BoolVar(&force, "force", false, "overwrite an existing -o file")
+	f.BoolVar(&initOv, "init-overrides", false, "print a starter overrides file listing every generated operation, instead of the config")
 	f.StringArrayVar(&headers, "header", nil, "'Name: value' sent when fetching a spec from a URL (repeatable)")
 	f.BoolVar(&quiet, "quiet", false, "print no summary or skipped operations")
 	opts.Register(f)

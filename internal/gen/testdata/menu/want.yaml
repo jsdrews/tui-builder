@@ -3,6 +3,7 @@
 #   tui-builder gen spec.yaml
 app:
   title: Lots
+  surface: filled
   version: "1"
   env:
     - name: LOTS_URL
@@ -39,31 +40,37 @@ tui:
       title: Alpha
       source: alpha
       auto: true
+      filterable: true
     beta:
       type: inspector
       title: Beta
       source: beta
       auto: true
+      filterable: true
     gamma:
       type: inspector
       title: Gamma
       source: gamma
       auto: true
+      filterable: true
     delta:
       type: inspector
       title: Delta
       source: delta
       auto: true
+      filterable: true
     epsilon:
       type: inspector
       title: Epsilon
       source: epsilon
       auto: true
+      filterable: true
     zeta:
       type: inspector
       title: Zeta
       source: zeta
       auto: true
+      filterable: true
     home_menu:
       type: menu
       title: Lots

@@ -10,6 +10,7 @@
 #   GET /orgs/{org}/repos/{repo}: `{org}` and `{repo}` need a list to pick each from, and a push can carry only one: add it in overrides
 app:
   title: Edges
+  surface: filled
   version: "1"
   env:
     - name: EDGES_URL
@@ -80,6 +81,7 @@ tui:
       title: Report
       source: report
       auto: true
+      filterable: true
     org_members:
       type: table
       title: Org members
@@ -92,6 +94,7 @@ tui:
       title: Tag
       source: tag
       auto: true
+      filterable: true
   initial: home
   screens:
     home:

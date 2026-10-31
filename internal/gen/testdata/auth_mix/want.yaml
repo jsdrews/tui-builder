@@ -3,6 +3,7 @@
 #   tui-builder gen spec.yaml
 app:
   title: Auth Mix
+  surface: filled
   version: "1"
   env:
     - name: AUTH_MIX_URL
@@ -82,26 +83,31 @@ tui:
       title: Me
       source: me
       auto: true
+      filterable: true
     billing:
       type: inspector
       title: Billing
       source: billing
       auto: true
+      filterable: true
     admin:
       type: inspector
       title: Admin
       source: admin
       auto: true
+      filterable: true
     partner:
       type: inspector
       title: Partner
       source: partner
       auto: true
+      filterable: true
     dash:
       type: inspector
       title: Dash
       source: dash
       auto: true
+      filterable: true
   initial: home
   screens:
     home:

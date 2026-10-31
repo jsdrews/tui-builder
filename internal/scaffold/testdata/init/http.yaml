@@ -12,6 +12,7 @@
 # columns, to read another API.
 app:
   title: demo
+  surface: filled
   env:
     - {name: THINGS_API_URL, default: "http://localhost:8765"}
     - {name: THINGS_API_TOKEN, default: fixture-token}
@@ -169,7 +170,7 @@ data:
       #                                 # `page_param`)
       #   limit_param: limit            # Query parameter for the page size (`limit`, `per_page`).
       #                                 # (required on http; not on exec)
-      #   search_param: ""              # Query parameter for bare filter terms, joined with spaces.
+      #   search_param: q               # Query parameter for bare filter terms, joined with spaces.
       #                                 # (http only)
       #   sort_param: ""                # Query parameter for the sort field. (http only)
       #   sorts: {}                     # Maps a column title to the sort field the API expects.
@@ -191,11 +192,13 @@ data:
       #                                 # template that resolves to a cursor, `${input.jump_to}`, to
       #                                 # jump there. (with `cursor`)
       #   find:                         # Searches past what's loaded: `n` / `N` ask the source
-      #                                 # where the next match is. (http)
-      #     params: {name: "${window.search}"}  # Query parameters set on the search request. (one
-      #                                         # of `params` / `body`)
-      #     body: {}                    # Fields merged into the request's JSON body. (one of
+      #                                 # where the next match is. (http, exec)
+      #     params: {name: "${window.search}"}  # Query parameters set on the search request. (http:
+      #                                         # one of `params` / `body`)
+      #     body: {}                    # Fields merged into the request's JSON body. (http: one of
       #                                 # `params` / `body`)
+      #     command: []                 # The argv that prints the match, in the source's own shape
+      #                                 # (its `root:` and fields). (exec; required there)
       #     position: id                # The path in the matching item to its 0-based position in
       #                                 # the (filtered) set. (required on a paged source; not on an
       #                                 # Anchored one)
@@ -213,6 +216,7 @@ tui:
     things:
       type: table
       title: Things
+      filterable: true
       source: things
       columns:
         - {title: Name,   value: name}

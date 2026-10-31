@@ -1,6 +1,7 @@
 # Written by `tui-builder add exec -- gh run list --json name,status`.
 app:
   title: Run
+  surface: filled
 data:
   sources:
     run:

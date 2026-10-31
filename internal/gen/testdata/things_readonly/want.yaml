@@ -3,6 +3,7 @@
 #   tui-builder gen things.yaml --read-only
 app:
   title: Things API
+  surface: filled
   version: 1.0.0
   env:
     - name: THINGS_API_URL
@@ -89,20 +90,20 @@ tui:
             - {when: failed, color: 'theme:error'}
             - {when: ~(fail|error|crash|backoff|unhealthy|fatal|critical|denied|reject|oom|evict), color: 'theme:error'}
             - {when: ~(pend|wait|progress|degrad|unknown|warn|terminat|queue|retry), color: 'theme:warning'}
-        - {title: Created at, value: created_at, align: right}
-        - {title: Id, value: id, align: right}
         - {title: Size, value: size, align: right}
-        - {title: Owner id, value: owner_id, align: right}
         - {title: Tags, value: tags}
+        - {title: Team, value: labels.team}
+        - {title: Env, value: labels.env}
+        - {title: Created at, value: created_at, align: right}
         - {title: Description, value: description, flex: 1}
-        # More fields from the schema; uncomment one to add it:
-        # - {title: Team, value: labels.team}
-        # - {title: Env, value: labels.env}
+        - {title: Owner id, value: owner_id, hidden: true}
+        - {title: Id, value: id, hidden: true}
     thing:
       type: inspector
       title: Thing
       source: thing
       auto: true
+      filterable: true
       color_rules:
         - {when: active, color: 'theme:success', path: status}
         - {when: pending, color: 'theme:warning', path: status}
@@ -115,13 +116,14 @@ tui:
       source: owners
       columns:
         - {title: Name, value: name, bold: true, flex: 1}
-        - {title: Id, value: id, align: right}
         - {title: Email, value: email}
+        - {title: Id, value: id, align: right}
     owner:
       type: inspector
       title: Owner
       source: owner
       auto: true
+      filterable: true
     owner_things:
       type: table
       title: Things
@@ -138,15 +140,15 @@ tui:
             - {when: failed, color: 'theme:error'}
             - {when: ~(fail|error|crash|backoff|unhealthy|fatal|critical|denied|reject|oom|evict), color: 'theme:error'}
             - {when: ~(pend|wait|progress|degrad|unknown|warn|terminat|queue|retry), color: 'theme:warning'}
-        - {title: Created at, value: created_at, align: right}
-        - {title: Id, value: id, align: right}
         - {title: Size, value: size, align: right}
-        - {title: Owner id, value: owner_id, align: right}
         - {title: Tags, value: tags}
+        - {title: Team, value: labels.team}
+        - {title: Env, value: labels.env}
+        - {title: Created at, value: created_at, align: right}
         - {title: Description, value: description, flex: 1}
         # More fields from the schema; uncomment one to add it:
-        # - {title: Team, value: labels.team}
-        # - {title: Env, value: labels.env}
+        # - {title: Id, value: id}
+        # - {title: Owner id, value: owner_id}
   initial: home
   screens:
     home:

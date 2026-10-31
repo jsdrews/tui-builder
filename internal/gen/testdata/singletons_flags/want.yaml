@@ -3,6 +3,7 @@
 #   tui-builder gen spec.yaml --prompt-server --name status --tag account
 app:
   title: Status Service
+  surface: filled
   version: 2.4.0
   env:
     - name: STATUS_URL
@@ -43,11 +44,13 @@ tui:
       title: Who I am
       source: me
       auto: true
+      filterable: true
     settings:
       type: inspector
       title: Settings
       source: settings
       auto: true
+      filterable: true
   initial: home
   screens:
     home:

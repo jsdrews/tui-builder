@@ -1,1 +1,2 @@
 3 screens, 3 sources, 3 actions
+hint: GET /owners/{owner_id}/things asks for {owner_id} at startup; add --operation list_owners_owners_get (GET /owners) to pick it from a list

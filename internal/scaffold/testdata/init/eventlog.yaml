@@ -7,33 +7,65 @@
 
 app:
   title: demo
+  surface: filled
 
 data:
   sources:
     events:
-      # An eventlog reads a window: one page of a bigger set. This command
-      # prints the page the window asks for, out of 500 events.
+      # An eventlog reads a window: one page of a bigger set. This script
+      # prints the page the window asks for, out of 500 events, keeping
+      # only those whose text contains the filter (f). With "find" first,
+      # it prints the next event matching a search (/, then n or N) and
+      # its position, so a search reaches events that aren't loaded yet.
+      # The window's values go in as arguments ($1 to $5), so a quote in
+      # what's typed can't break the script.
       type: exec
       command:
         - sh
         - -c
-        - |
-          awk -v off="${window.offset}" -v lim="${window.limit}" 'BEGIN {
-            out = ""
-            for (i = off; i < off + lim && i < 500; i++)
-              out = out (out == "" ? "" : ",") sprintf("{\"id\":%d,\"at\":\"10:%02d:%02d\",\"text\":\"event %d\"}", i, int(i / 60) % 60, i % 60, i)
-            printf "{\"total\":500,\"items\":[%s]}", out
+        - &events |
+          awk -v mode="$1" -v a="$2" -v b="$3" -v c="$4" -v q="$5" '
+          function item(i, n) {
+            return sprintf("{\"id\":%d,\"at\":\"10:%02d:%02d\",\"text\":\"event %d\",\"pos\":%d}", i, int(i / 60) % 60, i % 60, i, n)
+          }
+          BEGIN {
+            n = 0; out = ""; hit = ""
+            for (i = 0; i < 500; i++) {
+              text = sprintf("event %d", i)
+              if (q != "" && index(text, tolower(q)) == 0) continue
+              if (mode == "page" && n >= a && n < a + b)
+                out = out (out == "" ? "" : ",") item(i, n)
+              # find: a is the term, b the direction, c where the view is.
+              if (mode == "find" && index(text, tolower(a)) > 0) {
+                if (b == "newer" && n > c && hit == "") hit = item(i, n)
+                if (b == "older" && n < c) hit = item(i, n)
+              }
+              n++
+            }
+            if (mode == "find") out = hit
+            printf "{\"total\":%d,\"items\":[%s]}", n, out
           }'
+        - sh
+        - page
+        - "${window.offset}"
+        - "${window.limit}"
+        - ""
+        - "${window.search}"
       root: items
       window:
         page_size: 100
         total_path: total
+        find:
+          command: [sh, -c, *events, sh, find, "${window.term}", "${window.dir}", "${window.from}", "${window.search}"]
+          position: pos
 
 tui:
   components:
     events:
       type: eventlog
       title: Events
+      searchable: true
+      filterable: true
       source: events
       key: id
       text: text
@@ -59,10 +91,6 @@ tui:
       #                                 # root (`status`, `spec.replicas`, `items.0.state`), where
       #                                 # `*` matches any one key or index (`items.*.state`). (an
       #                                 # `auto: true` inspector's own `color_rules`)
-      # filterable: false               # `/` opens a filter that narrows the rows (`f` on an
-      #                                 # eventlog, where `/` is search).
-      # searchable: false               # `/` opens a search that highlights matches; `n` / `N` move
-      #                                 # between them.
       # filter_placeholder: ""          # Hint shown inside the empty filter or search input.
       # on_cursor:                      # Refetches this component's source as another component's
       #                                 # cursor moves.
@@ -71,8 +99,8 @@ tui:
       #   bind: {}                      # Maps this component's source parameters to templates over
       #                                 # the driver's focused row: `${cursor}`, `${cursor.N}`,
       #                                 # `${cursor.Title}`, `${cursor.path}`, plus `${env.*}`.
-      # on_input:                       # Refetches this component's source when an input or toggle
-      #                                 # on the screen commits.
+      # on_input:                       # Refetches this component's source when an input on the
+      #                                 # screen commits.
       #   bind: {q: "${input.search}"}  # Maps source parameters to templates over `${input.NAME}`,
       #                                 # plus `${env.*}`. (required)
 

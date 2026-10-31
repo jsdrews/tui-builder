@@ -198,6 +198,7 @@ func Generate(ctx context.Context, opts Options) (Result, error) {
 		c.inSeq(get(sc.comp, "columns"), lines...)
 	}
 	res.Hints = hints(screens, len(ops))
+	res.Hints = append(res.Hints, pickerHints(reads, all)...)
 	walks := 0
 	byNote := map[string][]string{}
 	var noteOrder []string
@@ -318,7 +319,7 @@ func sortByTag(screens []*built, tags openapi3.Tags) {
 
 // document assembles the config: header, app, data, actions and tui.
 func document(s *spec, opts Options, p *preset, screens []*built, actions *yaml.Node, skipped []string, title string) *yaml.Node {
-	app := mapping("title", str(title))
+	app := mapping("title", str(title), "surface", str("filled"))
 	if s.doc.Info != nil && s.doc.Info.Version != "" {
 		add(app, "version", str(s.doc.Info.Version))
 	}
@@ -620,6 +621,42 @@ func checkLoads(b []byte) error {
 
 // hints suggest --tag for a big result: past 40 top-level screens, with
 // a count per tag, and past 200 operations, noting nothing was dropped.
+// pickerHints says, for each list that asks for a path parameter at
+// startup, which list in the spec could offer it as a choice instead,
+// when the selection left that list out: /orgs/{org}/issues under
+// --tag issues, where /user/orgs is tagged orgs.
+func pickerHints(reads []*read, all []op) []string {
+	lists := map[string]*read{}
+	for _, o := range all {
+		if o.method != "GET" || strings.Contains(o.path, "{") {
+			continue
+		}
+		if sh, _ := shapeOf(responseSchema(o.op)); sh == shapeList {
+			lists[o.path] = &read{op: o, item: rowSchema(responseSchema(o.op), "")}
+		}
+	}
+	var out []string
+	for _, r := range reads {
+		if r.orphan == "" {
+			continue
+		}
+		segs := strings.Split(strings.Trim(r.op.path, "/"), "/")
+		i := slices.Index(segs, "{"+r.orphan+"}")
+		if i < 1 {
+			continue
+		}
+		parent := sameEnd(segs[i-1], lists)
+		if parent != nil && !slices.ContainsFunc(reads, func(o *read) bool { return o.op.path == parent.op.path }) {
+			pick := parent.op.op.OperationID
+			if pick == "" {
+				pick = parent.op.String()
+			}
+			out = append(out, fmt.Sprintf("%s asks for {%s} at startup; add --operation %s (%s) to pick it from a list", r.op, r.orphan, pick, parent.op))
+		}
+	}
+	return out
+}
+
 func hints(screens []*built, ops int) []string {
 	top := 0
 	byTag := map[string]int{}

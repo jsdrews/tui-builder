@@ -3,6 +3,7 @@
 #   tui-builder gen spec.yaml
 app:
   title: Split
+  surface: filled
   version: "1"
   env:
     - name: SPLIT_URL
@@ -24,6 +25,7 @@ tui:
       title: Me
       source: me
       auto: true
+      filterable: true
   initial: me
   screens:
     me:

@@ -2,6 +2,7 @@ package gen
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -84,8 +85,13 @@ func TestRank(t *testing.T) {
 			t.Errorf("%s ranked %d, want %d", path, got[path].Rank, want)
 		}
 	}
-	if got["spec.name"].Title != "Spec name" || got["name"].Title != "Name" {
-		t.Errorf("clashing titles: %q, %q", got["name"].Title, got["spec.name"].Title)
+	// A nested object's name is an identity too, titled by its parent.
+	if got["spec.name"].Title != "Spec" || got["spec.name"].Rank != columns.Identity || got["name"].Title != "Name" {
+		t.Errorf("nested name: %q (%d), name %q", got["spec.name"].Title, got["spec.name"].Rank, got["name"].Title)
+	}
+	// An id keeps its rank for its style, but sorts as minor.
+	if !got["id"].Minor || got["region"].Minor {
+		t.Errorf("minor: id %v, region %v", got["id"].Minor, got["region"].Minor)
 	}
 	if !got["ready"].Bool || got["id"].Sort != "number" || strings.Join(got["state"].Values, ",") != "running,failed" {
 		t.Errorf("ready %+v, id %+v, state %+v", got["ready"], got["id"], got["state"])
@@ -115,8 +121,10 @@ func TestInspectorRules(t *testing.T) {
 	}
 }
 
-// The fixture's things table is the plan's: name, status, time, the
-// three numbers, tags, and the long text in the last slot.
+// The fixture's things table: name, status, size, the short text and
+// the labels, the bookkeeping timestamp, and the long text in the last
+// slot. The ids are minor: owner_id is hidden for its filter, id for
+// the detail's bind.
 func TestFixtureColumns(t *testing.T) {
 	res, err := Generate(context.Background(), Options{Input: Input{Spec: "../fixture/things/things.yaml"}})
 	if err != nil {
@@ -131,10 +139,138 @@ func TestFixtureColumns(t *testing.T) {
 			titles = append(titles, strings.SplitN(l[i+7:], ",", 2)[0])
 		}
 	}
-	if got := strings.Join(titles, ", "); got != "Name, Status, Created at, Id, Size, Owner id, Tags, Description" {
+	if got := strings.Join(titles, ", "); got != "Name, Status, Size, Tags, Team, Env, Created at, Description, Owner id, Id" {
 		t.Errorf("columns: %s\n%s", got, block)
 	}
-	if !strings.Contains(block, "# - {title: Team, value: labels.team}") {
-		t.Errorf("labels aren't commented out:\n%s", block)
+	if !strings.Contains(block, "- {title: Owner id, value: owner_id, hidden: true}") {
+		t.Errorf("owner_id, a filter's column, isn't hidden:\n%s", block)
+	}
+}
+
+// An event-shaped row: what you'd look at first is the title, the
+// venue's name, the times, the artists and categories; the bookkeeping
+// timestamps, coordinates and ids come after.
+const eventRow = `
+type: object
+properties:
+	id: {type: string, format: uuid}
+	title: {type: string}
+	description: {type: string}
+	venue: {type: object, properties: {id: {type: string, format: uuid}, name: {type: string}, address: {type: string}, lat: {type: number}, lng: {type: number}}}
+	start_time: {type: string, format: date-time}
+	end_time: {type: string, format: date-time}
+	categories: {type: array, items: {type: string}}
+	artist_names: {type: array, items: {type: string}}
+	price: {type: object, properties: {min: {type: number}}}
+	image_url: {type: string, format: uri}
+	created_at: {type: string, format: date-time}
+	updated_at: {type: string, format: date-time}
+`
+
+func TestRankEvents(t *testing.T) {
+	fs := schemaFields(schemaOf(t, eventRow))
+	kept, rest := columns.Pick(rank(fs, identityOf(fs, "events")), columns.DefaultMax)
+	var titles []string
+	for _, c := range kept {
+		titles = append(titles, c.Title)
+	}
+	if got := strings.Join(titles, ", "); got != "Title, Venue, Start time, End time, Categories, Artist names, Address, Description" {
+		t.Errorf("kept: %s", got)
+	}
+	var paths []string
+	for _, c := range rest {
+		paths = append(paths, c.Path)
+	}
+	// Minor, in tier order: nested fields, bookkeeping, coordinates, ids
+	// and links.
+	if got := strings.Join(paths, " "); got != "price.min created_at updated_at venue.lat venue.lng id venue.id image_url" {
+		t.Errorf("rest: %s", got)
+	}
+}
+
+// A window's filters find their parameters through a column's
+// underscored path (venue.id → venue_id) and a range named after the
+// column less _time (start_time → start_after, start_before), and the
+// columns they name stay in the table.
+func TestWindowFilterParams(t *testing.T) {
+	q := map[string]*openapi3.Parameter{}
+	for _, n := range []string{"venue_id", "start_after", "start_before", "created_from", "created_to"} {
+		q[n] = &openapi3.Parameter{Name: n, In: "query"}
+	}
+	if p := paramFor(q, "venue.id"); p != "venue_id" {
+		t.Errorf("paramFor(venue.id) = %q", p)
+	}
+	for path, want := range map[string]string{"start_time": "start_after", "created_at": "created_from", "end_time": ""} {
+		if lo, _ := rangePair(q, path); lo != want {
+			t.Errorf("rangePair(%s) = %q, want %q", path, lo, want)
+		}
+	}
+}
+
+func TestKeepFiltered(t *testing.T) {
+	kept := []columns.Column{{Path: "title", Rank: columns.Identity}, {Path: "when", Rank: columns.Time}, {Path: "notes", Rank: columns.Long}}
+	rest := []columns.Column{{Path: "tags", Rank: columns.Short}, {Path: "owner_id", Rank: columns.Short, Minor: true}}
+	kept, rest, hidden := keepFiltered(kept, rest, []string{"tags", "owner_id"})
+	var got []string
+	for _, cs := range [][]columns.Column{kept, rest, hidden} {
+		var p []string
+		for _, c := range cs {
+			p = append(p, c.Path)
+		}
+		got = append(got, strings.Join(p, " "))
+	}
+	// tags takes when's place; owner_id, minor, is hidden instead.
+	if strings.Join(got, " | ") != "title tags notes | when | owner_id" {
+		t.Errorf("kept | rest | hidden = %s", strings.Join(got, " | "))
+	}
+}
+
+// A GitHub-shaped spec: /orgs/{org}/issues has no /orgs list, but
+// /user/orgs ends in the same segment, so the orgs are a list to pick
+// from (bound by login, since {org} isn't an id) rather than a prompt.
+// Left out by the selection, a hint names it. No security scheme warns.
+const orgsSpec = `openapi: 3.0.3
+info: {title: Hub, version: '1'}
+servers: [{url: 'https://api.example.com'}]
+paths:
+  /user/orgs:
+    get:
+      operationId: orgs/list-mine
+      tags: [orgs]
+      responses:
+        '200': {description: ok, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Org'}}}}}
+  /orgs/{org}/issues:
+    get:
+      operationId: issues/list-for-org
+      tags: [issues]
+      parameters: [{name: org, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: ok, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Issue'}}}}}
+components:
+  schemas:
+    Org: {type: object, properties: {id: {type: integer}, login: {type: string}}}
+    Issue: {type: object, properties: {id: {type: integer}, title: {type: string}}}
+`
+
+func TestOrgsPickedFromSameEndingList(t *testing.T) {
+	gen := func(sel Select) Result {
+		t.Helper()
+		res, err := Generate(context.Background(), Options{Input: Input{Spec: "-", Stdin: strings.NewReader(orgsSpec)}, Select: sel})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	res := gen(Select{})
+	out := string(res.Config)
+	if strings.Contains(out, "prompts:") || !strings.Contains(out, "url: /orgs/${params.org}/issues") || !strings.Contains(out, "bind: {org: '${selection.Login}'}") {
+		t.Errorf("the orgs aren't a list to pick from:\n%s", out)
+	}
+	if !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "no security scheme") }) {
+		t.Errorf("no warning about the missing auth: %q", res.Warnings)
+	}
+	res = gen(Select{Tags: []string{"issues"}})
+	if !strings.Contains(string(res.Config), "prompts:") || len(res.Hints) != 1 || !strings.Contains(res.Hints[0], "--operation orgs/list-mine (GET /user/orgs)") {
+		t.Errorf("--tag issues: hints %q", res.Hints)
 	}
 }

@@ -1,5 +1,6 @@
 app:
   title: __TITLE__
+  surface: filled
 
 data:
   sources:
@@ -16,6 +17,7 @@ tui:
     people:
       type: tree
       title: People
+      searchable: true
       source: people
       group_by: team
       label: name

@@ -9,6 +9,7 @@
 #   POST /login: no list to attach it to
 app:
   title: Jobs
+  surface: filled
   version: "1"
   env:
     - name: JOBS_API_URL
@@ -124,14 +125,15 @@ tui:
             - {when: ~(fail|error|crash|backoff|unhealthy|fatal|critical|denied|reject|oom|evict), color: 'theme:error'}
             - {when: ~(pend|wait|progress|degrad|unknown|warn|terminat|queue|retry), color: 'theme:warning'}
         - {title: Paused, value: paused, sortable: true, max_width: 20}
-        - {title: Id, value: id, sortable: true, sort: number, align: right}
         - {title: Priority, value: priority, sortable: true, sort: number, align: right}
         - {title: Image, value: spec.image, sortable: true}
+        - {title: Id, value: id, sortable: true, sort: number, align: right}
     job:
       type: inspector
       title: Job
       source: job
       auto: true
+      filterable: true
       color_rules:
         - {when: queued, color: 'theme:warning', path: state}
         - {when: running, color: 'theme:success', path: state}

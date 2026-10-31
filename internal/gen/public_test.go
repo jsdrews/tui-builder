@@ -85,7 +85,9 @@ func TestPublicTagNarrows(t *testing.T) {
 	if len(all.Hints) == 0 || !strings.Contains(all.Hints[0], "--tag") {
 		t.Errorf("no --tag hint on the whole spec: %q", all.Hints)
 	}
-	if len(some.Hints) != 0 {
+	// Narrowed, there's no --tag hint, but the org prompt names the list
+	// that would offer the orgs as a choice.
+	if len(some.Hints) != 1 || strings.Contains(some.Hints[0], "--tag") || !strings.Contains(some.Hints[0], "--operation orgs/list-for-authenticated-user") {
 		t.Errorf("hints on a narrowed spec: %q", some.Hints)
 	}
 }

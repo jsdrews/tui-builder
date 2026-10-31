@@ -1,5 +1,6 @@
 app:
   title: __TITLE__
+  surface: filled
 
 data:
   sources:
@@ -12,6 +13,7 @@ tui:
     service:
       type: inspector
       title: Service
+      filterable: true
       source: service
       fields:
         - {label: Name,     path: name}

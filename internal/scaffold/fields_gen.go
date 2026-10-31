@@ -75,7 +75,7 @@ var reference = map[string][]Field{
 		{Name: "presets", Type: "map of preset", Default: "—", ValidOn: "—", Desc: "Named, partial leaf sources that sources `extends:` to share settings. A preset produces nothing and can't be bound or run. See [presets](sources.md#presets)."},
 	},
 	"app.md#app": {
-		{Name: "title", Type: "string", Default: "—", ValidOn: "—", Desc: "The terminal window's title, set when the app starts. The breadcrumb shows each screen's own `title:`."},
+		{Name: "title", Type: "string", Default: "—", ValidOn: "—", Desc: "The terminal window's title, set when the app starts. The breadcrumb shows each screen's own `title:`, and this on a first screen that has none."},
 		{Name: "version", Type: "string", Default: "—", ValidOn: "—", Desc: "Shown on the right of the statusbar."},
 		{Name: "theme", Type: "string", Default: "first built-in", ValidOn: "—", Desc: "The starting palette. The `TUI_BUILDER_THEME` environment variable overrides it for one run; when neither is set, the `theme:` in your own `$XDG_CONFIG_HOME/tuilib/config.yaml` is used. An unknown name falls through to the next of those, then to the first theme. Names: `dark`, `accent`, `light`, `solarized`, `nord`, `dracula`, `gruvbox`, `catppuccin-mocha`, `catppuccin-latte`, `tokyo-night`, `rose-pine`, `rose-pine-dawn`, `one-dark`, `monokai`, `everforest-dark`, `base16-ocean`, `base16-eighties`, `base16-railscasts`, `base16-tomorrow-night`."},
 		{Name: "surface", Type: "string", Default: "`outlined`", ValidOn: "—", Desc: "The starting surface: how every pane's edge and body are drawn, independent of the palette. `outlined` (line borders, no fill), `filled` (solid cards), `banded` (a card under a coloured header band), `elevated` (a card with a drop shadow) or `accented` (a bar down the left edge). The `TUI_BUILDER_SURFACE` environment variable overrides it for one run; when neither is set, the `surface:` in your tuilib config file is used. Filled surfaces need 256 colours (and `filled` / `elevated` block glyphs) and fall back toward `outlined` on a terminal without them."},
@@ -162,7 +162,7 @@ var reference = map[string][]Field{
 		{Name: "initial", Type: "string", Default: "—", ValidOn: "required with `screens`", Desc: "The name of the root screen in `screens:`."},
 	},
 	"app.md#screens": {
-		{Name: "title", Type: "template", Default: "—", ValidOn: "—", Desc: "Shown in the breadcrumb. On a pushed screen it can use `${selection…}` from the row that opened it."},
+		{Name: "title", Type: "template", Default: "`app.title` on the first screen", ValidOn: "—", Desc: "Shown in the breadcrumb. On a pushed screen it can use `${selection…}` from the row that opened it."},
 		{Name: "layout", Type: "node", Default: "—", ValidOn: "one of `layout` / `tabs`", Desc: "The root of the screen's layout tree."},
 		{Name: "actions", Type: "list of binding", Default: "—", ValidOn: "not with `tabs`", Desc: "Action bindings: which actions this screen offers, on which keys, fed by which component's selection. See [actions.md](actions.md#bindings)."},
 		{Name: "tabs", Type: "list", Default: "—", ValidOn: "one of `layout` / `tabs`", Desc: "Makes this a tabbed screen. See [tabs](#tabs)."},
@@ -185,16 +185,16 @@ var reference = map[string][]Field{
 	},
 	"app.md#stack-items": {
 		{Name: "flex", Type: "int", Default: "`1`", ValidOn: "set one of `flex` / `fixed`", Desc: "Share of the space left after fixed items. Used when neither is set."},
-		{Name: "fixed", Type: "int", Default: "—", ValidOn: "set one of `flex` / `fixed`", Desc: "Exact size in rows (vstack) or columns (hstack). An input or toggle in a vstack is always `3` rows."},
+		{Name: "fixed", Type: "int", Default: "—", ValidOn: "set one of `flex` / `fixed`", Desc: "Exact size in rows (vstack) or columns (hstack). An input in a vstack is always `3` rows."},
 	},
 	"app.md#zstack": {
 		{Name: "base", Type: "node", Default: "—", ValidOn: "required", Desc: "The node underneath."},
 		{Name: "overlay", Type: "node", Default: "—", ValidOn: "required", Desc: "The node drawn on top."},
 	},
 	"components.md#common-fields": {
-		{Name: "type", Type: "string", Default: "—", ValidOn: "required", Desc: "The kind: `list`, `table`, `logview`, `textview`, `tree`, `inspector`, `eventlog`, `input`, `toggle` or `menu`."},
+		{Name: "type", Type: "string", Default: "—", ValidOn: "required", Desc: "The kind: `list`, `table`, `logview`, `textview`, `tree`, `inspector`, `eventlog`, `input` or `menu`."},
 		{Name: "title", Type: "template", Default: "—", ValidOn: "—", Desc: "Shown on the pane border."},
-		{Name: "source", Type: "string", Default: "—", ValidOn: "not input, toggle or menu", Desc: "The `data.sources` entry that populates this component. When set, static content (`items`, `rows`, `lines`, `content`, `root`, `fields` values) is ignored."},
+		{Name: "source", Type: "string", Default: "—", ValidOn: "not input or menu", Desc: "The `data.sources` entry that populates this component. When set, static content (`items`, `rows`, `lines`, `content`, `root`, `fields` values) is ignored."},
 		{Name: "colors", Type: "map", Default: "—", ValidOn: "—", Desc: "Per-component color overrides. See [`colors`](#colors)."},
 		{Name: "color_rules", Type: "list", Default: "—", ValidOn: "list, logview, eventlog, auto inspector (with `path:`)", Desc: "Colors each item or line by its value; on an `auto: true` inspector, each leaf value, scoped by the rule's `path:`. Tables put rules on each column and declared inspectors on each field. See [color rules](#color-rules)."},
 		{Name: "filterable", Type: "bool", Default: "`false`", ValidOn: "list, table, inspector, eventlog", Desc: "`/` opens a filter that narrows the rows (`f` on an eventlog, where `/` is search)."},
@@ -208,7 +208,7 @@ var reference = map[string][]Field{
 		{Name: "mark_key", Type: "path", Default: "—", ValidOn: "source-bound markable table; span table; table with `activity`", Desc: "The stable identity marks and activity are held by, read from the source item (not the rendered cells), e.g. `metadata.uid`. Required on a markable source-bound table, on every span table and on a table with `activity`."},
 		{Name: "activity", Type: "map", Default: "—", ValidOn: "table, list, tree on a fetched or polled source", Desc: "Shows a spinner on rows the data says are being worked on. See [`activity`](#activity)."},
 		{Name: "on_cursor", Type: "map", Default: "—", ValidOn: "source-bound target", Desc: "Refetches this component's source as another component's cursor moves. See [`on_cursor`](#on_cursor)."},
-		{Name: "on_input", Type: "map", Default: "—", ValidOn: "source-bound target", Desc: "Refetches this component's source when an input or toggle on the screen commits. See [`on_input`](#on_input)."},
+		{Name: "on_input", Type: "map", Default: "—", ValidOn: "source-bound target", Desc: "Refetches this component's source when an input on the screen commits. See [`on_input`](#on_input)."},
 	},
 	"components.md#list": {
 		{Name: "items", Type: "list of template", Default: "—", ValidOn: "static", Desc: "The rows."},
@@ -292,11 +292,6 @@ var reference = map[string][]Field{
 		{Name: "placeholder", Type: "template", Default: "—", ValidOn: "—", Desc: "Shown while the field is empty."},
 		{Name: "char_limit", Type: "int", Default: "`0` (none)", ValidOn: "—", Desc: "The longest value accepted."},
 		{Name: "mask", Type: "bool", Default: "`false`", ValidOn: "—", Desc: "Shows typed characters as bullets (`app.glyphs.mask`)."},
-	},
-	"components.md#toggle": {
-		{Name: "initial", Type: "string", Default: "`false`", ValidOn: "—", Desc: "`true` or `false`."},
-		{Name: "yes_label", Type: "string", Default: "`yes`", ValidOn: "—", Desc: "The \"true\" side's label."},
-		{Name: "no_label", Type: "string", Default: "`no`", ValidOn: "—", Desc: "The \"false\" side's label."},
 	},
 	"components.md#menu": {
 		{Name: "label", Type: "string", Default: "—", ValidOn: "required", Desc: "The item's text. The filter matches it, and the group."},
@@ -518,14 +513,15 @@ var reference = map[string][]Field{
 		{Name: "older", Type: "map", Default: "—", ValidOn: "http, with `cursor`", Desc: "What the request changes to walk towards older items, merged into `body:` or set as query parameters."},
 		{Name: "newer", Type: "map", Default: "—", ValidOn: "http, with `cursor`", Desc: "The same, walking towards newer items."},
 		{Name: "anchor", Type: "string", Default: "`newest`", ValidOn: "with `cursor`", Desc: "Where an Anchored view starts: `newest` (and follows), `oldest` (and walks newer as you scroll down), or a template that resolves to a cursor, `${input.jump_to}`, to jump there. See [jumping](#jumping-to-a-cursor)."},
-		{Name: "find", Type: "map", Default: "—", ValidOn: "http", Desc: "Searches past what's loaded: `n` / `N` ask the source where the next match is. See [`find`](#find)."},
+		{Name: "find", Type: "map", Default: "—", ValidOn: "http, exec", Desc: "Searches past what's loaded: `n` / `N` ask the source where the next match is. See [`find`](#find)."},
 		{Name: "viewport_delay", Type: "duration", Default: "tuilib's", ValidOn: "—", Desc: "How long scrolling must pause before rows are requested. `-` asks at once."},
 		{Name: "growing", Type: "`true` or map", Default: "—", ValidOn: "eventlog only; not with `refresh`", Desc: "The set is still gaining items at its newest end. A bound eventlog follows the newest item and the source is polled every `follow_every`; when growth stops, one final read picks up the last items. `true` grows for as long as the screen is open. The map form ties it to another source; see [growing](#growing)."},
 		{Name: "follow_every", Type: "duration", Default: "`2s`", ValidOn: "needs `growing`", Desc: "Poll interval while growing."},
 	},
 	"sources.md#find": {
-		{Name: "params", Type: "map", Default: "—", ValidOn: "one of `params` / `body`", Desc: "Query parameters set on the search request."},
-		{Name: "body", Type: "map", Default: "—", ValidOn: "one of `params` / `body`", Desc: "Fields merged into the request's JSON body."},
+		{Name: "params", Type: "map", Default: "—", ValidOn: "http: one of `params` / `body`", Desc: "Query parameters set on the search request."},
+		{Name: "body", Type: "map", Default: "—", ValidOn: "http: one of `params` / `body`", Desc: "Fields merged into the request's JSON body."},
+		{Name: "command", Type: "list of template", Default: "—", ValidOn: "exec; required there", Desc: "The argv that prints the match, in the source's own shape (its `root:` and fields). Must reference `${window.term}`."},
 		{Name: "position", Type: "path", Default: "—", ValidOn: "required on a paged source; not on an Anchored one", Desc: "The path in the matching item to its 0-based position in the (filtered) set."},
 	},
 	"sources.md#growing": {

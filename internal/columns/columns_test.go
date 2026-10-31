@@ -9,8 +9,9 @@ func cols(spec string) []Column {
 	var out []Column
 	for _, f := range strings.Fields(spec) {
 		name, rank, _ := strings.Cut(f, ":")
+		rank, minor := strings.CutSuffix(rank, "!")
 		r := map[string]Rank{"id": Identity, "st": Status, "t": Time, "n": Number, "s": Short, "l": Long, "e": Empty}[rank]
-		out = append(out, Column{Path: name, Title: name, Rank: r})
+		out = append(out, Column{Path: name, Title: name, Rank: r, Minor: minor})
 	}
 	return out
 }
@@ -40,6 +41,10 @@ func TestPick(t *testing.T) {
 		{"id:id desc:l", 3, "id desc", ""},
 		// Empty columns go last, after long text.
 		{"e:e id:id x:l", 2, "id x", "e"},
+		// A minor column (marked !) sorts after short text, whatever its
+		// rank, and is the one long text displaces.
+		{"made:t! id:id s:s when:t lat:n! desc:l", 4, "id when s desc", "made lat"},
+		{"id:id s:s made:t! desc:l", 3, "id s desc", "made"},
 	} {
 		kept, rest := Pick(cols(tc.in), tc.max)
 		if names(kept) != tc.kept || names(rest) != tc.rest {
@@ -124,5 +129,39 @@ func TestNames(t *testing.T) {
 				t.Errorf("%s shouldn't match", n)
 			}
 		}
+	}
+}
+
+func TestMinorNames(t *testing.T) {
+	for name, want := range map[string]bool{
+		"created_at": true, "updatedAt": true, "last_modified": true, "modified": true, "start_time": false, "created": true,
+	} {
+		if IsBookkeepingName(name) != want {
+			t.Errorf("IsBookkeepingName(%q) = %v", name, !want)
+		}
+	}
+	for name, want := range map[string]bool{"lat": true, "Longitude": true, "latency": false} {
+		if IsCoordinateName(name) != want {
+			t.Errorf("IsCoordinateName(%q) = %v", name, !want)
+		}
+	}
+	for name, want := range map[string]bool{"id": true, "owner_id": true, "ownerId": true, "idle": false, "valid": false} {
+		if IsIDName(name) != want {
+			t.Errorf("IsIDName(%q) = %v", name, !want)
+		}
+	}
+	for name, want := range map[string]bool{"image_url": true, "href": true, "self_link": true, "title": false} {
+		if IsLinkName(name) != want {
+			t.Errorf("IsLinkName(%q) = %v", name, !want)
+		}
+	}
+}
+
+// Only the first identity column is bold; a nested object's name after
+// it isn't.
+func TestStylesBoldFirstIdentity(t *testing.T) {
+	st := Styles([]Column{{Path: "title", Rank: Identity}, {Path: "venue.name", Rank: Identity}})
+	if !st[0].Bold || st[1].Bold {
+		t.Errorf("bold: %v %v, want true false", st[0].Bold, st[1].Bold)
 	}
 }

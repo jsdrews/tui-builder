@@ -1,11 +1,13 @@
 app:
   title: __TITLE__
+  surface: filled
 
 tui:
   components:
     log:
       type: logview
       title: app.log
+      searchable: true
       lines:
         - "08:00:01 INFO  app starting up"
         - "08:00:02 INFO  connected to the database"

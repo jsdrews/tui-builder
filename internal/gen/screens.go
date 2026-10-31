@@ -133,7 +133,9 @@ func classify(s *spec, gets []op) ([]*read, []skip, error) {
 // parentOf finds the list a path's one parameter comes from: for a
 // detail, /things/{id} is /things plus the parameter; for a sub-list,
 // /owners/{id}/things is a list, /owners, then the parameter, then
-// literal segments. Only top-level lists are parents, since a pushed
+// literal segments. With no list at that path, a top-level list ending
+// in the same segment stands in: /user/orgs for /orgs/{org}/issues, when
+// there's no /orgs. Only top-level lists are parents, since a pushed
 // screen can't carry its own parameters on to another push.
 func parentOf(path string, lists map[string]*read, detail bool) (*read, string) {
 	segs := strings.Split(strings.Trim(path, "/"), "/")
@@ -150,11 +152,29 @@ func parentOf(path string, lists map[string]*read, detail bool) (*read, string) 
 	if detail && i != len(segs)-1 || !detail && i == len(segs)-1 {
 		return nil, ""
 	}
-	parent := lists["/"+strings.Join(segs[:i], "/")]
-	if parent == nil {
+	param := strings.Trim(segs[i], "{}")
+	if parent := lists["/"+strings.Join(segs[:i], "/")]; parent != nil {
+		return parent, param
+	}
+	if i == 0 {
 		return nil, ""
 	}
-	return parent, strings.Trim(segs[i], "{}")
+	if parent := sameEnd(segs[i-1], lists); parent != nil && idProperty(parent.item, param, segs[i-1]) != "" {
+		return parent, param
+	}
+	return nil, ""
+}
+
+// sameEnd is the top-level list whose path ends in the literal seg
+// (/user/orgs for orgs), the shortest when several do; nil when none.
+func sameEnd(seg string, lists map[string]*read) *read {
+	var best *read
+	for path, r := range lists {
+		if lastLiteral(path) == seg && (best == nil || len(path) < len(best.op.path) || len(path) == len(best.op.path) && path < best.op.path) {
+			best = r
+		}
+	}
+	return best
 }
 
 // orphanParam is a sub-list path's one parameter when it isn't last
@@ -324,7 +344,13 @@ func idProperty(item *openapi3.Schema, param, listSeg string) string {
 	}
 	_, props := properties(item)
 	one := singular(listSeg)
-	for _, want := range []string{param, "id", one + "_id", strings.TrimPrefix(param, one+"_")} {
+	wants := []string{param, "id", one + "_id", strings.TrimPrefix(param, one+"_")}
+	// A parameter not named like an id ({org}, {username}) takes a name:
+	// GitHub's /orgs/{org} wants the login, not the number.
+	if param != "id" && !strings.HasSuffix(param, "_id") && !strings.HasSuffix(param, "Id") {
+		wants = append([]string{param, "login", "name", "slug", "username", "key"}, wants[1:]...)
+	}
+	for _, want := range wants {
 		if p, ok := props[want]; ok && isScalar(p) {
 			return want
 		}
@@ -393,6 +419,13 @@ func (b *built) takeKey(want, name string) string {
 	return pushKey(name, b.keys)
 }
 
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func (b *built) topLevel() bool { return b.kind == kindList || b.kind == kindSingleton }
 
 // build makes each read into a source and a component, and wires each
@@ -401,7 +434,18 @@ func build(ctx context.Context, s *spec, p *preset, reads []*read, title string,
 	byRead := map[*read]*built{}
 	var out []*built
 	var skips []skip
-	for _, r := range reads {
+	// Parents first, so a list that sorts after its child (/user/orgs
+	// after /orgs/{org}/issues) is built when the child looks for it;
+	// the screens keep the reads' order.
+	order := slices.Clone(reads)
+	slices.SortStableFunc(order, func(a, b *read) int {
+		return boolInt(a.parent != nil) - boolInt(b.parent != nil)
+	})
+	at := map[*read]int{}
+	for i, r := range reads {
+		at[r] = i
+	}
+	for _, r := range order {
 		if r.parent != nil && byRead[r.parent] == nil {
 			skips = append(skips, skip{r.op, "its list " + r.parent.op.String() + " wasn't generated"})
 			continue
@@ -417,6 +461,7 @@ func build(ctx context.Context, s *spec, p *preset, reads []*read, title string,
 		byRead[r] = b
 		out = append(out, b)
 	}
+	slices.SortStableFunc(out, func(a, b *built) int { return at[a.read] - at[b.read] })
 	actions := mapping()
 	for _, b := range out {
 		if b.parent == nil {
@@ -603,6 +648,10 @@ func buildRead(ctx context.Context, s *spec, p *preset, r *read, title string) (
 		if err != nil {
 			return nil, "", err
 		}
+		var hidden []columns.Column
+		if len(h.Columns) == 0 {
+			kept, rest, hidden = keepFiltered(kept, rest, pg.filtered)
+		}
 		if err := s.applyPaging(h, &pg, kept, r.name); err != nil {
 			return nil, "", err
 		}
@@ -621,6 +670,9 @@ func buildRead(ctx context.Context, s *spec, p *preset, r *read, title string) (
 		cols := seq()
 		for i, c := range kept {
 			cols.Content = append(cols.Content, columnNode(c, styles[i], b.sortable, b.onWind))
+		}
+		for _, c := range hidden {
+			cols.Content = append(cols.Content, flow(mapping("title", str(c.Title), "value", str(c.Path), "hidden", boolean(true))))
 		}
 		filterable := pg.window == nil || pg.filterable
 		b.comp = mapping("type", str("table"), "title", str(label), "source", str(r.name))
@@ -648,13 +700,43 @@ func buildRead(ctx context.Context, s *spec, p *preset, r *read, title string) (
 		}
 		s.applyScreen(h, b)
 	default:
-		b.comp = mapping("type", str("inspector"), "title", str(label), "source", str(r.name), "auto", boolean(true))
+		b.comp = mapping("type", str("inspector"), "title", str(label), "source", str(r.name), "auto", boolean(true), "filterable", boolean(true))
 		if rules := inspectorRules(unwrapNull(responseSchema(o.op))); rules != nil {
 			add(b.comp, "color_rules", rules)
 		}
 		s.applyScreen(h, b)
 	}
 	return b, "", nil
+}
+
+// keepFiltered makes sure each column a window's filters name is in the
+// table, since a scoped filter term only matches a column it has. One
+// the ranking left out is written hidden when it's minor (venue.id),
+// else kept in place of the last kept column that isn't an identity,
+// the long-text column or filtered itself.
+func keepFiltered(kept, rest []columns.Column, filtered []string) (_, _, hidden []columns.Column) {
+	for _, path := range filtered {
+		i := slices.IndexFunc(rest, func(c columns.Column) bool { return c.Path == path })
+		if i < 0 {
+			continue
+		}
+		out := -1
+		for j := len(kept) - 1; j >= 0 && !rest[i].Minor; j-- {
+			if c := kept[j]; c.Rank != columns.Identity && c.Rank != columns.Long && !slices.Contains(filtered, c.Path) {
+				out = j
+				break
+			}
+		}
+		if out < 0 {
+			hidden = append(hidden, rest[i])
+			rest = slices.Delete(rest, i, i+1)
+			continue
+		}
+		kept[out], rest[i] = rest[i], kept[out]
+	}
+	columns.SortByRank(kept)
+	columns.SortByRank(rest)
+	return kept, rest, hidden
 }
 
 // markKey is the row's id, for marking rows off a window: id or

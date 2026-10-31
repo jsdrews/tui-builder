@@ -7,6 +7,7 @@
 
 app:
   title: demo
+  surface: filled
 
 data:
   sources:
@@ -82,6 +83,17 @@ data:
       #                                 # `oldest` (and walks newer as you scroll down), or a
       #                                 # template that resolves to a cursor, `${input.jump_to}`, to
       #                                 # jump there. (with `cursor`)
+      #   find:                         # Searches past what's loaded: `n` / `N` ask the source
+      #                                 # where the next match is. (http, exec)
+      #     params: {name: "${window.search}"}  # Query parameters set on the search request. (http:
+      #                                         # one of `params` / `body`)
+      #     body: {}                    # Fields merged into the request's JSON body. (http: one of
+      #                                 # `params` / `body`)
+      #     command: []                 # The argv that prints the match, in the source's own shape
+      #                                 # (its `root:` and fields). (exec; required there)
+      #     position: id                # The path in the matching item to its 0-based position in
+      #                                 # the (filtered) set. (required on a paged source; not on an
+      #                                 # Anchored one)
       #   viewport_delay: ""            # How long scrolling must pause before rows are requested.
       #   growing:                      # The set is still gaining items at its newest end.
       #                                 # (eventlog only; not with `refresh`)
@@ -96,6 +108,7 @@ tui:
     services:
       type: table
       title: Services
+      filterable: true
       source: services
       columns:
         - {title: Name,   value: name}

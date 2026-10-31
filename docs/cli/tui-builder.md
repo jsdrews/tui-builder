@@ -7,7 +7,11 @@ tui-builder <config.yaml>
 tui-builder <command> [args]
 ```
 
-The run form takes one argument, the config file. Its only flags are
+The run form takes one argument, the config file, or `-` to read the
+config from stdin (`tui-builder init | tui-builder -`). The
+keys still come from the terminal. A config from stdin resolves an
+`app.env` `from: {file:}` path against the working directory, where a
+file's resolves against its own directory. Its only flags are
 `--version` (or `-v`), which prints the version and exits, and `--help`
 (or `-h`).
 
@@ -51,32 +55,42 @@ select text for copying.
 
 Each has its own `--help`.
 
+`init`, `gen` and `add exec` all print the config they make to stdout,
+with what they report on stderr, so the config can be piped. `-o FILE`
+writes it to a file instead, refusing one that exists unless `--force`.
+
+Every config they make sets `app.surface: filled`, and turns `/` on in
+every component that has it: `filterable: true` on a list, table or
+inspector, `searchable: true` on a logview, textview, tree or eventlog.
+A windowed table is filterable only when its source has somewhere to
+send the filter. Delete the line to fall back to your tuilib
+config's `surface:`, or `outlined`.
+
 ### `tui-builder init`
 
 ```sh
-tui-builder init [kind] [-o FILE] [--title TITLE] [--dry-run] [--force]
+tui-builder init [kind] [-o FILE] [--title TITLE] [--force]
 ```
 
-Writes a small commented config that runs straight away, offline: a
+Prints a small commented config that runs straight away, offline: a
 `static` source, a filterable table bound to it, and one screen. An http
 source and an exec source sit commented out under `data.sources` as next
 steps, and each section links its reference page. It asks nothing; the
-flags are the only choices. The file it writes is shown in the
+flags are the only choices. The config is shown in the
 [quick start](../quickstart.md#a-first-config).
 
 | Flag | Default | What it does |
 |---|---|---|
-| `-o`, `--output FILE` | `tui-builder.yaml` | The file to write. Its directory must exist. |
-| `--title TITLE` | the name of the directory the file goes into | `app.title`. |
-| `--dry-run` | off | Prints the config to stdout and writes nothing. |
-| `--force` | off | Overwrites an existing file. Without it, an existing file is an error that names it and suggests `--force` or `-o`. |
+| `-o`, `--output FILE` | stdout | Writes the config to this file instead. Its directory must exist. |
+| `--title TITLE` | the name of the directory the file goes into (the current one without `-o`) | `app.title`. |
+| `--force` | off | Overwrites an existing `-o` file. Without it, an existing file is an error that names it and suggests `--force` or `-o`. |
 
-After writing, it prints the command that runs the file:
+After writing a file, it prints the command that runs it on stderr:
 `run: tui-builder tui-builder.yaml`.
 
 #### `tui-builder init <kind>`
 
-With a kind, `init` writes an example of that one component kind or
+With a kind, `init` prints an example of that one component kind or
 source type instead: a small config built around it that runs as
 written, with every field the kind takes below it, commented out. It's
 a way to start from any kind, and a list of everything that kind can
@@ -84,12 +98,13 @@ do.
 
 | Kinds | |
 |---|---|
-| Components | `list`, `table`, `logview`, `textview`, `tree`, `inspector`, `eventlog`, `input`, `toggle`, `menu` |
+| Components | `list`, `table`, `logview`, `textview`, `tree`, `inspector`, `eventlog`, `input`, `menu` |
 | Sources | `http`, `exec`, `file`, `websocket`, `static`, `merge` |
 
 ```sh
-tui-builder init table                 # writes tui-builder.yaml
-tui-builder init http --dry-run | less # or read it first
+tui-builder init table | less          # read it
+tui-builder init table | tui-builder - # run it
+tui-builder init table -o table.yaml   # save it
 ```
 
 - **Each commented line is one field:** its default where the docs give
@@ -106,8 +121,9 @@ tui-builder init http --dry-run | less # or read it first
   `items:` is "Instead of source, item."
 - **The `#` sits at the block's indent** on every line, so deleting
   `# ` leaves a line where it belongs.
-- **`init file`** also writes the `services.json` it reads, beside the
-  config; both are checked first, so `--force` or nothing.
+- **`init file`** reads a `services.json`, which `-o` writes beside the
+  config; both are checked first, so `--force` or nothing. Without `-o`,
+  a note on stderr says the config needs it.
 - **`init http` and `init websocket`** read the things fixture API.
   In a clone of tui-builder, start it with `go run
   ./internal/fixture/things/thingsd`; or set `THINGS_API_URL` (or
@@ -151,7 +167,10 @@ still generate.
   scheme tui-builder can't send (mutualTLS) is a warning. Of alternatives
   the first is used; schemes required together go in as headers or query
   parameters. An operation with `security: []` gets `unset: [auth]`, and
-  one with another scheme its own `auth:`.
+  one with another scheme its own `auth:`. A spec that declares no
+  security scheme at all (GitHub's) gets no `auth:`, and a warning says
+  requests go out anonymous until an overrides file adds
+  `data.presets.<name>.auth`.
 - **`retry: {}`** goes on the preset when the spec documents a 429 or
   rate-limit headers.
 - **Screens,** one per GET it can show, named from the path (`/things` →
@@ -168,29 +187,45 @@ still generate.
   - a **sub-list** (`/owners/{owner_id}/things`) is pushed from its parent
     list's row through the action menu, on a key from its name (`a`, then
     `i`);
+  - with no list at the parent path, a top-level list ending in the same
+    segment is the parent: `/user/orgs` for `/orgs/{org}/issues`, when
+    the spec has no `/orgs`. A parameter not named like an id (`{org}`,
+    `{username}`) is filled from a name-like field (`login`, `name`,
+    `slug`) before `id`;
   - a **singleton** (no path parameters, one object) is an inspector.
 
   A required query parameter is asked for at startup (`app.prompts`; an
   enum is a select) and sent from the environment; optional ones are left
   out. A sub-list whose parent list isn't generated (the spec has none, or
   `--tag` left it out) is a list of its own, its path parameter asked for
-  at startup the same way. A spec with nothing to show stops with
+  at startup the same way. When the spec has a list that could offer the
+  parameter as a choice but the selection left it out, a hint names the
+  `--operation` to add. A spec with nothing to show stops with
   "nothing to generate".
 - **Columns** come from the row schema: scalars, nested objects
   flattened two levels (`labels.team`), and lists of plain values (shown
   `a, b`); lists of objects, maps, alternatives of different shapes and
   `writeOnly` fields are left out. They're ranked as `add exec` ranks a
   sample's, with the schema as the evidence: the identity (a name-like
-  field, else the id a detail binds), then states (an enum, a boolean, a
+  field, else the id a detail binds) and a nested object's name
+  (`venue.name`, titled `Venue`), then states (an enum, a boolean, a
   status-like name), timestamps (`date-time` / `date`), numbers, short
-  text, and long text (a description-like name, or a `maxLength` over
-  80). The first 8 are written, one slot kept for the first long-text
+  text, minor columns, and long text (a description-like name, or a
+  `maxLength` over 80). Minor columns, whatever their kind, are a
+  nested object's other fields (`price.min`), then bookkeeping
+  timestamps (`created_at`, `updatedAt`), then coordinates (`lat`,
+  `lng`), then ids and links (`id`, `owner_id`, a `uuid` or `uri`
+  format, `image_url`). The first 8 are written, one slot kept for the first long-text
   column, and the rest follow commented out. The style is `add exec`'s
-  too: the identity bold, status colours for the enum's values,
+  too: the first identity bold, status colours for the enum's values,
   `> 0` warnings on failure counts, numbers right-aligned with
   `sort: number`, and `flex: 1` on the long text. Titles are the field
   name in words, not the schema's `title`. A column a push binds is
-  always written, hidden when it's past the cap. Off a window, a table
+  always written, hidden when it's past the cap. So is a column a
+  window filters: past the cap, a minor one is written hidden, and any
+  other takes the place of the last column that isn't an identity or
+  the long text. A filter term matches a hidden column too, by a prefix
+  of its title (`owner:2` for Owner id). Off a window, a table
   whose rows have a required `id` is markable by it. A detail's or
   singleton's inspector colours its enum fields the same way, each rule
   scoped by `path:`.
@@ -214,9 +249,12 @@ still generate.
   its enum become `sort_fields` (a `-` prefix means descending, and a
   value that matches a column only once case and underscores are ignored
   gets a `sorts:` entry); a `q` / `search`-like parameter is the search;
-  a parameter named like a column's field filters that column, as do
+  a parameter named like a column's field filters that column (a
+  nested field's with `_` for `.`: `venue_id` for `venue.id`), as do
   range pairs (`size_gte` / `size_lte`, `created_after` /
-  `created_before`); enum columns list their values for completion; and
+  `created_before`, and `start_after` / `start_before` for `start_time`,
+  since `_at`, `_time`, `_date` and `_on` are dropped from the field's
+  name); enum columns list their values for completion; and
   the table is filterable only with somewhere to send a filter. Columns
   the enum doesn't list don't sort. Off a window, every column sorts
   and filters the rows held. Notes after the summary say which lists
@@ -273,8 +311,8 @@ still generate.
   lists, or need a column, title or secret source the spec can't name.
   Don't edit the generated file; put changes in an overrides file and
   pass `--overrides FILE` every time, so a regeneration keeps them.
-  `--init-overrides FILE` writes a starter listing every generated
-  operation, commented out, with the hints each can take. The file has
+  `--init-overrides` prints a starter listing every generated
+  operation (`-o FILE` writes it), commented out, with the hints each can take. The file has
   two parts:
 
   ```yaml
@@ -342,7 +380,7 @@ still generate.
 | Flag | Default | What it does |
 |---|---|---|
 | `-o`, `--output FILE` | stdout | Writes the config to `FILE`. An existing file is an error without `--force`. |
-| `--force` | off | Overwrites an existing `-o` or `--init-overrides` file. |
+| `--force` | off | Overwrites an existing `-o` file. |
 | `--header 'Name: value'` | — | Sent when fetching the spec (and its `$ref`s) from a URL, for specs behind auth. Repeatable. Never written to the config. |
 | `--timeout D` | `30s` | How long fetching from a URL may take. |
 | `--tag TAG` | all | Only operations with this tag. Repeatable; globs (`admin*`). |
@@ -357,7 +395,7 @@ still generate.
 | `--prompt-server` | off | When the spec lists several servers, asks which at startup (`app.prompts`). |
 | `--overrides FILE` | — | Merges this file's hints and config into what's generated. See Overrides, above. |
 | `--prune-overrides` | off | Warns, rather than fails, on hints for operations the spec no longer has. |
-| `--init-overrides FILE` | — | Writes a starter overrides file listing every generated operation, instead of the config. Refuses an existing file without `--force`. |
+| `--init-overrides` | off | Prints a starter overrides file listing every generated operation, instead of the config; `-o FILE` writes it. |
 | `--quiet` | off | Prints no summary, hints or skipped operations. Warnings still print. |
 
 Exit status: `0` written (skipped operations aren't a failure), `1` an
@@ -376,12 +414,12 @@ tui-builder add exec [flags] -- <command> [args…]
 ```
 
 Runs the command once, reads the JSON it prints, and prints a complete
-config to stdout (or, with `--into`, adds to one you have): an exec source for the command, and a table that
+config to stdout (or `-o FILE`; with `--into`, it adds to one you have): an exec source for the command, and a table that
 shows it (an `auto: true` inspector when the output is a single object),
 on one screen. Save it and run it:
 
 ```sh
-tui-builder add exec -- kubectl get pods -o json > pods.yaml
+tui-builder add exec -o pods.yaml -- kubectl get pods -o json
 tui-builder pods.yaml
 ```
 
@@ -390,10 +428,17 @@ tui-builder pods.yaml
   environment and working directory, as at runtime; no environment
   variable is copied into the config. It prints `running: <command>` on
   stderr first, and `Ctrl-C` cancels it.
-- **The rows:** a top-level list; or an object holding exactly one list
-  of objects (a Kubernetes `List`'s `items`), which becomes `root:`; or
-  one JSON value per line (NDJSON), of which the first 50 are sampled. An
-  object with several lists of objects stops and asks for `--root`.
+- **The rows:** a top-level list; or an object that wraps exactly one
+  list of objects, which becomes `root:`; or one JSON value per line
+  (NDJSON), of which the first 50 are sampled. An object wraps its list
+  when everything else in it is paging or metadata (a Kubernetes
+  `List`'s `kind` and `metadata`, a page's `total` and `next`) or at
+  most two other fields. An object with more fields of its own (a movie
+  with a list of ratings) is one object, shown by an inspector, and the
+  summary names `--root` for a table of its list. An object with
+  several lists of objects stops and asks for `--root`. With
+  `--component inspector`, no root is looked for: it shows the whole
+  value.
 - **The columns** come from every field seen across the rows. Nested
   objects flatten two levels (`metadata.name`), a list of plain values
   is one column shown as `a, b`, and lists of objects and fields null in
@@ -492,7 +537,9 @@ tui-builder pods.yaml
   items. A window can't be combined with `--refresh`, `--follow` or
   `--no-run`.
 - **Adding to a config you have** (`--into app.yaml`): the source and
-  component go into it instead of printing a new config. Where the
+  component go into it, and the result is printed; `-o app.yaml` writes
+  it back over the file, with no `--force` needed, and `-o` another file
+  writes it there. Pipe it to `diff app.yaml -` to see the change. Where the
   component goes depends on the config's shape:
   - one screen: into its layout. A lone `component:` becomes a `vstack`
     of the old and the new; a `vstack` gets one more item;
@@ -511,9 +558,9 @@ tui-builder pods.yaml
   indentation or CRLF endings. So is a name that's taken: "source `pods`
   already exists — pass `--name pods2`". Before writing, the result is
   checked to be the old config plus exactly the new entries, and loaded;
-  if either fails nothing is written. `--dry-run` prints the change as a
-  unified diff instead; otherwise the file is replaced in one step
-  (keeping its permissions) and a line says what went where.
+  if either fails nothing is written or printed. Written back in place,
+  the file is replaced in one step (keeping its permissions), and a line
+  on stderr says what went where.
 - **Flags win; inference fills the rest.** After the config, stderr
   lists each choice and where it came from (`name: pods (inferred)`,
   `component: list (--component)`), with a warning for any flag the
@@ -524,7 +571,8 @@ tui-builder pods.yaml
   `${params.ns}`, and the source declares `ns` with the value as its
   `default`, so it still runs as it did. A value that's missing, or
   appears more than once, is an error. Each parameter gets an input
-  field (a toggle for a `bool`) above the component, which reads it
+  field above the component (for a `bool`, its placeholder says `true
+  or false`), which reads it
   through `on_input`; `--no-inputs` leaves them out, for a source a push
   will fill instead.
 - **Failures print nothing to stdout:** a non-zero exit (with the last
@@ -552,9 +600,10 @@ tui-builder pods.yaml
 | `--cursor-path PATH` | inferred | Each item's cursor, for an anchored window. |
 | `--growing` | off | The eventlog's set is still gaining items: it follows the newest (`growing: true`). Only on an eventlog. |
 | `--follow-every D` | `2s` | How often a growing window is polled (`follow_every:`). Needs `--growing`. |
-| `--into FILE` | — | Adds the source and component to this config, instead of printing a new one. |
+| `-o`, `--output FILE` | stdout | Writes the config to `FILE`. An existing file is an error without `--force`, except the `--into` file, which this edits in place. |
+| `--force` | off | Overwrites an existing `-o` file. |
+| `--into FILE` | — | Adds the source and component to this config, and prints the result. |
 | `--place WHERE` | by the config's shape | With `--into`: `stack` (the screen's layout), `tab` (a new tab) or `screen` (a new screen, linked from the initial screen's menu if it has one). |
-| `--dry-run` | off | With `--into`: prints the change as a unified diff and writes nothing. |
 | `--no-run` | off | Doesn't run the command, for one that's slow or changes something. With no sample to take columns from, the source is shown by an `auto: true` inspector, or by a table or list of the `--columns` given. |
 
 ### `tui-builder version`

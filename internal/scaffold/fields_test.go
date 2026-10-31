@@ -64,9 +64,9 @@ func TestKindsOf(t *testing.T) {
 		"required when source-bound": "",
 		"list, logview, eventlog, auto inspector (with `path:`)":         "list logview inspector eventlog",
 		"source-bound markable table; span table; table with `activity`": "table",
-		"source-bound target":       "list table logview tree inspector textview eventlog",
-		"not with `follow`":         "",
-		"not input, toggle or menu": "list table logview tree inspector textview eventlog",
+		"source-bound target": "list table logview tree inspector textview eventlog",
+		"not with `follow`":   "",
+		"not input or menu":   "list table logview tree inspector textview eventlog",
 	} {
 		got, err := kindsOf(cell, all)
 		if err != nil || strings.Join(got, " ") != want {

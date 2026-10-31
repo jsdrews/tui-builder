@@ -1,11 +1,13 @@
 app:
   title: __TITLE__
+  surface: filled
 
 tui:
   components:
     notes:
       type: textview
       title: Notes
+      searchable: true
       content: |
         A textview shows a block of text: notes, help, a file's contents.
         Press / to search it.

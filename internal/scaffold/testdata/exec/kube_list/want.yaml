@@ -1,6 +1,7 @@
 # Written by `tui-builder add exec -- kubectl get pods -o json`.
 app:
   title: Pods
+  surface: filled
 data:
   sources:
     pods:

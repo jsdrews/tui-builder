@@ -1,10 +1,7 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -15,31 +12,30 @@ import (
 	"github.com/jsdrews/tui-builder/internal/scaffold"
 )
 
-// defaultInitPath is where `tui-builder init` writes without -o.
-const defaultInitPath = "tui-builder.yaml"
-
 func newInitCmd() *cobra.Command {
 	var (
 		output string
 		title  string
-		dryRun bool
 		force  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "init [kind]",
-		Short: "Write a starter config, or an example of any kind.",
-		Long: `init writes a small commented config that runs straight away, offline:
+		Short: "Print a starter config, or an example of any kind.",
+		Long: `init prints a small commented config that runs straight away, offline:
 a static source, a filterable table bound to it, and one screen, with
-an http and an exec source commented out as next steps.
+an http and an exec source commented out as next steps. -o writes it
+to a file instead.
 
-init <kind> writes a small config built around one component kind or
+init <kind> prints a small config built around one component kind or
 source type, which runs as written, with every field that kind takes
 below it, commented out: each line shows the field's default and what
-it does. init file also writes the JSON file it reads; init http and
-init websocket read the things fixture API.
+it does. init file reads a JSON file, which -o writes beside the
+config; init http and init websocket read the things fixture API.
 
 Components: ` + strings.Join(scaffold.ComponentKinds, ", ") + `.
 Sources: ` + strings.Join(scaffold.SourceKinds, ", ") + `.`,
+		Example: `  tui-builder init table | tui-builder -   # run one without saving it
+  tui-builder init table -o table.yaml     # save it`,
 		Args:      usageArgs(cobra.MaximumNArgs(1)),
 		ValidArgs: scaffold.Kinds(),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -65,21 +61,22 @@ Sources: ` + strings.Join(scaffold.SourceKinds, ", ") + `.`,
 					return err
 				}
 			}
-			if dryRun {
-				_, err := cmd.OutOrStdout().Write(ex.Config)
-				return err
-			}
-			// Refuse before writing anything, so a refusal leaves no half.
+			stderr := cmd.ErrOrStderr()
 			var side []string
 			for name := range ex.Files {
 				side = append(side, filepath.Join(filepath.Dir(output), name))
 			}
 			slices.Sort(side)
-			if !force {
-				for _, p := range append([]string{output}, side...) {
-					if _, err := os.Stat(p); err == nil {
-						return fmt.Errorf("%s already exists: pass --force to overwrite it, or -o to write somewhere else", p)
-					}
+			if output == "" {
+				for _, p := range side {
+					fmt.Fprintf(stderr, "note: this config reads %s: pass -o to write it beside the config\n", p)
+				}
+				return writeOutput(cmd, "", ex.Config, force)
+			}
+			// Refuse before writing anything, so a refusal leaves no half.
+			for _, p := range append([]string{output}, side...) {
+				if err := refuseExisting(p, force); err != nil {
+					return err
 				}
 			}
 			if err := writeFile(output, ex.Config, force); err != nil {
@@ -89,37 +86,17 @@ Sources: ` + strings.Join(scaffold.SourceKinds, ", ") + `.`,
 				if err := writeFile(p, ex.Files[filepath.Base(p)], force); err != nil {
 					return err
 				}
-				fmt.Fprintln(cmd.OutOrStdout(), "wrote", p)
+				fmt.Fprintln(stderr, "wrote", p)
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "run: tui-builder", output)
+			fmt.Fprintln(stderr, "run: tui-builder", output)
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&output, "output", "o", defaultInitPath, "the file to write")
+	cmd.Flags().StringVarP(&output, "output", "o", "", "write the config to this file instead of stdout")
 	cmd.Flags().StringVar(&title, "title", "", "app.title (default the directory's name)")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the config instead of writing it")
-	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing file")
+	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing -o file")
+	goneFlags(cmd, map[string]string{"dry-run": "init prints the config unless -o names a file; drop --dry-run"})
 	return cmd
-}
-
-// writeFile writes b to a new file at path, or over one with force.
-func writeFile(path string, b []byte, force bool) error {
-	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
-	if force {
-		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
-	}
-	f, err := os.OpenFile(path, flags, 0o644)
-	if errors.Is(err, fs.ErrExist) {
-		return fmt.Errorf("%s already exists: pass --force to overwrite it, or -o to write somewhere else", path)
-	}
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(b); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
 }
 
 // dirTitle is the name of the directory the config is written into.

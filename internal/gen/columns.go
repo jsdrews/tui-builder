@@ -85,10 +85,13 @@ func identityOf(fs []field, listSeg string) string {
 // rank classifies each field from its schema: identity, status (an enum,
 // a boolean, or a status-like name), time (date-time / date), numbers,
 // short text, then long text (description-like names, or a maxLength
-// over 80).
+// over 80). A nested object's name (venue.name) is an identity too,
+// after the row's own. Minor columns (see minorTier) come after short
+// text, in tier order.
 func rank(fs []field, identity string) []columns.Column {
 	titles := fieldTitles(fs)
 	out := make([]columns.Column, len(fs))
+	tiers := make(map[string]int, len(fs))
 	for i, f := range fs {
 		s := unwrapNull(f.schema)
 		name := lastSegment(f.path)
@@ -98,7 +101,7 @@ func rank(fs []field, identity string) []columns.Column {
 			c.Sort = "number"
 		}
 		switch {
-		case f.path == identity:
+		case f.path == identity || nestedName(f):
 			c.Rank = columns.Identity
 		case !f.list && (len(c.Values) > 0 || s.Type.Is("boolean") || columns.IsStatusName(name)):
 			c.Rank = columns.Status
@@ -112,9 +115,41 @@ func rank(fs []field, identity string) []columns.Column {
 		default:
 			c.Rank = columns.Short
 		}
+		if c.Rank != columns.Identity {
+			if t, ok := minorTier(f, s); ok {
+				c.Minor, tiers[f.path] = true, t
+			}
+		}
 		out[i] = c
 	}
+	slices.SortStableFunc(out, func(a, b columns.Column) int { return tiers[a.Path] - tiers[b.Path] })
 	return out
+}
+
+// nestedName is a nested object's name-like field: venue.name, the
+// column that says which venue.
+func nestedName(f field) bool {
+	parent, leaf, nested := strings.Cut(f.path, ".")
+	return nested && parent != "" && !strings.Contains(leaf, ".") && !f.list && slices.Contains(nameLike, leaf)
+}
+
+// minorTier says whether a field is minor, and its place among the
+// minor ones: a nested object's other fields (price.min), then
+// bookkeeping timestamps (created_at), then coordinates, then ids and
+// links.
+func minorTier(f field, s *openapi3.Schema) (int, bool) {
+	name := lastSegment(f.path)
+	switch {
+	case columns.IsIDName(name) || s.Format == "uuid" || s.Format == "uri" || s.Format == "url" || columns.IsLinkName(name):
+		return 4, true
+	case columns.IsCoordinateName(name):
+		return 3, true
+	case columns.IsBookkeepingName(name):
+		return 2, true
+	case strings.Contains(f.path, "."):
+		return 1, true
+	}
+	return 0, false
 }
 
 func lastSegment(path string) string { return path[strings.LastIndex(path, ".")+1:] }
@@ -125,14 +160,25 @@ func fieldTitles(fs []field) []string {
 	out := make([]string, len(fs))
 	count := map[string]int{}
 	for i, f := range fs {
-		if f.path == "." {
+		switch {
+		case f.path == ".":
 			out[i] = "Value"
-		} else {
+		case nestedName(f):
+			// venue.name says which venue: titled Venue.
+			parent, _, _ := strings.Cut(f.path, ".")
+			out[i] = words(parent)
+		default:
 			out[i] = words(lastSegment(f.path))
 		}
 		count[out[i]]++
 	}
 	for i, f := range fs {
+		if count[out[i]] > 1 && nestedName(f) {
+			// A field named like the parent: back to Venue name.
+			parent, leaf, _ := strings.Cut(f.path, ".")
+			out[i] = words(parent) + " " + strings.ToLower(words(leaf))
+			continue
+		}
 		if count[out[i]] > 1 && strings.Contains(f.path, ".") {
 			segs := strings.Split(f.path, ".")
 			out[i] = words(segs[len(segs)-2]) + " " + strings.ToLower(out[i])

@@ -189,8 +189,8 @@ From [Flags that shape what add exec writes](https://github.com/jsdrews/tui-buil
   becomes `${params.NAME}`, also inside an element (`--namespace=default`)
   when unambiguous; a missing or ambiguous match is an error. It writes
   the parameter with `default: VALUE`, so the source stays runnable.
-- **Each `--param` adds an input field** (a text input; a toggle for
-  bool) titled from the name, starting at VALUE. The fields share one
+- **Each `--param` adds an input field** (a text input; for a bool,
+  one whose placeholder says `true or false`) titled from the name, starting at VALUE. The fields share one
   row above the component, which gets
   `on_input: {bind: {NAME: "${input.NAME}"}}`. `--no-inputs` writes the
   parameter only, for a source reached by a push.
@@ -392,3 +392,18 @@ Left for after v1; each needs a runtime feature or a decision of its own.
   operators and `initial_sort` (hand-edit after); template variants for
   `init`; commands that print text tables; editing configs
   interactively.
+
+**Since:** every command that makes a config prints it to stdout, and
+`-o FILE` writes it (`--force` to overwrite). `init` no longer writes
+`tui-builder.yaml` by itself, and its `--dry-run` is gone. `add exec
+--into FILE` prints the merged config; `-o FILE` (the same file) edits
+it in place, and `--dry-run`'s diff became `| diff FILE -`. `gen
+--init-overrides` is a switch that prints the overrides file. A removed
+flag fails with a hint naming the new form.
+
+**Since:** an object with one list of objects is an envelope (its list
+becomes `root:`) only when the rest is paging or metadata, or at most
+two other fields; otherwise it's one object, and the summary names
+`--root`. `--component inspector` infers no root and shows the whole
+value. An argument that isn't word-like (JSON, a sentence) doesn't name
+the source, so `echo '{…}'` is `echo`.

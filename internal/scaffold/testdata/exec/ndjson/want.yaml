@@ -1,6 +1,7 @@
 # Written by `tui-builder add exec -- docker ps --format json`.
 app:
   title: Ps
+  surface: filled
 data:
   sources:
     ps:

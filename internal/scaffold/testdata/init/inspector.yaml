@@ -7,6 +7,7 @@
 
 app:
   title: demo
+  surface: filled
 
 data:
   sources:
@@ -19,6 +20,7 @@ tui:
     service:
       type: inspector
       title: Service
+      filterable: true
       source: service
       fields:
         - {label: Name,     path: name}
@@ -75,8 +77,6 @@ tui:
       #                                 # root (`status`, `spec.replicas`, `items.0.state`), where
       #                                 # `*` matches any one key or index (`items.*.state`). (an
       #                                 # `auto: true` inspector's own `color_rules`)
-      # filterable: false               # `/` opens a filter that narrows the rows (`f` on an
-      #                                 # eventlog, where `/` is search).
       # filter_placeholder: ""          # Hint shown inside the empty filter or search input.
       # initial_query: ""               # Starts with this search or filter query applied.
       # initial_cursor: 0               # Row the cursor starts on.
@@ -87,8 +87,8 @@ tui:
       #   bind: {}                      # Maps this component's source parameters to templates over
       #                                 # the driver's focused row: `${cursor}`, `${cursor.N}`,
       #                                 # `${cursor.Title}`, `${cursor.path}`, plus `${env.*}`.
-      # on_input:                       # Refetches this component's source when an input or toggle
-      #                                 # on the screen commits.
+      # on_input:                       # Refetches this component's source when an input on the
+      #                                 # screen commits.
       #   bind: {q: "${input.search}"}  # Maps source parameters to templates over `${input.NAME}`,
       #                                 # plus `${env.*}`. (required)
 

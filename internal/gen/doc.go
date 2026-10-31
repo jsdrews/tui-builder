@@ -201,6 +201,12 @@ func (p *preset) security(ctx context.Context, s *spec, ops []op, title, pick st
 		if pick != "" {
 			return fmt.Errorf("gen.security: %s: the spec has no security requirement to pick from", pick)
 		}
+		// GitHub's spec is one: every request goes out anonymous, unless
+		// the overrides add auth.
+		if s.ov.sets("data", "presets", p.name, "auth") {
+			return nil
+		}
+		p.warnings = append(p.warnings, fmt.Sprintf("the spec declares no security scheme, so no auth is written and requests go out anonymous: if the API takes a token, add data.presets.%s.auth in an overrides file", p.name))
 		return nil
 	}
 	if pick != "" {

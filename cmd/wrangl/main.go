@@ -86,6 +86,8 @@ for one-shot sources, NDJSON (one frame per line) for streaming
 sources. Streams are designed to pipe straight into jq, duckdb,
 miller, or any other line-oriented downstream.
 
+Pass - as the config to read it from stdin.
+
 The data layer is architecturally independent of the TUI — running
 wrangl never compiles, links, or drags in any terminal-UI code.`,
 		Example: `  # List every defined source and pipeline

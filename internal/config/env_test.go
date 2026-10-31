@@ -286,3 +286,75 @@ tui:
 		t.Errorf("LoadTo wrote to stderr: %q", errs.String())
 	}
 }
+
+// Load reads stdin for the path "-": errors name stdin, and relative
+// paths resolve against the working directory.
+func TestLoadStdin(t *testing.T) {
+	prevIn, prevEnv := stdin, envStdin
+	t.Cleanup(func() { stdin, envStdin = prevIn, prevEnv })
+	stdin = strings.NewReader(`
+app: {title: S}
+tui:
+  components:
+    t: {type: textview, title: T, content: x}
+  screen: {layout: {component: t}}
+`)
+	c, err := Load("-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wd, _ := os.Getwd(); c.App.Title != "S" || c.dir != wd {
+		t.Errorf("title %q, dir %q: want S and %q", c.App.Title, c.dir, wd)
+	}
+	stdin = strings.NewReader("tui: {screen: {layout: {component: nope}}}\n")
+	if _, err := Load("-"); err == nil || !strings.HasPrefix(err.Error(), "validate stdin: ") {
+		t.Errorf("err = %v, want it to start with %q", err, "validate stdin: ")
+	}
+}
+
+// An untitled first screen takes app.title; a titled one, and any other
+// screen, keeps its own.
+func TestRootScreenTitleFallsBackToApp(t *testing.T) {
+	load := func(src string) *Config {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "c.yaml")
+		os.WriteFile(path, []byte(src), 0o644)
+		c, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	c := load(`
+app: {title: App}
+tui:
+  components: {t: {type: textview, title: T, content: x}}
+  screen: {layout: {component: t}}
+`)
+	if got := c.TUI.Screen.Title; got != "App" {
+		t.Errorf("single screen title %q, want App", got)
+	}
+	c = load(`
+app: {title: App}
+tui:
+  components:
+    t: {type: textview, title: T, content: x}
+    u: {type: textview, title: U, content: y}
+  screens:
+    home: {layout: {component: t}}
+    other: {layout: {component: u}}
+  initial: home
+`)
+	if home, other := c.TUI.Screens["home"].Title, c.TUI.Screens["other"].Title; home != "App" || other != "" {
+		t.Errorf("home %q, other %q: want App and empty", home, other)
+	}
+	c = load(`
+app: {title: App}
+tui:
+  components: {t: {type: textview, title: T, content: x}}
+  screen: {title: Mine, layout: {component: t}}
+`)
+	if got := c.TUI.Screen.Title; got != "Mine" {
+		t.Errorf("titled screen %q, want Mine", got)
+	}
+}

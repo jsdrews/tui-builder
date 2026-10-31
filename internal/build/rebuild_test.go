@@ -197,3 +197,33 @@ func TestColorRulesFollowThemeRebuild(t *testing.T) {
 		t.Errorf("inspector value = %q, want it recolored to %q", got, want)
 	}
 }
+
+// An empty answer says so on the title, beside "reads failing" when
+// both hold; rows clear it, and a theme rebuild keeps the notes.
+func TestEmptyAnswerNotesTheTitle(t *testing.T) {
+	th := theme.New(palette.Nord())
+	tbl, err := NewComponent(&cfg.Component{Type: "table", Title: "Orgs", Source: "orgs", Columns: []cfg.Column{{Title: "Login", Value: cfg.Path{"login"}}}}, th)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ApplyData(tbl, []any{}, th)
+	if got := tbl.Table.Title(); got != "Orgs · no rows" {
+		t.Errorf("empty: title %q", got)
+	}
+	SetReadsFailing(tbl, true)
+	tbl.Rebuild(th)
+	if got := tbl.Table.Title(); got != "Orgs · no rows · reads failing" {
+		t.Errorf("empty and failing, after a rebuild: title %q", got)
+	}
+	SetReadsFailing(tbl, false)
+	ApplyData(tbl, []any{map[string]any{"login": "acme"}}, th)
+	if got := tbl.Table.Title(); got != "Orgs" {
+		t.Errorf("with rows: title %q", got)
+	}
+	// An inspector with nothing to show says so too; a textview doesn't.
+	ins, _ := NewComponent(&cfg.Component{Type: "inspector", Title: "Org", Source: "org", Auto: true}, th)
+	ApplyData(ins, nil, th)
+	if !ins.empty {
+		t.Error("an empty inspector isn't marked")
+	}
+}

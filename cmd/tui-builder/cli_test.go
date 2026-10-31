@@ -47,18 +47,18 @@ func TestExitCodes(t *testing.T) {
 	}
 }
 
-// The run form is unchanged: one positional, the config, with flags
-// accepted after it as before.
+// The run form is unchanged: one positional, the config (or "-" for
+// stdin), with flags accepted after it as before.
 func TestRunFormGetsThePath(t *testing.T) {
 	var got []string
 	runForm = func(path string) error { got = append(got, path); return nil }
 	t.Cleanup(func() { runForm = runConfig })
-	for _, args := range [][]string{{"app.yaml"}, {"./version"}, {"version.yaml"}} {
+	for _, args := range [][]string{{"app.yaml"}, {"./version"}, {"version.yaml"}, {"-"}} {
 		if code, _, stderr := run(t, args...); code != exitOK {
 			t.Fatalf("%q: exit %d: %s", args, code, stderr)
 		}
 	}
-	if want := []string{"app.yaml", "./version", "version.yaml"}; strings.Join(got, " ") != strings.Join(want, " ") {
+	if want := []string{"app.yaml", "./version", "version.yaml", "-"}; strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Errorf("run form got %q, want %q", got, want)
 	}
 	runForm = func(string) error { return errors.New("boom") }

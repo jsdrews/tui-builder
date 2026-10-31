@@ -146,7 +146,7 @@ var needsMore = map[string]string{
 var needsMoreOnAll = map[string]string{
 	"mark_key":            "mark_key: needs markable: true",
 	"on_cursor":           "on_cursor: needs another component on the screen to drive it",
-	"on_input":            "on_input: needs an input or toggle on the screen",
+	"on_input":            "on_input: needs an input on the screen",
 	"window.anchor":       "anchor: needs cursor:",
 	"window.growing":      "growing: needs an eventlog",
 	"window.follow_every": "follow_every: needs growing:",
@@ -173,7 +173,7 @@ func why(kind, path string) (string, bool) {
 var alsoOn = map[string][]string{
 	"activity":       {"activity.busy"},
 	"parameters":     {"parameters.q.type"},
-	"http:window":    {"window.offset_param", "window.limit_param"},
+	"http:window":    {"window.offset_param", "window.limit_param", "window.search_param"},
 	"window.find":    {"window.find.params", "window.find.position"},
 	"http:paginate":  {"paginate.page_param"},
 	"table:activity": {"activity.busy", "mark_key"},
@@ -266,7 +266,6 @@ var structFor = map[string][]any{
 	"components.md#inspector":        {config.Component{}},
 	"components.md#eventlog":         {config.Component{}},
 	"components.md#input":            {config.Component{}},
-	"components.md#toggle":           {config.Component{}},
 	"components.md#menu":             {config.MenuItem{}},
 	"components.md#columns":          {config.Column{}},
 	"components.md#metrics":          {config.Metric{}},

@@ -270,3 +270,18 @@ the point of the feature, so nothing is collapsed.
    (outside the repo) has an `init <kind>` section. The docs site
    builds clean, with the `#tui-builder-init-kind` anchor the links
    use.
+
+**Since:** `type: toggle` was removed from tui-builder, so `init` takes
+9 component kinds. `add exec` writes a bool
+`--param` as an input whose placeholder says `true or false`.
+`examples/inputs.yaml` lost its "deleted pods" toggle. The `init menu`
+example now has groups, descriptions and a `bind:`, the way tuilib's
+examples draw a menu.
+
+**Since:** every command that makes a config prints it to stdout, and
+`-o FILE` writes it (`--force` to overwrite). `init` no longer writes
+`tui-builder.yaml` by itself, and its `--dry-run` is gone. `add exec
+--into FILE` prints the merged config; `-o FILE` (the same file) edits
+it in place, and `--dry-run`'s diff became `| diff FILE -`. `gen
+--init-overrides` is a switch that prints the overrides file. A removed
+flag fails with a hint naming the new form.

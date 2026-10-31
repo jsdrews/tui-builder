@@ -90,15 +90,20 @@ func TestGenOverridesFlags(t *testing.T) {
 	dir := t.TempDir()
 	ov := filepath.Join(dir, "o.yaml")
 	const things = "../../internal/fixture/things/things.yaml"
-	code, stdout, stderr := run(t, "gen", "--init-overrides", ov, things)
-	if code != exitOK || stdout != "" || !strings.Contains(stderr, "wrote "+ov) {
-		t.Fatalf("--init-overrides → %d %q %q", code, stdout, stderr)
+	code, printed, stderr := run(t, "gen", "--init-overrides", things)
+	if code != exitOK || !strings.Contains(printed, "GET /things") || !strings.Contains(stderr, "--overrides <overrides>") {
+		t.Fatalf("--init-overrides → %d %q %q", code, printed, stderr)
 	}
-	if code, _, stderr := run(t, "gen", "--init-overrides", ov, things); code != exitError || !strings.Contains(stderr, "already exists") {
+	code, stdout, stderr := run(t, "gen", "--init-overrides", "-o", ov, things)
+	if b, _ := os.ReadFile(ov); code != exitOK || stdout != "" || string(b) != printed || !strings.Contains(stderr, "--overrides "+ov) {
+		t.Fatalf("--init-overrides -o → %d %q %q", code, stdout, stderr)
+	}
+	if code, _, stderr := run(t, "gen", "--init-overrides", "-o", ov, things); code != exitError || !strings.Contains(stderr, "already exists") {
 		t.Errorf("--init-overrides over a file → %d %q", code, stderr)
 	}
-	if code, _, _ := run(t, "gen", "--init-overrides", ov, "-o", filepath.Join(dir, "c.yaml"), things); code != exitUsage {
-		t.Errorf("--init-overrides with -o → %d, want usage", code)
+	// The old form, a file after the flag, says what changed.
+	if code, _, stderr := run(t, "gen", "--init-overrides", ov, things); code != exitUsage || !strings.Contains(stderr, "takes no file now") {
+		t.Errorf("--init-overrides FILE → %d %q", code, stderr)
 	}
 	os.WriteFile(ov, []byte("gen: {operations: {\"GET /things\": {title: Stock}}}\n"), 0o644)
 	code, stdout, stderr = run(t, "gen", "--overrides", ov, things)

@@ -427,6 +427,7 @@ var examples = map[string]string{
 	"sources.md#window.offset_param":       "offset",
 	"sources.md#window.limit_param":        "limit",
 	"sources.md#window.total_path":         "total",
+	"sources.md#window.search_param":       "q",
 	"sources.md#find.params":               `{name: "${window.search}"}`,
 	"sources.md#growing.source":            "services",
 	"sources.md#growing.while":             `"${item.status} == running"`,

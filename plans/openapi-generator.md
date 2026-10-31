@@ -673,3 +673,31 @@ the generator drops its workaround.
 - **Not planned:** Swagger 2.0 (convert it first), a GraphQL generator,
   non-http sources from a spec, a `--strict` mode, live checks against
   the API at generation time.
+
+**Since:** every command that makes a config prints it to stdout, and
+`-o FILE` writes it (`--force` to overwrite). `init` no longer writes
+`tui-builder.yaml` by itself, and its `--dry-run` is gone. `add exec
+--into FILE` prints the merged config; `-o FILE` (the same file) edits
+it in place, and `--dry-run`'s diff became `| diff FILE -`. `gen
+--init-overrides` is a switch that prints the overrides file. A removed
+flag fails with a hint naming the new form.
+
+**Since:** columns rank a nested object's name (`venue.name`, titled
+`Venue`) as an identity, after the row's own, bold only on the first.
+Minor columns (a nested object's other fields, bookkeeping timestamps,
+coordinates, ids and links) sort after short text, in that order, and
+keep their rank for their style. Window filters match `venue_id` to
+`venue.id`, and range pairs drop `_time`, `_date` and `_on` as well as
+`_at` (`start_time` → `start_after` / `start_before`). A column a
+filter names is always in the table: hidden when it's minor, else in
+place of the last ordinary kept column.
+
+**Since:** with no list at a sub-list's or detail's parent path, a
+top-level list ending in the same segment is its parent (`/user/orgs`
+for `/orgs/{org}/issues`), so a path parameter is picked from a list
+instead of typed at startup. Parents are built before their children,
+whatever their path order. A parameter not named like an id is filled
+from `login`, `name`, `slug`, `username` or `key` before `id`. A startup
+prompt that a deselected list could replace gets a hint naming the
+`--operation`, and a spec with no security scheme warns that requests
+go out anonymous unless the overrides add `data.presets.<name>.auth`.

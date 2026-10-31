@@ -39,14 +39,22 @@ func newAddExecCmd() *cobra.Command {
 		every      time.Duration
 		into       string
 		place      string
-		dryRun     bool
+		output     string
+		force      bool
 	)
 	cmd := &cobra.Command{
 		Use:   "exec [flags] -- <command> [args…]",
 		Short: "Run a command, sample its JSON, and print a config that shows it.",
 		Long: `exec runs the command once, reads the JSON it prints, and prints a
 complete config: an exec source for the command and a table (or, for a
-single object, an inspector) that shows it.
+single object, an inspector) that shows it. -o writes it to a file
+instead.
+
+With --into, it adds the source and component to that config and prints
+the result; -o names where to write it, which can be the same file:
+
+  tui-builder add exec --into app.yaml -- kubectl get pods -o json | diff app.yaml -
+  tui-builder add exec --into app.yaml -o app.yaml -- kubectl get pods -o json
 
 The command goes after --, exactly as it should run: no shell, so pipes
 and redirects need an explicit sh -c "…".`,
@@ -57,11 +65,19 @@ and redirects need an explicit sh -c "…".`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, argv []string) error {
-			if into == "" && (place != "" || dryRun) {
-				return usagef("--place and --dry-run go with --into")
+			if into == "" && place != "" {
+				return usagef("--place goes with --into: it says where in that config the component goes")
 			}
 			if place != "" && !slices.Contains(scaffold.Places, place) {
 				return usagef("--place %s: want one of %s", place, strings.Join(scaffold.Places, ", "))
+			}
+			// -o naming the --into file edits it in place: no --force,
+			// since overwriting it is the point.
+			inPlace := into != "" && output != "" && samePath(into, output)
+			if !inPlace {
+				if err := refuseExisting(output, force); err != nil {
+					return err
+				}
 			}
 			var old []byte
 			if into != "" {
@@ -149,8 +165,7 @@ and redirects need an explicit sh -c "…".`,
 				fmt.Fprintln(cmd.ErrOrStderr(), "  "+line)
 			}
 			if into == "" {
-				_, err := cmd.OutOrStdout().Write(res.Config)
-				return err
+				return writeOutput(cmd, output, res.Config, force)
 			}
 			sp, err := scaffold.SpliceInto(old, res, place, filepath.Dir(into))
 			if err != nil {
@@ -159,14 +174,18 @@ and redirects need an explicit sh -c "…".`,
 			for _, n := range sp.Notes {
 				fmt.Fprintln(cmd.ErrOrStderr(), "note:", n)
 			}
-			if dryRun {
-				fmt.Fprint(cmd.OutOrStdout(), scaffold.UnifiedDiff(into, sp.Old, sp.New))
-				return nil
+			switch {
+			case output == "":
+				return writeOutput(cmd, "", sp.New, force)
+			case inPlace:
+				err = scaffold.WriteAtomic(into, sp.New)
+			default:
+				err = writeFile(output, sp.New, force)
 			}
-			if err := scaffold.WriteAtomic(into, sp.New); err != nil {
+			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s in %s\n", sp.Summary, into)
+			fmt.Fprintf(cmd.ErrOrStderr(), "%s in %s\n", sp.Summary, output)
 			return nil
 		},
 	}
@@ -189,10 +208,22 @@ and redirects need an explicit sh -c "…".`,
 	cmd.Flags().StringVar(&cursorPath, "cursor-path", "", "each item's cursor, for an anchored window (default inferred)")
 	cmd.Flags().BoolVar(&growing, "growing", false, "the eventlog's set is still gaining items: follow the newest")
 	cmd.Flags().DurationVar(&every, "follow-every", 0, "how often a growing window is polled (default 2s)")
-	cmd.Flags().StringVar(&into, "into", "", "add the source and component to this config instead of printing a new one")
+	cmd.Flags().StringVar(&into, "into", "", "add the source and component to this config, and print the result")
 	cmd.Flags().StringVar(&place, "place", "", "with --into: stack, tab or screen (default by the config's shape)")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "with --into: print the change as a diff and write nothing")
+	cmd.Flags().StringVarP(&output, "output", "o", "", "write the config to this file instead of stdout; the --into file edits it in place")
+	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing -o file")
+	goneFlags(cmd, map[string]string{"dry-run": "add exec prints the config unless -o names a file; to see what --into changes, pipe it to diff FILE -"})
 	return cmd
+}
+
+// samePath is whether a and b name the same file.
+func samePath(a, b string) bool {
+	if ia, err := os.Stat(a); err == nil {
+		if ib, err := os.Stat(b); err == nil {
+			return os.SameFile(ia, ib)
+		}
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 // cmdContext is the context a command runs under, or Background when

@@ -17,7 +17,9 @@ import (
 	"github.com/jsdrews/tui-builder/internal/expr"
 )
 
-// Load reads a YAML file at path and returns a validated Config. Load-time
+// Load reads a YAML file at path, or stdin when path is "-", and returns
+// a validated Config. A config from stdin resolves an app.env `from:`
+// file against the working directory. Load-time
 // warnings (an env var referenced but unset and undeclared) go to stderr,
 // which is right before a TUI has the screen and wrong after: see LoadTo.
 func Load(path string) (*Config, error) { return LoadTo(path, stderr) }
@@ -26,9 +28,13 @@ func Load(path string) (*Config, error) { return LoadTo(path, stderr) }
 // for a caller that loads while a TUI owns the terminal, where a stray
 // stderr line paints over the screen. The example launcher is one.
 func LoadTo(path string, warn io.Writer) (*Config, error) {
-	b, err := os.ReadFile(path)
+	b, err := read(path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	dir := filepath.Dir(path)
+	if path == "-" {
+		path, dir = "stdin", "."
 	}
 	var root yaml.Node
 	if err := yaml.Unmarshal(b, &root); err != nil {
@@ -64,6 +70,7 @@ func LoadTo(path string, warn io.Writer) (*Config, error) {
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("validate %s: %w", path, err)
 	}
+	c.titleRoot()
 	// Keep each auth secret's template as written, so a run-time "is
 	// empty" error can name the env var behind it.
 	for _, s := range c.Data.Sources {
@@ -82,11 +89,45 @@ func LoadTo(path string, warn io.Writer) (*Config, error) {
 	if err := checkEnvTo(&c, warn); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	c.dir = filepath.Dir(path)
+	c.dir = dir
 	if abs, err := filepath.Abs(c.dir); err == nil {
 		c.dir = abs
 	}
 	return &c, nil
+}
+
+// titleRoot gives an untitled first screen app.title, so the breadcrumb
+// above it isn't blank.
+func (c *Config) titleRoot() {
+	root := &c.TUI.Screen
+	if len(c.TUI.Screens) > 0 {
+		root = c.TUI.Screens[c.TUI.Initial]
+	}
+	if root != nil && root.Title == "" {
+		root.Title = c.App.Title
+	}
+}
+
+// stdin is what Load reads for the path "-". Overridable in tests.
+var stdin io.Reader = os.Stdin
+
+// read is the config's bytes: the file at path, or stdin for "-". Stdin
+// is used up once it's read, so an app.env `from:` command, which would
+// otherwise read it for a password prompt, reads the terminal instead.
+func read(path string) ([]byte, error) {
+	if path != "-" {
+		return os.ReadFile(path)
+	}
+	b, err := io.ReadAll(stdin)
+	if err != nil {
+		return nil, err
+	}
+	if tty, err := os.Open("/dev/tty"); err == nil {
+		envStdin = tty
+	} else {
+		envStdin = strings.NewReader("")
+	}
+	return b, nil
 }
 
 // Validate walks the config and returns the first structural error found.
@@ -384,8 +425,8 @@ func (c *Config) validatePane(path string, layout *Node, actions []ActionBinding
 	return c.validateInputRefs(refs, actions, path)
 }
 
-// inputRefRe matches ${input.NAME}: the committed value of an input or
-// toggle on the same screen.
+// inputRefRe matches ${input.NAME}: the committed value of an input on
+// the same screen.
 var inputRefRe = regexp.MustCompile(`\$\{input\.([A-Za-z0-9_]+)\}`)
 
 // InputRefs lists the input names s references.
@@ -399,7 +440,7 @@ func InputRefs(s string) []string {
 
 // validateActionInputRefs checks ${input.NAME} in action definitions.
 // An action is shared by every screen that binds it, so the most that
-// can be said here is that NAME is an input or toggle somewhere; on a
+// can be said here is that NAME is an input somewhere; on a
 // screen without it, the token resolves to "".
 func (c *Config) validateActionInputRefs() error {
 	// A templated window anchor is the same: a source can be bound on
@@ -411,7 +452,7 @@ func (c *Config) validateActionInputRefs() error {
 		for _, ref := range InputRefs(src.Window.Anchor) {
 			comp := c.TUI.Components[ref]
 			if comp == nil || !slices.Contains(InputKinds, comp.Type) {
-				return fmt.Errorf("data.sources.%s.window.anchor: ${input.%s} needs an input or toggle component named %q", name, ref, ref)
+				return fmt.Errorf("data.sources.%s.window.anchor: ${input.%s} needs an input component named %q", name, ref, ref)
 			}
 		}
 	}
@@ -423,7 +464,7 @@ func (c *Config) validateActionInputRefs() error {
 			for _, ref := range InputRefs(tmpl) {
 				comp := c.TUI.Components[ref]
 				if comp == nil || !slices.Contains(InputKinds, comp.Type) {
-					return fmt.Errorf("actions.%s: ${input.%s} needs an input or toggle component named %q", name, ref, ref)
+					return fmt.Errorf("actions.%s: ${input.%s} needs an input component named %q", name, ref, ref)
 				}
 			}
 		}
@@ -464,13 +505,13 @@ func (c *Config) validateOnInput(refs map[string]int, path string) error {
 }
 
 // validateInputRefs checks every ${input.NAME} a screen's bindings read
-// names an input or toggle placed on that screen.
+// names an input placed on that screen.
 func (c *Config) validateInputRefs(refs map[string]int, actions []ActionBinding, path string) error {
 	check := func(where, tmpl string) error {
 		for _, name := range InputRefs(tmpl) {
 			comp := c.TUI.Components[name]
 			if refs[name] == 0 || comp == nil || !slices.Contains(InputKinds, comp.Type) {
-				return fmt.Errorf("%s: ${input.%s} needs an input or toggle named %q on this screen", where, name, name)
+				return fmt.Errorf("%s: ${input.%s} needs an input named %q on this screen", where, name, name)
 			}
 		}
 		return nil
@@ -744,7 +785,7 @@ func (n *Node) validate(path string, components map[string]*Component, refs map[
 	case n.VStack != nil:
 		for i, it := range n.VStack {
 			ip := fmt.Sprintf("%s.vstack[%d]", path, i)
-			// An input or toggle is a bordered one-line field: three
+			// An input is a bordered one-line field: three
 			// rows, always. (In an hstack, flex and fixed set its width.)
 			if c := components[it.Component]; c != nil && slices.Contains(InputKinds, c.Type) {
 				if it.Flex > 0 || (it.Fixed != 0 && it.Fixed != InputHeight) {
@@ -779,7 +820,7 @@ func (n *Node) validate(path string, components map[string]*Component, refs map[
 
 // ComponentKinds is every `type:` a component may have, in the order the
 // reference documents them. The docs coverage test reads it too.
-var ComponentKinds = []string{"list", "table", "logview", "tree", "inspector", "textview", "eventlog", "input", "toggle", "menu"}
+var ComponentKinds = []string{"list", "table", "logview", "tree", "inspector", "textview", "eventlog", "input", "menu"}
 
 func (c *Component) validate(path string) error {
 	switch {
@@ -1043,8 +1084,6 @@ func (c *Component) validateKindOptions(path string) error {
 		{"placeholder", c.Placeholder != "", []string{"input"}},
 		{"char_limit", c.CharLimit != 0, []string{"input"}},
 		{"mask", c.Mask, []string{"input"}},
-		{"yes_label", c.YesLabel != "", []string{"toggle"}},
-		{"no_label", c.NoLabel != "", []string{"toggle"}},
 		{"loading_label", c.LoadingLabel != "", []string{"list", "table", "tree"}},
 		{"line_numbers", c.LineNumbers, []string{"logview"}},
 		{"gutter", c.Gutter != nil, []string{"eventlog"}},
@@ -1058,9 +1097,6 @@ func (c *Component) validateKindOptions(path string) error {
 	if slices.Contains(InputKinds, c.Type) {
 		if c.Source != "" {
 			return fmt.Errorf("%s: an %s holds a value, it doesn't display a source — other components read it as ${input.NAME}", path, c.Type)
-		}
-		if c.Type == "toggle" && c.Initial != "" && c.Initial != "true" && c.Initial != "false" {
-			return fmt.Errorf("%s.initial: %q (want true|false)", path, c.Initial)
 		}
 		if c.CharLimit < 0 {
 			return fmt.Errorf("%s.char_limit: can't be negative", path)

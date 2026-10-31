@@ -71,6 +71,7 @@ func newRoot() *cobra.Command {
 		Long: `tui-builder renders a YAML config as an interactive terminal UI.
 
   tui-builder <config.yaml>
+  tui-builder -              (read the config from stdin)
 
 A subcommand's name wins over a config file of the same name: open a
 file called "init" as ./init.`,

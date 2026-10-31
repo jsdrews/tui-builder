@@ -206,19 +206,32 @@ func TestAddExecInto(t *testing.T) {
 	}
 	args := []string{"add", "exec", "--no-run", "--name", "pods", "--columns", "metadata.name", "--into", path, "--", "kubectl", "get", "pods"}
 
-	code, stdout, stderr := run(t, append([]string{"add", "exec", "--dry-run"}, args[2:]...)...)
-	if code != exitOK || !strings.HasPrefix(stdout, "--- "+path) || !strings.Contains(stdout, "+    pods:") || !strings.Contains(stdout, "-      component: a") {
-		t.Fatalf("--dry-run → %d\n%s\n%s", code, stdout, stderr)
+	// Without -o, the merged config is printed and the file left alone.
+	code, merged, stderr := run(t, args...)
+	if code != exitOK || !strings.Contains(merged, "    pods:") || !strings.Contains(merged, "# mine\ntui:") {
+		t.Fatalf("--into → %d\n%s\n%s", code, merged, stderr)
 	}
 	if b, _ := os.ReadFile(path); string(b) != cfgText {
-		t.Fatal("--dry-run wrote the file")
+		t.Fatal("--into without -o wrote the file")
 	}
 
-	code, stdout, stderr = run(t, args...)
-	if code != exitOK || stdout != "added source `pods`, table `pods` to the screen in "+path+"\n" {
-		t.Fatalf("--into → %d %q %q", code, stdout, stderr)
+	// -o another file that exists: refused before anything runs.
+	other := filepath.Join(dir, "other.yaml")
+	os.WriteFile(other, []byte("x"), 0o644)
+	if code, _, stderr := run(t, append([]string{"add", "exec", "-o", other}, args[2:]...)...); code != exitError || !strings.Contains(stderr, "already exists") {
+		t.Errorf("-o over another file → %d %q", code, stderr)
+	}
+
+	// -o the --into file edits it in place, no --force needed.
+	inPlace := append([]string{"add", "exec", "-o", path}, args[2:]...)
+	code, stdout, stderr := run(t, inPlace...)
+	if code != exitOK || stdout != "" || !strings.Contains(stderr, "added source `pods`, table `pods` to the screen in "+path+"\n") {
+		t.Fatalf("--into -o same → %d %q %q", code, stdout, stderr)
 	}
 	b, _ := os.ReadFile(path)
+	if string(b) != merged {
+		t.Error("the file written isn't what --into printed")
+	}
 	if !strings.HasPrefix(string(b), "data:\n  sources:\n    # Added by `tui-builder add exec -- kubectl get pods`.\n    pods:") || !strings.Contains(string(b), "# mine\ntui:") {
 		t.Errorf("written:\n%s", b)
 	}
@@ -230,14 +243,17 @@ func TestAddExecInto(t *testing.T) {
 	}
 	// Again: the name is taken, and the file is left alone.
 	before, _ := os.ReadFile(path)
-	if code, _, stderr := run(t, args...); code != exitError || !strings.Contains(stderr, "pass --name pods2") {
+	if code, _, stderr := run(t, inPlace...); code != exitError || !strings.Contains(stderr, "pass --name pods2") {
 		t.Errorf("second --into → %d %q", code, stderr)
 	}
 	if after, _ := os.ReadFile(path); string(after) != string(before) {
 		t.Error("a refused --into changed the file")
 	}
-	if code, _, stderr := run(t, "add", "exec", "--dry-run", "--", "true"); code != exitUsage || !strings.Contains(stderr, "go with --into") {
-		t.Errorf("--dry-run without --into → %d %q", code, stderr)
+	if code, _, stderr := run(t, "add", "exec", "--dry-run", "--", "true"); code != exitUsage || !strings.Contains(stderr, "--dry-run is gone") {
+		t.Errorf("--dry-run → %d %q", code, stderr)
+	}
+	if code, _, stderr := run(t, "add", "exec", "--place", "tab", "--", "true"); code != exitUsage || !strings.Contains(stderr, "--place goes with --into") {
+		t.Errorf("--place without --into → %d %q", code, stderr)
 	}
 	if code, _, _ := run(t, "add", "exec", "--into", filepath.Join(dir, "nope.yaml"), "--no-run", "--", "true"); code != exitError {
 		t.Errorf("--into a missing file → %d", code)

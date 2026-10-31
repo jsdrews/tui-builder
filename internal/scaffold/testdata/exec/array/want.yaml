@@ -1,6 +1,7 @@
 # Written by `tui-builder add exec -- docker images --format json`.
 app:
   title: Images
+  surface: filled
 data:
   sources:
     images:

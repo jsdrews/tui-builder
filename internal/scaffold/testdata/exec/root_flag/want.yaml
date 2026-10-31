@@ -1,6 +1,7 @@
 # Written by `tui-builder add exec -- some-tool report`.
 app:
   title: Report
+  surface: filled
 data:
   sources:
     report:

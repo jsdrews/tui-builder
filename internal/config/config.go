@@ -331,7 +331,7 @@ type WindowConfig struct {
 	Anchor string `yaml:"anchor,omitempty"`
 	// Find answers a search across the whole set rather than only what's
 	// loaded: `n` / `N` past the items held ask the source where the next
-	// match is. http only. See FindConfig.
+	// match is. See FindConfig.
 	Find *FindConfig `yaml:"find,omitempty"`
 	// ViewportDelay is how long scrolling must pause before rows are
 	// requested, a duration; "-" asks at once. Empty is tuilib's default.
@@ -385,8 +385,9 @@ func (g *Growing) UnmarshalYAML(node *yaml.Node) error {
 }
 
 // FindConfig is `window.find:` — the request that finds the next match
-// for a search term, as a patch over the source's request: query
-// parameters, or fields merged into its JSON body. Its tokens are
+// for a search term. On http it's a patch over the source's request:
+// query parameters, or fields merged into its JSON body. On exec it's a
+// command of its own, templated with the same tokens. Its tokens are
 // ${window.term} (what the user searched for), ${window.dir} (older or
 // newer: before or after the current item), ${window.cursor} (the
 // current item's cursor) and ${window.from} (its position, Seekable
@@ -398,6 +399,9 @@ func (g *Growing) UnmarshalYAML(node *yaml.Node) error {
 type FindConfig struct {
 	Params map[string]any `yaml:"params,omitempty"`
 	Body   map[string]any `yaml:"body,omitempty"`
+	// Command is an exec window's search: the argv that prints the
+	// match, in the source's own shape (its root and fields).
+	Command []string `yaml:"command,omitempty"`
 	// Position is the dot-path in the matching item to its 0-based
 	// position in the set. Required on a Seekable source; an Anchored
 	// one finds by cursor.
@@ -1271,16 +1275,15 @@ type Component struct {
 	// pane refreshes the bottom.
 	OnCursor *OnCursor `yaml:"on_cursor,omitempty"`
 	// OnInput rebinds this component's source parameters from inputs
-	// and toggles on the screen (${input.NAME}), refetching when one
+	// on the screen (${input.NAME}), refetching when one
 	// commits. For a component with no cursor driver; ${input.*} also
 	// works inside on_cursor.bind.
 	OnInput *OnInput `yaml:"on_input,omitempty"`
 
-	// input / toggle:
+	// input:
 	//
-	// Initial is the value bound before anything is committed: an
-	// input's text (templated with ${env.*}), or a toggle's "true" /
-	// "false".
+	// Initial is the value bound before anything is committed: the
+	// input's text (templated with ${env.*}).
 	Initial string `yaml:"initial,omitempty"`
 	// Placeholder is shown in an empty input.
 	Placeholder string `yaml:"placeholder,omitempty"`
@@ -1288,27 +1291,24 @@ type Component struct {
 	CharLimit int `yaml:"char_limit,omitempty"`
 	// Mask shows an input's characters as bullets.
 	Mask bool `yaml:"mask,omitempty"`
-	// YesLabel / NoLabel name a toggle's two sides. Default "yes" / "no".
-	YesLabel string `yaml:"yes_label,omitempty"`
-	NoLabel  string `yaml:"no_label,omitempty"`
 }
 
 // OnInput is a component's `on_input:` — source parameters filled from
-// inputs and toggles on the same screen:
+// inputs on the same screen:
 //
 //	on_input:
-//	  bind: {q: "${input.search}", deleted: "${input.show_deleted}"}
+//	  bind: {q: "${input.search}"}
 type OnInput struct {
 	Bind map[string]string `yaml:"bind"`
 }
 
-// InputHeight is an input's or toggle's height in rows: a bordered
+// InputHeight is an input's height in rows: a bordered
 // one-line field. A layout item holding one defaults to it.
 const InputHeight = 3
 
 // InputKinds are the component kinds that hold a value other components
 // read as ${input.NAME}.
-var InputKinds = []string{"input", "toggle"}
+var InputKinds = []string{"input"}
 
 // Activity is a component's `activity:` block: which field says what a
 // row is doing, and which of its values mean "busy".

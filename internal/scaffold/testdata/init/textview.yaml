@@ -7,12 +7,14 @@
 
 app:
   title: demo
+  surface: filled
 
 tui:
   components:
     notes:
       type: textview
       title: Notes
+      searchable: true
       content: |
         A textview shows a block of text: notes, help, a file's contents.
         Press / to search it.
@@ -23,8 +25,6 @@ tui:
       #   border_active: ""             # Border color when focused.
       #   border_inactive: ""           # Border color when unfocused.
       #   spinner: ""                   # The loading spinner.
-      # searchable: false               # `/` opens a search that highlights matches; `n` / `N` move
-      #                                 # between them.
       # filter_placeholder: ""          # Hint shown inside the empty filter or search input.
       # initial_query: ""               # Starts with this search or filter query applied.
       # on_cursor:                      # Refetches this component's source as another component's
@@ -34,8 +34,8 @@ tui:
       #   bind: {}                      # Maps this component's source parameters to templates over
       #                                 # the driver's focused row: `${cursor}`, `${cursor.N}`,
       #                                 # `${cursor.Title}`, `${cursor.path}`, plus `${env.*}`.
-      # on_input:                       # Refetches this component's source when an input or toggle
-      #                                 # on the screen commits.
+      # on_input:                       # Refetches this component's source when an input on the
+      #                                 # screen commits.
       #   bind: {q: "${input.search}"}  # Maps source parameters to templates over `${input.NAME}`,
       #                                 # plus `${env.*}`. (required)
 

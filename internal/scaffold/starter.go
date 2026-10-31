@@ -14,7 +14,7 @@ var starter string
 
 // Starter is the config `tui-builder init` writes, titled title.
 func Starter(title string) []byte {
-	return []byte(strings.Replace(starter, "__TITLE__", yamlScalar(title), 1))
+	return []byte(strings.ReplaceAll(starter, "__TITLE__", yamlScalar(title)))
 }
 
 // yamlScalar is s as a YAML value on one line, quoted only when it must

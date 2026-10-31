@@ -9,6 +9,7 @@
 #   webhook incident: the API calls it, not the other way round
 app:
   title: Status Service
+  surface: filled
   version: 2.4.0
   env:
     - name: STATUS_SERVICE_URL
@@ -53,11 +54,13 @@ tui:
       title: Who I am
       source: me
       auto: true
+      filterable: true
     health:
       type: inspector
       title: Health
       source: health
       auto: true
+      filterable: true
       color_rules:
         - {when: ok, color: 'theme:success', path: status}
         - {when: degraded, color: 'theme:warning', path: status}
@@ -76,6 +79,7 @@ tui:
       title: Settings
       source: settings
       auto: true
+      filterable: true
   initial: home
   screens:
     home:

@@ -70,11 +70,15 @@ func TestInitTableRuns(t *testing.T) {
 	}
 }
 
-// init menu opens the screen its first item names, and esc comes back.
+// init menu draws its groups and descriptions, opens the screen its
+// first item names, and esc comes back.
 func TestInitMenuRuns(t *testing.T) {
 	h := initHarness(t, "menu")
-	if view := h.view(); !strings.Contains(view, "Sections") || !strings.Contains(view, "About") {
-		t.Fatalf("init menu didn't render the menu:\n%s", view)
+	view := h.view()
+	for _, want := range []string{"Sections", "compute", "database", "other", "what's running", "About"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("init menu didn't render %q:\n%s", want, view)
+		}
 	}
 	h.send(tea.KeyMsg{Type: tea.KeyEnter})
 	if view := h.view(); !strings.Contains(view, "pending") {
@@ -113,5 +117,41 @@ func TestInitWebsocketRuns(t *testing.T) {
 	view := initHarness(t, "websocket").view()
 	if !strings.Contains(view, "Thing statuses") || !strings.Contains(view, "thing-001") {
 		t.Fatalf("init websocket didn't render the first event:\n%s", view)
+	}
+}
+
+// init eventlog's filter (f) narrows the window: the command gets the
+// term and only matching events come back.
+func TestInitEventlogFilters(t *testing.T) {
+	h := initHarness(t, "eventlog")
+	if view := h.view(); !strings.Contains(view, "filter › —") || !strings.Contains(view, "event 0") {
+		t.Fatalf("init eventlog didn't open on its events with the filter shown:\n%s", view)
+	}
+	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	for _, r := range "event 49" {
+		h.model, _ = h.model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	h.send(tea.KeyMsg{Type: tea.KeyEnter})
+	view := h.view()
+	if !strings.Contains(view, "event 490") || strings.Contains(view, "event 48") {
+		t.Errorf("f event 49 didn't narrow the events:\n%s", view)
+	}
+}
+
+// init eventlog's search reaches events that aren't loaded: / event 4,
+// then n past the last loaded match (event 49) asks the find command,
+// which answers event 400, and N goes back.
+func TestInitEventlogSearchFinds(t *testing.T) {
+	h := initHarness(t, "eventlog")
+	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	for _, r := range "event 4" {
+		h.model, _ = h.model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	h.send(tea.KeyMsg{Type: tea.KeyEnter})
+	for i := 0; i < 12 && !strings.Contains(h.view(), "event 400"); i++ {
+		h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	}
+	if view := h.view(); !strings.Contains(view, "event 400") {
+		t.Fatalf("n never reached event 400:\n%s", view)
 	}
 }

@@ -156,6 +156,51 @@ func TestSourceName(t *testing.T) {
 			t.Errorf("sourceName(%s) = %q, want %q", argv, got, want)
 		}
 	}
+	// JSON in an argument isn't a name.
+	if got := sourceName([]string{"echo", `{"Title": "Godzilla", "Year": "2023"}`}); got != "echo" {
+		t.Errorf("sourceName(echo '{…}') = %q, want echo", got)
+	}
+}
+
+// An object is an envelope around its one list of objects only when
+// the rest is paging or metadata, or there's little else. One with
+// fields of its own is a single object, and says --root picks the list.
+func TestFindRowsEnvelope(t *testing.T) {
+	for sample, want := range map[string]string{
+		`{"apiVersion": "v1", "kind": "List", "metadata": {}, "items": [{"a": 1}]}`:                   "root items",
+		`{"items": [{"a": 1}], "total": 9, "page": 1, "size": 50, "pages": 1}`:                        "root items",
+		`{"name": "team", "members": [{"a": 1}]}`:                                                     "root members",
+		`{"Title": "G", "Year": "2023", "Plot": "p", "Rated": "PG", "Ratings": [{"Source": "IMDb"}]}`: "single, inner Ratings",
+	} {
+		values, err := decodeSample(Output{Stdout: []byte(sample)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sh, err := findRows(values, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := "root " + sh.root
+		if sh.single != nil {
+			got = "single, inner " + sh.inner
+		}
+		if got != want {
+			t.Errorf("%s: %s, want %s", sample, got, want)
+		}
+	}
+}
+
+// --component inspector shows the whole value: no root is inferred,
+// even for a Kubernetes List.
+func TestInspectorTakesTheWholeValue(t *testing.T) {
+	res, err := ExecConfig(ExecOptions{Argv: []string{"kubectl", "get", "pods"}, Component: "inspector", MaxColumns: 8},
+		Output{Stdout: []byte(`{"kind": "List", "items": [{"a": 1}]}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := string(res.Config); strings.Contains(out, "root:") || !strings.Contains(out, "type: inspector") {
+		t.Errorf("config:\n%s", out)
+	}
 }
 
 func TestSortFor(t *testing.T) {

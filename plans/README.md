@@ -64,3 +64,8 @@ section in the plan gets trimmed or deleted.
   field valid on it commented out, defaults and descriptions generated
   from the `docs/reference` tables. Four PRs, all built and
   uncommitted.
+- [`add-http.md`](add-http.md) — `tui-builder add http <url>`: `add
+  exec` for one HTTP endpoint. One GET, sampled into an http source and a
+  component, with credentials written as `${env.X}`, paging read from
+  the live response, and `--into` reusing a matching preset. Proposed,
+  not decided; five PRs, with the open questions listed.

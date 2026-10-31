@@ -5,6 +5,7 @@
 # columns, to read another API.
 app:
   title: __TITLE__
+  surface: filled
   env:
     - {name: THINGS_API_URL, default: "http://localhost:8765"}
     - {name: THINGS_API_TOKEN, default: fixture-token}
@@ -25,6 +26,7 @@ tui:
     things:
       type: table
       title: Things
+      filterable: true
       source: things
       columns:
         - {title: Name,   value: name}

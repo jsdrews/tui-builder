@@ -132,11 +132,11 @@ never import any TUI code.
 
 ```sh
 mkdir my-project && cd my-project
-tui-builder init              # writes tui-builder.yaml
+tui-builder init -o tui-builder.yaml
 tui-builder tui-builder.yaml
 ```
 
-`init` writes a small commented config that runs offline: a `static`
+`init` prints a small commented config that runs offline: a `static`
 source of four rows, a filterable table bound to it, and one screen,
 with an http source and an exec source commented out as next steps.
 Each section links its reference page. The whole file is shown in the
@@ -152,9 +152,13 @@ menu against THAT row — one gesture, not click-then-press-`a`.
 Mouse reporting takes over the terminal's own click-drag text selection —
 hold `shift` (or `alt` in iTerm2) while dragging to select text for a copy.
 
-`tui-builder init <kind>` writes an example of any one component or
+`tui-builder init <kind>` prints an example of any one component or
 source instead, `init table` or `init http`, with every field it takes
 commented out underneath.
+
+Every command that makes a config prints it, and `-o FILE` writes it
+instead: `tui-builder init table | tui-builder -` runs one without saving
+it.
 
 From there, `tui-builder add exec -- <command>` writes a config for any
 command that prints JSON, and `tui-builder gen <openapi spec>` one for an

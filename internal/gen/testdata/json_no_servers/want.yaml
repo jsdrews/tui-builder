@@ -3,6 +3,7 @@
 #   tui-builder gen spec.json --base-url http://localhost:9000/
 app:
   title: Plain JSON
+  surface: filled
   version: "0.1"
   env:
     - name: PLAIN_JSON_URL
@@ -24,6 +25,7 @@ tui:
       title: Version
       source: version
       auto: true
+      filterable: true
   initial: version
   screens:
     version:

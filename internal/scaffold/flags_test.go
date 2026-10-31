@@ -130,12 +130,13 @@ func TestParamsWriteInputs(t *testing.T) {
 		t.Errorf("on_input: %+v", b)
 	}
 
-	// A bool is a toggle; --no-inputs writes the parameter alone.
+	// A bool is an input that says true or false; --no-inputs writes the
+	// parameter alone.
 	res, err = ExecConfig(ExecOptions{Argv: append(podsArgv, "--watch=false"), Params: []Param{{"watch", "false", "bool"}}}, podsSample)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c := decode(t, res); c.TUI.Components["watch"].Type != "toggle" || c.Data.Sources["pods"].Parameters["watch"].Type != "bool" {
+	if c := decode(t, res); c.TUI.Components["watch"].Type != "input" || c.TUI.Components["watch"].Placeholder != "true or false" || c.Data.Sources["pods"].Parameters["watch"].Type != "bool" {
 		t.Errorf("bool param:\n%s", res.Config)
 	}
 	res, err = ExecConfig(ExecOptions{Argv: podsArgv, Params: []Param{{"ns", "default", "string"}}, NoInputs: true}, podsSample)

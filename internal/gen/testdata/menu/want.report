@@ -1,1 +1,2 @@
+warning: the spec declares no security scheme, so no auth is written and requests go out anonymous: if the API takes a token, add data.presets.lots.auth in an overrides file
 6 screens, 6 sources

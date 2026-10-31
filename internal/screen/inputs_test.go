@@ -78,13 +78,13 @@ var enter = tea.KeyMsg{Type: tea.KeyEnter}
 // one commits, and a revert puts back what was committed.
 func TestInputsDriveTheirSource(t *testing.T) {
 	m := inputsExample(t)
-	if got := podNames(m); len(got) != 3 {
-		t.Fatalf("initial rows = %v, want web, api, db (deleted hidden, no query)", got)
+	if got := podNames(m); len(got) != 4 {
+		t.Fatalf("initial rows = %v, want web, api, db, old-batch (no query)", got)
 	}
 	// The search field is first in the layout, so it has focus and is
 	// editing. Typing alone doesn't refetch.
 	settle(t, m, keys("ap")...)
-	if got := podNames(m); len(got) != 3 {
+	if got := podNames(m); len(got) != 4 {
 		t.Errorf("typing without enter refetched: %v", got)
 	}
 	settle(t, m, enter)
@@ -101,18 +101,6 @@ func TestInputsDriveTheirSource(t *testing.T) {
 	settle(t, m, tea.KeyMsg{Type: tea.KeyEsc})
 	if in.Value() != "ap" || in.Focused() {
 		t.Errorf("after esc: value %q focused %v, want ap and left", in.Value(), in.Focused())
-	}
-
-	// Tab to the toggle; a flip commits and refetches.
-	settle(t, m, tea.KeyMsg{Type: tea.KeyTab})
-	settle(t, m, tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
-	if m.inputs["show_deleted"] != "true" {
-		t.Fatalf("toggle didn't commit: %q", m.inputs["show_deleted"])
-	}
-	settle(t, m, tea.KeyMsg{Type: tea.KeyTab})
-	settle(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
-	if got := podNames(m); len(got) != 1 || got[0] != "api" {
-		t.Errorf("deleted shown, query ap: rows = %v, want [api]", got)
 	}
 }
 

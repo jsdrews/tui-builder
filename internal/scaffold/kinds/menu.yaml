@@ -1,13 +1,27 @@
 app:
   title: __TITLE__
+  surface: filled
 
 data:
   sources:
     services:
       type: static
       data:
-        - {name: api, status: running}
-        - {name: web, status: pending}
+        - {name: api,    status: running}
+        - {name: worker, status: running}
+        - {name: web,    status: pending}
+    volumes:
+      type: static
+      data:
+        - {name: data, size: 20G}
+        - {name: logs, size: 4G}
+    instance:
+      # Each menu item that opens this screen fills ${params.engine}
+      # through its bind:.
+      type: exec
+      parameters:
+        engine: {type: string, required: true}
+      command: [sh, -c, "printf '[{\"engine\":\"%s\",\"status\":\"up\"}]' '${params.engine}'"]
 
 tui:
   components:
@@ -15,21 +29,42 @@ tui:
       type: menu
       title: Sections
       items:
-        - {label: Services, screen: services}
-        - {label: About,    screen: about}
+        - {group: compute,  label: Services, screen: services, description: "what's running"}
+        - {group: storage,  label: Volumes,  screen: volumes,  description: "disks and their sizes"}
+        - {group: database, label: postgres, screen: instance, description: "the postgres instance", bind: {engine: postgres}}
+        - {group: database, label: mysql,    screen: instance, description: "the mysql instance",    bind: {engine: mysql}}
+        - {label: About, screen: about, description: "no group, so it goes last, under other"}
         # @fields items
       # @fields
     services:
       type: table
       title: Services
+      filterable: true
       source: services
       columns:
         - {title: Name,   value: name}
         - {title: Status, value: status}
+    volumes:
+      type: table
+      title: Volumes
+      filterable: true
+      source: volumes
+      columns:
+        - {title: Name, value: name}
+        - {title: Size, value: size, align: right}
+    instance:
+      type: inspector
+      title: Instance
+      filterable: true
+      source: instance
+      auto: true
     about:
       type: textview
       title: About
-      content: Opened from the menu; esc goes back.
+      searchable: true
+      content: |
+        Opened from the menu; esc goes back. / filters the menu on label
+        and group, and [ / ] jump between groups.
 
   initial: home
   screens:
@@ -37,8 +72,18 @@ tui:
       layout:
         component: home
     services:
+      title: Services
       layout:
         component: services
+    volumes:
+      title: Volumes
+      layout:
+        component: volumes
+    instance:
+      title: Instance
+      layout:
+        component: instance
     about:
+      title: About
       layout:
         component: about

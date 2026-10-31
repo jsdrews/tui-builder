@@ -16,6 +16,9 @@ type shape struct {
 	root   string
 	rows   []*object
 	single *object
+	// inner is a single object's one list of objects, which wasn't taken
+	// as the rows because the object has fields of its own.
+	inner string
 }
 
 // findRows locates the rows in the decoded sample. rootFlag, when set,
@@ -56,9 +59,11 @@ func findRows(values []any, rootFlag string) (shape, error) {
 			}
 		}
 		switch {
-		case len(lists) == 1:
+		case len(lists) == 1 && envelope(d, lists[0]):
 			rows, _ := objects(d.vals[lists[0]].([]any), lists[0])
 			return shape{root: lists[0], rows: rows}, nil
+		case len(lists) == 1:
+			return shape{single: d, inner: lists[0]}, nil
 		case len(lists) > 1:
 			return shape{}, fmt.Errorf("the output has several lists of objects (%s): pick the rows with --root", strings.Join(lists, ", "))
 		case len(empty) > 0:
@@ -67,6 +72,31 @@ func findRows(values []any, rootFlag string) (shape, error) {
 		return shape{single: d}, nil
 	}
 	return shape{}, fmt.Errorf("the output is a single %s, not an object or a list of them", jsonKind(doc))
+}
+
+// envelope is whether an object only wraps its list of rows: everything
+// else in it is paging or metadata (a Kubernetes List's kind and
+// metadata, a page's total and next), or there's little else. A movie
+// with a list of ratings among twenty fields of its own is one object.
+func envelope(o *object, list string) bool {
+	others := 0
+	for _, k := range o.keys {
+		if k == list || envelopeKeys[strings.ToLower(strings.TrimLeft(k, "_@$"))] {
+			continue
+		}
+		others++
+	}
+	return others <= 2
+}
+
+var envelopeKeys = map[string]bool{
+	"apiversion": true, "kind": true, "metadata": true, "meta": true, "links": true, "link": true,
+	"total": true, "total_count": true, "totalcount": true, "count": true, "total_results": true,
+	"page": true, "pages": true, "page_size": true, "per_page": true, "size": true, "limit": true, "offset": true,
+	"next": true, "previous": true, "prev": true, "next_url": true, "nextlink": true,
+	"cursor": true, "next_cursor": true, "has_more": true, "hasmore": true, "next_page_token": true,
+	"incomplete_results": true, "took": true, "timed_out": true, "status": true, "success": true, "ok": true,
+	"message": true, "error": true, "errors": true, "warnings": true, "query": true, "type": true, "version": true,
 }
 
 func objects(list []any, where string) ([]*object, error) {
@@ -253,6 +283,7 @@ func joinScalars(l []any) string {
 }
 
 var (
+	wordLike   = regexp.MustCompile(`^[A-Za-z0-9._/\\:-]+$`)
 	numberText = regexp.MustCompile(`^-?[0-9][0-9,]*(\.[0-9]+)?$`)
 	// siText is what the table's si sort parses: a number with K, M, G
 	// or T (binary with i, bytes with B) or a bare B.
@@ -390,6 +421,10 @@ func sourceName(argv []string) string {
 	for _, a := range argv[1:] {
 		if strings.HasPrefix(a, "-") {
 			break
+		}
+		// JSON, a URL's query or a sentence isn't a name: echo '{…}' is echo.
+		if !wordLike.MatchString(a) {
+			continue
 		}
 		if !verbs[strings.ToLower(a)] && !numberText.MatchString(a) {
 			name = a

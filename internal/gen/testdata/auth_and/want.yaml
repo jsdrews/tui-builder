@@ -3,6 +3,7 @@
 #   tui-builder gen spec.yaml
 app:
   title: Keyed
+  surface: filled
   version: "1"
   env:
     - name: KEYED_URL
@@ -41,6 +42,7 @@ tui:
       title: Account
       source: account
       auto: true
+      filterable: true
   initial: account
   screens:
     account:

@@ -191,9 +191,8 @@ type Model struct {
 	cancel context.CancelFunc
 	pushed []context.CancelFunc
 
-	// inputs holds each input's and toggle's committed value, by
-	// component name: what ${input.NAME} reads. An input commits on
-	// enter, a toggle on every flip.
+	// inputs holds each input's committed value, by component name:
+	// what ${input.NAME} reads. An input commits on enter.
 	inputs map[string]string
 
 	// windows lists the windowed tables (each a tuilib remote.Table),
@@ -881,14 +880,6 @@ func (m *Model) update(msg tea.Msg) (tscreen.Screen, tea.Cmd) {
 		}
 	}
 	cmds = m.syncFocusAfterPress(msg, cmds)
-	// A click can flip a toggle too; it commits the same as a key.
-	if _, ok := msg.(mouse.Msg); ok {
-		for i, c := range m.tree.All() {
-			if c.Kind == build.KToggle {
-				cmds = append(cmds, m.commitInput(m.tree.Order[i]))
-			}
-		}
-	}
 	return m, tea.Batch(cmds...)
 }
 
@@ -1039,12 +1030,8 @@ func (m *Model) handleFetch(msg fetchMsg) tea.Cmd {
 	polled := entry.src.Refresh() > 0
 	startedFailing := failed && !entry.failing
 	if polled && failed != entry.failing {
-		suffix := ""
-		if failed {
-			suffix = " · reads failing"
-		}
 		for _, compName := range m.sourceUsers[msg.source] {
-			build.SetTitleSuffix(m.tree.Components[compName], suffix)
+			build.SetReadsFailing(m.tree.Components[compName], failed)
 		}
 	}
 	entry.failing = failed
@@ -1241,8 +1228,6 @@ func componentHelpSections(c *build.Component) []help.Section {
 		return c.Eventlog.HelpSections()
 	case build.KInput:
 		return c.Input.HelpSections()
-	case build.KToggle:
-		return c.Toggle.HelpSections()
 	case build.KMenu:
 		return c.Menu.HelpSections()
 	}
@@ -1256,12 +1241,12 @@ func (m *Model) SetTheme(t theme.Theme) {
 	for _, c := range m.tree.All() {
 		c.Rebuild(t)
 	}
-	// A rebuild takes the configured title back; put the outage marker
-	// back on what's still failing.
+	// Rebuild puts a component's title notes back, but a windowed one
+	// restyles in place and returns first; mark what's still failing.
 	for name, entry := range m.sources {
 		if entry.failing && entry.src.Refresh() > 0 {
 			for _, compName := range m.sourceUsers[name] {
-				build.SetTitleSuffix(m.tree.Components[compName], " · reads failing")
+				build.SetReadsFailing(m.tree.Components[compName], true)
 			}
 		}
 	}
@@ -1321,8 +1306,6 @@ func focusableOf(c *build.Component) focus.Focusable {
 		return c.Eventlog
 	case build.KInput:
 		return c.Input
-	case build.KToggle:
-		return c.Toggle
 	case build.KMenu:
 		return c.Menu
 	}
@@ -1409,8 +1392,6 @@ func componentHelp(c *build.Component) []key.Binding {
 		return c.Eventlog.Help()
 	case build.KInput:
 		return c.Input.Help()
-	case build.KToggle:
-		return c.Toggle.Help()
 	case build.KMenu:
 		return c.Menu.Help()
 	}
@@ -2053,10 +2034,6 @@ func updateComponent(c *build.Component, msg tea.Msg) tea.Cmd {
 		m, cmd := c.Input.Update(msg)
 		*c.Input = m
 		return cmd
-	case build.KToggle:
-		m, cmd := c.Toggle.Update(msg)
-		*c.Toggle = m
-		return cmd
 	case build.KMenu:
 		m, cmd := c.Menu.Update(msg)
 		*c.Menu = m
@@ -2197,7 +2174,7 @@ func (m *Model) initCursor(components map[string]*cfg.Component, sources map[str
 	m.cursorAllSources = sources
 	m.inputs = map[string]string{}
 	for _, name := range m.tree.Order {
-		if c := m.tree.Components[name]; c.Kind == build.KInput || c.Kind == build.KToggle {
+		if c := m.tree.Components[name]; c.Kind == build.KInput {
 			m.inputs[name] = build.InputValue(c)
 		}
 	}

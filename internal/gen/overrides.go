@@ -268,6 +268,21 @@ func normalOpKey(key string) string {
 	return key
 }
 
+// sets says whether the overrides' config sets the value at path:
+// sets("data", "presets", "github", "auth").
+func (ov *overrides) sets(path ...string) bool {
+	if ov == nil || ov.fragment == nil {
+		return false
+	}
+	n := ov.fragment
+	for _, k := range path {
+		if n = get(n, k); n == nil {
+			return false
+		}
+	}
+	return true
+}
+
 // hint is the operation's hints, or an empty set.
 func (ov *overrides) hint(o op) *opHints {
 	if ov != nil && ov.ops != nil {

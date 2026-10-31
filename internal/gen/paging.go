@@ -32,6 +32,9 @@ type paging struct {
 	// sorted are the columns a window sorts (by value path); nil off a
 	// window, where every column sorts locally.
 	sorted map[string]bool
+	// filtered are the columns a window's filters name (by value path),
+	// which have to be shown: a scoped term only matches a column.
+	filtered []string
 	// distinct are a window's enum columns' values, by value path.
 	distinct map[string][]string
 	note     string // why it's a walk when it looked like a window
@@ -193,14 +196,16 @@ func windowFor(o op, q map[string]*openapi3.Parameter, page, offset, size, total
 	filters := flow(mapping())
 	used := map[string]bool{page: true, offset: true, size: true}
 	for _, c := range cols {
-		if p := q[c.path]; p != nil && !used[c.path] {
-			add(filters, c.title, str(c.path))
-			used[c.path] = true
+		if p := paramFor(q, c.path); p != "" && !used[p] {
+			add(filters, c.title, str(p))
+			used[p] = true
+			pg.filtered = append(pg.filtered, c.path)
 			continue
 		}
-		if lo, hi := rangePair(q, c.path); lo != "" {
+		if lo, hi := rangePair(q, c.path); lo != "" && !used[lo] {
 			add(filters, c.title, flow(mapping("gte", str(lo), "lte", str(hi))))
 			used[lo], used[hi] = true, true
+			pg.filtered = append(pg.filtered, c.path)
 		}
 	}
 	if len(filters.Content) > 0 {
@@ -359,10 +364,29 @@ func sortFields(s *openapi3.Schema, cols []column) ([]string, *yaml.Node, bool) 
 // created_at are the same.
 func normal(s string) string { return strings.ToLower(strings.ReplaceAll(s, "_", "")) }
 
+// paramFor is the query parameter named like a column: its path, or the
+// path with dots as underscores (venue.id → venue_id).
+func paramFor(q map[string]*openapi3.Parameter, path string) string {
+	for _, name := range []string{path, strings.ReplaceAll(path, ".", "_")} {
+		if q[name] != nil {
+			return name
+		}
+	}
+	return ""
+}
+
 // rangePair finds a column's from/to parameters: created_after and
-// created_before, min_size and max_size, size_gte and size_lte.
+// created_before, min_size and max_size, size_gte and size_lte. The
+// column's name is tried whole and without a trailing _at, _time, _date
+// or _on, so start_time pairs with start_after and start_before.
 func rangePair(q map[string]*openapi3.Parameter, path string) (string, string) {
-	bases := []string{path, strings.TrimSuffix(path, "_at")}
+	base := strings.ReplaceAll(path, ".", "_")
+	bases := []string{base}
+	for _, suffix := range []string{"_at", "_time", "_date", "_on"} {
+		if b, ok := strings.CutSuffix(base, suffix); ok && b != "" {
+			bases = append(bases, b)
+		}
+	}
 	for _, b := range bases {
 		for _, pair := range [][2]string{
 			{b + "_after", b + "_before"}, {"min_" + b, "max_" + b}, {b + "_gte", b + "_lte"},

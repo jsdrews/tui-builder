@@ -35,19 +35,39 @@ type Column struct {
 	Values []string
 	// Sort is the comparator: "", "number" or "si".
 	Sort string
+	// Minor is a column worth less than any other short one, whatever
+	// its rank: a bookkeeping timestamp, a coordinate, an id or link, a
+	// nested object's other fields. It sorts after short text, before
+	// long text, and keeps its rank for its style.
+	Minor bool
+}
+
+// order is where a column sorts: by rank, with minor columns between
+// short and long text.
+func order(c Column) int {
+	if c.Minor && c.Rank < Long {
+		return 2*int(Short) + 1
+	}
+	return 2 * int(c.Rank)
+}
+
+// SortByRank orders cols by rank, minor columns after short text,
+// keeping the given order within each.
+func SortByRank(cols []Column) {
+	slices.SortStableFunc(cols, func(a, b Column) int { return order(a) - order(b) })
 }
 
 // DefaultMax is how many columns are kept; the rest are written
 // commented out.
 const DefaultMax = 8
 
-// Pick orders cols by rank (keeping the given order within a rank) and
-// keeps the first max, with one slot guaranteed to the top long-text
-// column: it takes the last slot, displacing the last short one (or,
-// with none, the last kept). It returns the kept columns and the rest.
+// Pick orders cols with SortByRank and keeps the first max, with one
+// slot guaranteed to the top long-text column: it takes the last slot,
+// displacing the last short or minor one (or, with none, the last
+// kept). It returns the kept columns and the rest.
 func Pick(cols []Column, max int) (kept, rest []Column) {
 	ordered := slices.Clone(cols)
-	slices.SortStableFunc(ordered, func(a, b Column) int { return int(a.Rank) - int(b.Rank) })
+	SortByRank(ordered)
 	if max <= 0 || len(ordered) <= max {
 		return ordered, nil
 	}
@@ -57,7 +77,7 @@ func Pick(cols []Column, max int) (kept, rest []Column) {
 		long := rest[i]
 		out := len(kept) - 1
 		for j := len(kept) - 1; j >= 0; j-- {
-			if kept[j].Rank == Short {
+			if kept[j].Rank == Short || kept[j].Minor {
 				out = j
 				break
 			}
@@ -66,7 +86,7 @@ func Pick(cols []Column, max int) (kept, rest []Column) {
 		kept = append(slices.Delete(kept, out, out+1), long)
 		rest = slices.Delete(rest, i, i+1)
 		rest = slices.Insert(rest, 0, displaced)
-		slices.SortStableFunc(rest, func(a, b Column) int { return int(a.Rank) - int(b.Rank) })
+		SortByRank(rest)
 	}
 	return kept, rest
 }
@@ -87,7 +107,7 @@ type Style struct {
 	Rules    []Rule
 }
 
-// Styles styles the kept columns: bold identity; status colours from
+// Styles styles the kept columns: bold on the first identity column; status colours from
 // the vocabulary, for values seen; booleans coloured only when named as
 // a check; failure counts warn above zero; numbers and timestamps right-
 // aligned; flex on the long-text column, else on the identity; a
@@ -103,7 +123,7 @@ func Styles(kept []Column) []Style {
 		name := lastSegment(c.Path)
 		switch c.Rank {
 		case Identity:
-			s.Bold = true
+			s.Bold = slices.IndexFunc(kept, func(c Column) bool { return c.Rank == Identity }) == i
 		case Status:
 			s.MaxWidth = 20
 			switch {
@@ -199,6 +219,33 @@ func IsCheckName(name string) bool { return checkName.MatchString(name) }
 // IsFailureCount reads a number's name as a count of failures:
 // restarts, errors, failures…
 func IsFailureCount(name string) bool { return failureName.MatchString(name) }
+
+// IsBookkeepingName is a timestamp the store keeps rather than one
+// about the thing: created_at, updatedAt, last_modified.
+func IsBookkeepingName(name string) bool { return bookkeepingName.MatchString(normalName(name)) }
+
+// IsCoordinateName is a latitude or longitude.
+func IsCoordinateName(name string) bool {
+	return slices.Contains([]string{"lat", "lng", "lon", "long", "latitude", "longitude"}, normalName(name))
+}
+
+// IsLinkName is a URL or link to something: image_url, href, self_link.
+func IsLinkName(name string) bool { return linkName.MatchString(normalName(name)) }
+
+// IsIDName is an id: id, owner_id, ownerId.
+func IsIDName(name string) bool { return name == "id" || idName.MatchString(name) }
+
+var (
+	bookkeepingName = regexp.MustCompile(`^(created|updated|modified|deleted|inserted|lastmodified|lastupdated)(at|on|time|date|timestamp)?$`)
+	linkName        = regexp.MustCompile(`(url|uri|href|link)$`)
+	idName          = regexp.MustCompile(`(_id|[a-z0-9]Id|_uuid)$`)
+)
+
+// normalName lower-cases a name and drops its underscores and dashes,
+// so created_at and createdAt read the same.
+func normalName(name string) string {
+	return strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(name))
+}
 
 // IsLongName reads a field name as long text: description, message…
 func IsLongName(name string) bool { return longName.MatchString(name) }

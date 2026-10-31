@@ -292,13 +292,13 @@ func substituteCell(v any, sel Selection) any {
 // named by their path (${selection.event_data.host}).
 var tokenRe = regexp.MustCompile(`\$\{(selection|cursor|env|inputs)(?:\.([A-Za-z0-9_.]+))?\}`)
 
-// inputRe matches ${input.NAME}, an input's or toggle's committed value.
+// inputRe matches ${input.NAME}, an input's committed value.
 // Kept apart from tokenRe because it resolves against live screen state,
 // not a frozen selection or an action's own inputs.
 var inputRe = regexp.MustCompile(`\$\{input\.([A-Za-z0-9_]+)\}`)
 
 // SubstituteInputValues resolves ${input.NAME} against the committed
-// values of a screen's inputs and toggles; an unknown name is "". Every
+// values of a screen's inputs; an unknown name is "". Every
 // other token passes through for its own resolver.
 func SubstituteInputValues(s string, values map[string]string) string {
 	if !strings.Contains(s, "${input.") {

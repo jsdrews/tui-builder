@@ -106,13 +106,13 @@ func (t *Tree) RenderNode() layout.Node {
 	return visit(t.Root)
 }
 
-// fixedFor is a vstack item's fixed height: its own, or an input's or
-// toggle's when it holds one.
+// fixedFor is a vstack item's fixed height: its own, or an input's when
+// it holds one.
 func (t *Tree) fixedFor(it cfg.Item) int {
 	if it.Fixed > 0 {
 		return it.Fixed
 	}
-	if c := t.Components[it.Component]; c != nil && (c.Kind == KInput || c.Kind == KToggle) {
+	if c := t.Components[it.Component]; c != nil && c.Kind == KInput {
 		return cfg.InputHeight
 	}
 	return 0
@@ -150,8 +150,6 @@ func componentNode(c *Component) layout.Node {
 		return layout.Sized(c.Eventlog)
 	case KInput:
 		return layout.Sized(c.Input)
-	case KToggle:
-		return layout.Sized(c.Toggle)
 	case KMenu:
 		return layout.Sized(c.Menu)
 	}

@@ -65,7 +65,7 @@ Write a starter config in an empty directory:
 
 ```sh
 mkdir my-project && cd my-project
-tui-builder init        # writes tui-builder.yaml
+tui-builder init -o tui-builder.yaml
 tui-builder tui-builder.yaml
 ```
 
@@ -85,9 +85,12 @@ says how they're shown: a table whose columns each take a value from an
 item by path, laid out on one screen. `wrangl tui-builder.yaml items`
 prints the source's data without the UI.
 
-To see everything one kind can do, `tui-builder init <kind>` writes an
-example of it with every field commented out: `tui-builder init table
---dry-run | less`. See [`init <kind>`](cli/tui-builder.md#tui-builder-init-kind).
+Without `-o`, `init` prints the config instead, so `tui-builder init |
+tui-builder -` runs it without saving it.
+
+To see everything one kind can do, `tui-builder init <kind>` prints an
+example of it with every field commented out: `tui-builder init table |
+less`. See [`init <kind>`](cli/tui-builder.md#tui-builder-init-kind).
 
 ## Live data
 

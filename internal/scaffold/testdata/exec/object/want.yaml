@@ -1,6 +1,7 @@
 # Written by `tui-builder add exec -- gh api user`.
 app:
   title: User
+  surface: filled
 data:
   sources:
     user:
@@ -13,6 +14,7 @@ tui:
       title: User
       source: user
       auto: true
+      filterable: true
   screen:
     layout:
       component: user

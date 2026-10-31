@@ -188,6 +188,7 @@ func ApplyData(c *Component, data any, th theme.Theme) {
 		return
 	}
 	c.last, c.hasLast = data, true
+	c.setEmpty(noRows(c.Kind, data))
 	switch c.Kind {
 	case KList:
 		applyList(c, data, th)
@@ -204,6 +205,26 @@ func ApplyData(c *Component, data any, th theme.Theme) {
 	case KTextview:
 		applyTextview(c, data)
 	}
+}
+
+// noRows is whether a fetch answered nothing to show: no rows for a
+// list, table, tree or logview, nothing at all for an inspector. A
+// textview's empty text is left alone; it may be meant.
+func noRows(k Kind, data any) bool {
+	switch k {
+	case KList, KTable, KTree, KLogview:
+		return len(ds.Iter(data)) == 0
+	case KInspector:
+		switch d := data.(type) {
+		case nil:
+			return true
+		case map[string]any:
+			return len(d) == 0
+		case []any:
+			return len(d) == 0
+		}
+	}
+	return false
 }
 
 // applyTextview coerces a source's response into a single string and
@@ -375,6 +396,7 @@ func BeginRead(c *Component) activity.Read {
 func ApplyRead(c *Component, rd activity.Read, data any, err error, th theme.Theme) bool {
 	if err == nil {
 		c.last, c.hasLast = data, true
+		c.setEmpty(noRows(c.Kind, data))
 	}
 	switch c.Kind {
 	case KTable:

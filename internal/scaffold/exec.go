@@ -120,11 +120,21 @@ func ExecConfig(opts ExecOptions, out Output) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	// An inspector shows the whole value, so there's no root to find.
+	if opts.Component == "inspector" && opts.Root == "" && wkind == noWindow && len(values) == 1 {
+		if err := p.component("inspector", nil); err != nil {
+			return Result{}, err
+		}
+		return p.finish()
+	}
 	sh, err := findRows(values, opts.Root)
 	if err != nil {
 		return Result{}, err
 	}
 	p.root = sh.root
+	if sh.inner != "" {
+		p.note("rows", fmt.Sprintf("the whole object, not its %s list: pass --root %s for a table of them", sh.inner, sh.inner), "")
+	}
 	if sh.root != "" {
 		p.note("rows", "root: "+sh.root, flagIf(opts.Root != "", "--root"))
 	}
@@ -231,7 +241,7 @@ func (p *plan) component(kind string, rows []*object) error {
 	p.kind = kind
 	switch kind {
 	case "inspector":
-		p.comp = mapping("type", scalar("inspector"), "title", scalar(title), "source", scalar(p.name), "auto", yes())
+		p.comp = mapping("type", scalar("inspector"), "title", scalar(title), "source", scalar(p.name), "auto", yes(), "filterable", yes())
 	case "table", "list":
 		cols, key, err := p.columns(rows)
 		if err != nil {
@@ -439,7 +449,7 @@ func (p *plan) finish() (Result, error) {
 		appTitle = titleCase(p.name)
 	}
 	doc := mapping(
-		"app", mapping("title", scalar(appTitle)),
+		"app", mapping("title", scalar(appTitle), "surface", scalar("filled")),
 		"data", mapping("sources", mapping(pt.name, pt.source)),
 		"tui", mapping(
 			"components", pt.components,
@@ -510,7 +520,8 @@ func (p *plan) parts() *parts {
 			in := inputName(pa.Name, p.name)
 			field := mapping("type", scalar("input"), "title", scalar(words(pa.Name)), "initial", scalar(pa.Value))
 			if pa.Type == "bool" {
-				field = mapping("type", scalar("toggle"), "title", scalar(words(pa.Name)), "initial", scalar(pa.Value))
+				// The source parameter is typed bool; say what it takes.
+				add(field, "placeholder", scalar("true or false"))
 			}
 			add(comps, in, field)
 			add(bind, pa.Name, scalar("${input."+in+"}"))
