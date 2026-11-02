@@ -29,3 +29,6 @@
 
 # goreleaser output
 /dist/
+
+# Public OpenAPI specs fetched for gen tests (go generate ./internal/gen)
+/internal/gen/testdata/public/.cache/

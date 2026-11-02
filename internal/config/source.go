@@ -624,8 +624,8 @@ func (w *WindowConfig) validateShared(path string) error {
 		}
 	}
 	if f := w.Find; f != nil {
-		if len(f.Params) == 0 && len(f.Body) == 0 {
-			return fmt.Errorf("%s.find: needs `params:` or `body:` — the patch that turns a request into a search", path)
+		if len(f.Params) == 0 && len(f.Body) == 0 && len(f.Command) == 0 {
+			return fmt.Errorf("%s.find: needs `params:` or `body:` (http), or `command:` (exec) — what turns a request into a search", path)
 		}
 		if w.Cursor == "" && f.Position == "" {
 			return fmt.Errorf("%s.find.position: required on a paged source — the path in the matching item to its position in the set", path)
@@ -746,6 +746,9 @@ func (w *WindowConfig) validateHTTPWindow(path string) error {
 	if err := w.validateShared(path); err != nil {
 		return err
 	}
+	if w.Find != nil && len(w.Find.Command) > 0 {
+		return fmt.Errorf("%s.find.command: exec-only — an http window's find is a `params:` or `body:` patch over the request", path)
+	}
 	if w.Cursor != "" {
 		if len(w.Older) == 0 || len(w.Newer) == 0 {
 			return fmt.Errorf("%s: an Anchored window needs both `older:` and `newer:` — what the request changes when walking each way (usually the sort order and where ${window.cursor} goes)", path)
@@ -825,8 +828,17 @@ func (w *WindowConfig) validateExecWindow(path string, argv []string) error {
 	if len(w.Older) > 0 || len(w.Newer) > 0 {
 		return fmt.Errorf("%s: `older:` / `newer:` are http-only — an exec command reads ${window.cursor} and ${window.dir} (older|newer) instead", path)
 	}
-	if w.Find != nil {
-		return fmt.Errorf("%s.find: http-only — an exec window can only search what's loaded", path)
+	if f := w.Find; f != nil {
+		switch {
+		case len(f.Params) > 0 || len(f.Body) > 0:
+			return fmt.Errorf("%s.find: `params:` and `body:` are http-only — an exec window's find is a `command:` that reads ${window.term}", path)
+		case len(f.Command) == 0:
+			return fmt.Errorf("%s.find: needs `command:` — the argv that prints the next match for ${window.term}", path)
+		case strings.Contains(f.Command[0], "${"):
+			return fmt.Errorf("%s.find.command[0]: the program can't be a template", path)
+		case !strings.Contains(strings.Join(f.Command, " "), "${window.term}"):
+			return fmt.Errorf("%s.find.command: never references ${window.term} — without it every search finds the same item", path)
+		}
 	}
 	joined := strings.Join(argv, " ")
 	required := []string{"${window.offset}", "${window.limit}"}

@@ -8,7 +8,7 @@ linked, so it's quick to build, script and test with.
 wrangl [flags] <config.yaml> [target]
 ```
 
-With no target it lists the config's entries. With a target (a source or
+Pass `-` as the config to read it from stdin. With no target it lists the config's entries. With a target (a source or
 pipeline name), it writes that entry's value.
 
 ## Flags

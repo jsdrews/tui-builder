@@ -24,7 +24,7 @@ Field tables in the other pages give each field's type as `template`,
 | `${selection.N}` | A table row's Nth cell, 1-based | As above |
 | `${selection.Title}` | The cell in the column titled `Title` (case-insensitive, exact) | As above |
 | `${cursor}` … | The live focused row of an `on_cursor` driver (see [below](#cursor)) | `on_cursor.bind` |
-| `${input.NAME}` | The committed value of the [input or toggle](components.md#input) named NAME on this screen (a toggle is `true` / `false`) | `on_input.bind`, `on_cursor.bind`; a binding's `bind:`, `confirm` and `notice`; an action's `run`, `url`, `method`, `headers`, `body` (resolved when the action runs) |
+| `${input.NAME}` | The committed value of the [input](components.md#input) named NAME on this screen | `on_input.bind`, `on_cursor.bind`; a binding's `bind:`, `confirm` and `notice`; an action's `run`, `url`, `method`, `headers`, `body` (resolved when the action runs) |
 | `${inputs.NAME}` | An action input, after `bind:` and the form | An action's `run`, `url`, `method`, `headers`, `body`, `message`, `error_message`; a binding's `confirm` |
 | `${code}`, `${output}` | Exit or HTTP status; stdout or response body | `message`, `error_message` |
 | `${body.PATH}` | A field of the action's JSON response, by dot-path | `message`, `error_message` |
@@ -137,8 +137,8 @@ success: "code == 0 or output contains 'already exists'"
 |---|---|---|
 | Named | `red`, `bright_green` | `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, `gray` / `grey`, and `bright_` versions of each |
 | Palette index | `"160"` | 0–255 |
-| Hex | `"#ff8800"` | Not usable for `column_separator` / `header_rule` or color rules, which need a palette color |
-| Theme token | `theme:accent` | Follows the active palette, including when themes cycle: `accent`, `current`, `muted`, `subtle`, `key`, `border-active`, `border-inactive`, `bar-bg`, `bar-fg`, `info-bg`, `info-fg`, `error-bg`, `error-fg` |
+| Hex | `"#ff8800"` | Not usable for `column_separator`, `header_rule` or a metric's `color`, which need a palette color. In color rules it's matched to the terminal's colors |
+| Theme token | `theme:accent` | Follows the active palette, including when themes cycle: `accent`, `current`, `muted`, `subtle`, `key`, `border-active`, `border-inactive`, `bar-bg`, `bar-fg`, `info-bg`, `info-fg`, `error-bg`, `error-fg`, and for status values `success`, `warning`, `error` |
 
 ## Durations
 

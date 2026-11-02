@@ -5,6 +5,8 @@ package build
 
 import (
 	"fmt"
+	"math"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,7 +27,6 @@ import (
 	"github.com/jsdrews/tuilib/pkg/table"
 	"github.com/jsdrews/tuilib/pkg/textview"
 	"github.com/jsdrews/tuilib/pkg/theme"
-	"github.com/jsdrews/tuilib/pkg/toggle"
 	"github.com/jsdrews/tuilib/pkg/tree"
 
 	cfg "github.com/jsdrews/tui-builder/internal/config"
@@ -45,7 +46,6 @@ const (
 	KTextview
 	KEventlog
 	KInput
-	KToggle
 	KMenu
 )
 
@@ -64,7 +64,6 @@ type Component struct {
 	Textview  *textview.Model
 	Eventlog  *eventlog.Model
 	Input     *input.Model
-	Toggle    *toggle.Model
 	Menu      *menu.Model
 
 	// Remote is set on a table bound to a windowed source, which tuilib's
@@ -101,6 +100,10 @@ type Component struct {
 	// fetched" apart from a fetch that returned nil.
 	last    any
 	hasLast bool
+
+	// The notes on the pane title after the configured one: the last
+	// fetch answered no rows, or a polled source's reads are failing.
+	empty, failing bool
 }
 
 // NewComponent builds a Component from a config leaf and the active theme.
@@ -127,9 +130,6 @@ func NewComponent(c *cfg.Component, th theme.Theme) (*Component, error) {
 	case "input":
 		m := buildInput(c, th)
 		return &Component{Cfg: c, Kind: KInput, Input: &m}, nil
-	case "toggle":
-		m := buildToggle(c, th)
-		return &Component{Cfg: c, Kind: KToggle, Toggle: &m}, nil
 	case "menu":
 		m := buildMenu(c, th)
 		return &Component{Cfg: c, Kind: KMenu, Menu: &m}, nil
@@ -197,16 +197,16 @@ func (c *Component) Rebuild(th theme.Theme) {
 		st := c.Input.State()
 		*c.Input = buildInput(c.Cfg, th)
 		c.Input.Restore(st)
-	case KToggle:
-		st := c.Toggle.State()
-		*c.Toggle = buildToggle(c.Cfg, th)
-		c.Toggle.Restore(st)
 	case KMenu:
 		st := c.Menu.State()
 		*c.Menu = buildMenu(c.Cfg, th)
 		c.Menu.Restore(st)
 	}
 	c.recolor(th)
+	// A rebuilt pane has its configured title back; put the notes back on.
+	if c.empty || c.failing {
+		c.redrawTitle()
+	}
 }
 
 // recolor re-renders a component's content with th so a `theme:` token
@@ -855,7 +855,7 @@ func applyPaneColors(active, inactive *lipgloss.TerminalColor, spinner *lipgloss
 	if v := parseColor(cs.BorderInactive, th); v != nil {
 		*inactive = v
 	}
-	// Inputs and toggles have no spinner.
+	// Inputs have no spinner.
 	if v := parseColor(cs.Spinner, th); v != nil && spinner != nil {
 		*spinner = spinner.Foreground(v)
 	}
@@ -874,7 +874,7 @@ func applyPaneColors(active, inactive *lipgloss.TerminalColor, spinner *lipgloss
 //
 // Recognised theme tokens: accent, current, muted, subtle, key,
 // border-active, border-inactive, bar-bg, bar-fg, info-bg, info-fg,
-// error-bg, error-fg.
+// error-bg, error-fg, success, warning, error.
 //
 // Returns nil when the spec is empty / unrecognised so callers can leave
 // the theme default in place.
@@ -951,6 +951,15 @@ func resolveThemeToken(name string, th theme.Theme) lipgloss.TerminalColor {
 		return th.ErrorBG
 	case "error-fg":
 		return th.ErrorFG
+	// Foregrounds for a status value: a good outcome, one short of an
+	// error, and an error. error is the error band's colour (ErrorBG),
+	// which is the one that reads as a foreground on the screen.
+	case "success":
+		return th.Success
+	case "warning":
+		return th.Warning
+	case "error":
+		return th.ErrorBG
 	}
 	return nil
 }
@@ -1027,30 +1036,33 @@ func parseNumber(s string) float64 {
 // K/M/B/G/T suffix. Unrecognized suffixes leave the multiplier at 1.
 func parseSI(s string) float64 {
 	s = strings.TrimSpace(xansi.Strip(s))
-	if s == "" {
-		return 0
+	m := siValue.FindStringSubmatch(s)
+	if m == nil {
+		f, _ := strconv.ParseFloat(s, 64)
+		return f
 	}
-	mult := 1.0
-	last := s[len(s)-1]
-	switch last {
-	case 'K', 'k':
-		mult = 1e3
-		s = s[:len(s)-1]
-	case 'M', 'm':
-		mult = 1e6
-		s = s[:len(s)-1]
-	case 'B', 'b', 'G', 'g':
-		mult = 1e9
-		s = s[:len(s)-1]
-	case 'T', 't':
-		mult = 1e12
-		s = s[:len(s)-1]
+	f, _ := strconv.ParseFloat(m[1], 64)
+	unit := m[2]
+	if strings.EqualFold(unit, "b") {
+		return f * 1e9 // a bare B is billions, as in 1.2B
 	}
-	f, _ := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	return f * mult
+	if unit == "" {
+		return f
+	}
+	exp := strings.Index("kmgt", strings.ToLower(unit[:1])) + 1
+	base := 1000.0
+	if len(unit) > 1 && unit[1] == 'i' {
+		base = 1024 // Ki, MiB: binary units
+	}
+	return f * math.Pow(base, float64(exp))
 }
 
-// ------------------------------------------------------- input / toggle ---
+// siValue is a number with an optional unit: K, M, G or T (any case),
+// optionally binary (Ki, Mi…) and optionally bytes (KB, MiB, kB), or a
+// bare B for billions.
+var siValue = regexp.MustCompile(`^(-?[0-9]*\.?[0-9]+)\s?([kKmMgGtT]i?[bB]?|[bB])?$`)
+
+// ---------------------------------------------------------------- input ---
 
 // buildInput is a one-line text field whose committed value other
 // components read as ${input.NAME}.
@@ -1066,18 +1078,6 @@ func buildInput(c *cfg.Component, th theme.Theme) input.Model {
 	}
 	applyPaneColors(&opts.ActiveColor, &opts.InactiveColor, nil, c.Colors, th)
 	return input.New(opts)
-}
-
-// buildToggle is a yes/no switch whose value other components read as
-// ${input.NAME}: "true" or "false".
-func buildToggle(c *cfg.Component, th theme.Theme) toggle.Model {
-	opts := th.Toggle()
-	opts.Title = c.Title
-	opts.Initial = c.Initial == "true"
-	opts.YesLabel = c.YesLabel
-	opts.NoLabel = c.NoLabel
-	applyPaneColors(&opts.ActiveColor, &opts.InactiveColor, nil, c.Colors, th)
-	return toggle.New(opts)
 }
 
 // buildMenu is a menu of the config's items. Each item's ID is its
@@ -1118,14 +1118,10 @@ func MenuItemFor(c *Component, msg tea.Msg) (cfg.MenuItem, bool) {
 	return c.Cfg.MenuItems[i], true
 }
 
-// InputValue is an input's or toggle's current value, as ${input.NAME}
-// reads it.
+// InputValue is an input's current value, as ${input.NAME} reads it.
 func InputValue(c *Component) string {
-	switch c.Kind {
-	case KInput:
+	if c.Kind == KInput {
 		return c.Input.Value()
-	case KToggle:
-		return strconv.FormatBool(c.Toggle.Value())
 	}
 	return ""
 }
@@ -1294,14 +1290,38 @@ func revisionFunc(a *cfg.Activity) func(data any) string {
 	return func(data any) string { return ds.FirstString(data, a.Revision) }
 }
 
-// SetTitleSuffix redraws c's pane title as its configured title plus
-// suffix ("" to clear), for state the screen reports on the border such
-// as "· reads failing".
-func SetTitleSuffix(c *Component, suffix string) {
+// SetReadsFailing marks c's title "· reads failing", or clears it, for a
+// polled source whose reads fail: a pane that's quietly stale says so.
+func SetReadsFailing(c *Component, failing bool) {
+	if c == nil {
+		return
+	}
+	c.failing = failing
+	c.redrawTitle()
+}
+
+// setEmpty marks c's title "· no rows" when a fetch answered nothing, so
+// an empty answer doesn't look like a broken one.
+func (c *Component) setEmpty(empty bool) {
+	if c.empty == empty {
+		return
+	}
+	c.empty = empty
+	c.redrawTitle()
+}
+
+// redrawTitle draws c's pane title: its configured title, then its notes.
+func (c *Component) redrawTitle() {
 	if c == nil || c.Cfg == nil {
 		return
 	}
-	title := c.Cfg.Title + suffix
+	title := c.Cfg.Title
+	if c.empty {
+		title += " · no rows"
+	}
+	if c.failing {
+		title += " · reads failing"
+	}
 	switch c.Kind {
 	case KList:
 		c.List.SetTitle(title)

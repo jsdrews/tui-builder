@@ -1,0 +1,119 @@
+# An example eventlog from `tui-builder init eventlog`. Run it with
+#   tui-builder <this file>
+# Every field a eventlog takes is below, commented out: uncomment a line to
+# use it. A line shows the field's default where it has one; a block
+# shows every field it takes, so keep the ones you need.
+# https://jsdrews.github.io/tui-builder/reference/components/#eventlog
+
+app:
+  title: demo
+  surface: filled
+
+data:
+  sources:
+    events:
+      # An eventlog reads a window: one page of a bigger set. This script
+      # prints the page the window asks for, out of 500 events, keeping
+      # only those whose text contains the filter (f). With "find" first,
+      # it prints the next event matching a search (/, then n or N) and
+      # its position, so a search reaches events that aren't loaded yet.
+      # The window's values go in as arguments ($1 to $5), so a quote in
+      # what's typed can't break the script.
+      type: exec
+      command:
+        - sh
+        - -c
+        - &events |
+          awk -v mode="$1" -v a="$2" -v b="$3" -v c="$4" -v q="$5" '
+          function item(i, n) {
+            return sprintf("{\"id\":%d,\"at\":\"10:%02d:%02d\",\"text\":\"event %d\",\"pos\":%d}", i, int(i / 60) % 60, i % 60, i, n)
+          }
+          BEGIN {
+            n = 0; out = ""; hit = ""
+            for (i = 0; i < 500; i++) {
+              text = sprintf("event %d", i)
+              if (q != "" && index(text, tolower(q)) == 0) continue
+              if (mode == "page" && n >= a && n < a + b)
+                out = out (out == "" ? "" : ",") item(i, n)
+              # find: a is the term, b the direction, c where the view is.
+              if (mode == "find" && index(text, tolower(a)) > 0) {
+                if (b == "newer" && n > c && hit == "") hit = item(i, n)
+                if (b == "older" && n < c) hit = item(i, n)
+              }
+              n++
+            }
+            if (mode == "find") out = hit
+            printf "{\"total\":%d,\"items\":[%s]}", n, out
+          }'
+        - sh
+        - page
+        - "${window.offset}"
+        - "${window.limit}"
+        - ""
+        - "${window.search}"
+      root: items
+      window:
+        page_size: 100
+        total_path: total
+        find:
+          command: [sh, -c, *events, sh, find, "${window.term}", "${window.dir}", "${window.from}", "${window.search}"]
+          position: pos
+
+tui:
+  components:
+    events:
+      type: eventlog
+      title: Events
+      searchable: true
+      filterable: true
+      source: events
+      key: id
+      text: text
+
+      # Common fields: https://jsdrews.github.io/tui-builder/reference/components/#common-fields
+      # colors:                         # Per-component color overrides.
+      #   border_active: ""             # Border color when focused.
+      #   border_inactive: ""           # Border color when unfocused.
+      #   spinner: ""                   # The loading spinner.
+      #   selected_fg: ""               # Focused row text.
+      #   selected_bg: ""               # Focused row background.
+      #   cell: ""                      # Ordinary cell text.
+      #   gutter: ""                    # The line-number or position gutter.
+      #   new: ""                       # Positions of items that just loaded.
+      # color_rules:                    # Colors each item or line by its value; on an `auto: true`
+      #                                 # inspector, each leaf value, scoped by the rule's `path:`.
+      #   - color: red                  # See color values. (required)
+      #     when: stopped               # Exact text (case-insensitive), `~regex`
+      #                                 # (case-insensitive), or a numeric comparison: `> 5`, `<=
+      #                                 # 10`, `== 0`, `!= 0`, with an optional K/M/B/G/T suffix on
+      #                                 # the number.
+      #     path: ""                    # The fields the rule applies to: a dot-path from the record
+      #                                 # root (`status`, `spec.replicas`, `items.0.state`), where
+      #                                 # `*` matches any one key or index (`items.*.state`). (an
+      #                                 # `auto: true` inspector's own `color_rules`)
+      # filter_placeholder: ""          # Hint shown inside the empty filter or search input.
+      # on_cursor:                      # Refetches this component's source as another component's
+      #                                 # cursor moves.
+      #   source: other_table           # The driver: a table, list or tree on the same screen.
+      #                                 # (required)
+      #   bind: {}                      # Maps this component's source parameters to templates over
+      #                                 # the driver's focused row: `${cursor}`, `${cursor.N}`,
+      #                                 # `${cursor.Title}`, `${cursor.path}`, plus `${env.*}`.
+      # on_input:                       # Refetches this component's source when an input on the
+      #                                 # screen commits.
+      #   bind: {q: "${input.search}"}  # Maps source parameters to templates over `${input.NAME}`,
+      #                                 # plus `${env.*}`. (required)
+
+      # Eventlog fields: https://jsdrews.github.io/tui-builder/reference/components/#eventlog
+      # mark: ""                        # Shown as-is in the gutter, normally the server's
+      #                                 # timestamp.
+      # start: oldest                   # Where the view opens once the source isn't growing:
+      #                                 # `oldest` or `newest`. (paged (not Anchored) sources)
+      # max_items: 0                    # Items held at once; the end furthest from the view is
+      #                                 # trimmed.
+      # gutter: true                    # The gutter of positions down the left.
+      # new_for: 2s                     # How long items that just loaded stay marked in the gutter.
+
+  screen:
+    layout:
+      component: events

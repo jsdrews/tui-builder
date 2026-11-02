@@ -270,7 +270,7 @@ func TestSurfacesStartFirstWithChrome(t *testing.T) {
 	}
 }
 
-// The filled surfaces carry a filled field form for inputs, toggles and
+// The filled surfaces carry a filled field form for inputs and
 // the filter bar; the config's chrome must keep it rather than leave
 // them drawing an outlined box under a filled card.
 func TestChromeKeepsFilledFieldForms(t *testing.T) {

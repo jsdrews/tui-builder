@@ -6,6 +6,8 @@ import (
 	"fmt"
 	neturl "net/url"
 	"strconv"
+
+	cfg "github.com/jsdrews/tui-builder/internal/config"
 )
 
 // FindingSource answers a search across a remote set, not only the items
@@ -106,10 +108,41 @@ func (s *httpSource) FindItem(ctx context.Context, q FindQuery) (FindResult, err
 	if err != nil {
 		return FindResult{}, err
 	}
-	items := Iter(applyRoot(parsed, s.root))
+	return findResult(Iter(applyRoot(parsed, s.root)), w)
+}
+
+// FindItem implements FindingSource for exec: the window's `find:`
+// command, templated with ${window.term}, ${window.dir}, ${window.from}
+// and ${window.cursor} plus the view's filter, prints the match in the
+// source's own shape.
+func (s *execSource) FindItem(ctx context.Context, q FindQuery) (FindResult, error) {
+	if s.window == nil || s.window.Find == nil || len(s.window.Find.Command) == 0 {
+		return FindResult{}, ErrNotWindowed
+	}
+	vals := edgeTokens(EdgeQuery{Cursor: q.Cursor, Search: q.Search, Filters: q.Filters, Newer: q.Newer}, s.window.Filters)
+	vals["term"], vals["from"], vals["limit"] = q.Term, strconv.Itoa(q.From), "1"
+	argv := renderTokenArgv(s.window.Find.Command, vals)
+	if len(argv) == 0 {
+		return FindResult{}, fmt.Errorf("find: rendered an empty command")
+	}
+	raw, err := s.run(ctx, argv)
+	if err != nil {
+		return FindResult{}, err
+	}
+	parsed, err := s.parseJSON(raw)
+	if err != nil {
+		return FindResult{}, err
+	}
+	return findResult(Iter(applyRoot(parsed, s.root)), s.window)
+}
+
+// findResult is a find's answer from the items it printed: the first is
+// the match, at its position (paged) or cursor (Anchored); none, no match.
+func findResult(items []any, w *cfg.WindowConfig) (FindResult, error) {
 	if len(items) == 0 {
 		return FindResult{}, nil
 	}
+	f := w.Find
 	res := FindResult{Found: true, Item: items[0]}
 	if f.Position != "" {
 		n, ok := toInt(Get(items[0], f.Position))

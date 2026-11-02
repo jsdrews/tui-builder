@@ -1,0 +1,5 @@
+[
+  {"name": "api", "status": "running"},
+  {"name": "web", "status": "pending"},
+  {"name": "cron", "status": "stopped"}
+]

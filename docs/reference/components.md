@@ -23,14 +23,14 @@ These apply to every kind unless the column says otherwise.
 
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
-| `type` | string | — | required | The kind: `list`, `table`, `logview`, `textview`, `tree`, `inspector` or `eventlog`. |
+| `type` | string | — | required | The kind: `list`, `table`, `logview`, `textview`, `tree`, `inspector`, `eventlog`, `input` or `menu`. |
 | `title` | template | — | — | Shown on the pane border. |
-| `source` | string | — | — | The `data.sources` entry that populates this component. When set, static content (`items`, `rows`, `lines`, `content`, `root`, `fields` values) is ignored. |
+| `source` | string | — | not input or menu | The `data.sources` entry that populates this component. When set, static content (`items`, `rows`, `lines`, `content`, `root`, `fields` values) is ignored. |
 | `colors` | map | — | — | Per-component color overrides. See [`colors`](#colors). |
 | `color_rules` | list | — | list, logview, eventlog, auto inspector (with `path:`) | Colors each item or line by its value; on an `auto: true` inspector, each leaf value, scoped by the rule's `path:`. Tables put rules on each column and declared inspectors on each field. See [color rules](#color-rules). |
 | `filterable` | bool | `false` | list, table, inspector, eventlog | `/` opens a filter that narrows the rows (`f` on an eventlog, where `/` is search). |
 | `searchable` | bool | `false` | logview, textview, tree, eventlog | `/` opens a search that highlights matches; `n` / `N` move between them. |
-| `filter_placeholder` | template | — | any filterable or searchable kind | Hint shown inside the empty filter or search input. |
+| `filter_placeholder` | template | — | list, table, inspector, logview, textview, tree, eventlog | Hint shown inside the empty filter or search input. |
 | `initial_filter` | template | — | list, table | Starts with this filter applied. |
 | `initial_query` | template | — | logview, textview, tree, inspector | Starts with this search or filter query applied. |
 | `initial_cursor` | int | `0` | list, table, tree, inspector | Row the cursor starts on. |
@@ -39,7 +39,7 @@ These apply to every kind unless the column says otherwise.
 | `mark_key` | path | — | source-bound markable table; span table; table with `activity` | The stable identity marks and activity are held by, read from the source item (not the rendered cells), e.g. `metadata.uid`. Required on a markable source-bound table, on every span table and on a table with `activity`. |
 | `activity` | map | — | table, list, tree on a fetched or polled source | Shows a spinner on rows the data says are being worked on. See [`activity`](#activity). |
 | `on_cursor` | map | — | source-bound target | Refetches this component's source as another component's cursor moves. See [`on_cursor`](#on_cursor). |
-| `on_input` | map | — | source-bound target | Refetches this component's source when an input or toggle on the screen commits. See [`on_input`](#on_input). |
+| `on_input` | map | — | source-bound target | Refetches this component's source when an input on the screen commits. See [`on_input`](#on_input). |
 
 **Validation:**
 
@@ -122,13 +122,13 @@ rejects `sortable` columns, `initial_sort` and `sort_debounce`;
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
 | `title` | template | — | required | Header text. Also the name used by `${selection.Title}`, `${cursor.Title}`, `title:value` filter terms and `window.filters`. |
-| `value` | path | — | required when source-bound | Dot-path to the cell value in each item. A list of paths is tried in order and the first non-empty wins. |
+| `value` | path | — | required when source-bound | Dot-path to the cell value in each item. A list of paths is tried in order and the first non-empty wins. A list of plain values shows joined with `, ` (`web, prod`). `.` is the item itself, for a source that returns a list of strings. |
 | `width` | int | `0` | — | `0` sizes to content; a positive number is a fixed width. |
 | `flex` | int | `0` | — | Share of leftover width. |
 | `max_width` | int | — | — | Caps a flex or auto column. |
 | `align` | string | `left` | — | `left`, `right` or `center`. |
 | `sortable` | bool | `false`, or `true` when a windowed source's `sort_fields` lists the column | — | The column can be sorted from the keyboard. `false` opts out of `sort_fields`. |
-| `sort` | string | `string` | `sortable` | Comparator: `string` (case-insensitive), `number` (commas stripped), `si` (number with K/M/B/G/T suffix). |
+| `sort` | string | `string` | `sortable` | Comparator: `string` (case-insensitive), `number` (commas stripped), `si` (a number with a unit: K, M, G or T in any case, binary as in `12Ki` or `2GiB`, bytes as in `900kB` or `187MB`; a bare B is billions, as in `1.2B`). |
 | `hidden` | bool | `false` | — | Not drawn, but still in the row: it matches filters and resolves in `${selection.*}` / `${cursor.*}`. For identity columns a drilldown needs. |
 | `distinct` | list or map | — | windowed tables | The values this column's filter suggests and completes, which otherwise come only from the page that's loaded. A list (`[Running, Pending, Failed]`), or `{source: NAME}` for a source that returns a list of strings; it's fetched and polled alongside the table. The source can't be windowed. |
 | `color_rules` | list | — | — | Colors each cell by its value. See [color rules](#color-rules). |
@@ -369,35 +369,21 @@ and every component that reads it refetches. **esc** puts back the
 committed value and leaves the field; enter starts editing again. Tabbing
 away puts back anything typed but not committed.
 
-## `toggle`
-
-A yes/no switch, read as `${input.NAME}`: `true` or `false`. Every flip
-(`←`/`→`, space or a click) commits, and the components that read it
-refetch.
-
-| Field | Type | Default | Valid on/with | What it does |
-|---|---|---|---|---|
-| `initial` | string | `false` | — | `true` or `false`. |
-| `yes_label` | string | `yes` | — | The "true" side's label. |
-| `no_label` | string | `no` | — | The "false" side's label. |
-
-An input or toggle is three rows tall: in a `vstack` it takes `fixed: 3`
-on its own, and any other height is an error. In an `hstack`, `flex` /
-`fixed` set its width as usual.
+An input is three rows tall: in a `vstack` it takes `fixed: 3` on its
+own, and any other height is an error. In an `hstack`, `flex` / `fixed`
+set its width as usual.
 
 ```yaml
-search:       {type: input,  title: Search, placeholder: name…, initial: "${env.Q}"}
-show_deleted: {type: toggle, title: Deleted?, yes_label: shown, no_label: hidden}
+search: {type: input, title: Search, placeholder: name…, initial: "${env.Q}"}
 pods_table:
   type: table
-  source: pods            # declares parameters: q, deleted
+  source: pods            # declares parameter q
   on_input:
-    bind: {q: "${input.search}", deleted: "${input.show_deleted}"}
+    bind: {q: "${input.search}"}
 ```
 
-**Validation:** neither takes `source:`; `initial` on a toggle is `true` or
-`false`; `char_limit` can't be negative; their fields are errors on other
-kinds.
+**Validation:** an input doesn't take `source:`; `char_limit` can't be
+negative; its fields are errors on other kinds.
 
 ## `menu`
 
@@ -474,6 +460,13 @@ succeeds again, and the error is reported once rather than on every poll.
 Rows keep what the last good read said; rows that were busy then show a
 static, muted marker instead of spinning. This applies to every polled
 component, with or without `activity:`.
+
+**No rows.** When a fetch answers with nothing to show (no rows for a
+list, table, tree or logview, nothing at all for an inspector), the
+component shows `· no rows` on its title until a fetch brings some, so
+an empty answer doesn't look like a broken one. With both, the title
+reads `Orgs · no rows · reads failing`. A textview's empty text gets no
+note, and neither does a filter that hides every row.
 
 **Validation:** `status` and exactly one of `busy` / `busy_when` are
 required, and `busy_when` must compile. A table needs `mark_key:` (activity
@@ -555,7 +548,7 @@ cursor and an input at once.
 
 ## `on_input`
 
-Refetches this component's source when an [input or toggle](#input) on
+Refetches this component's source when an [input](#input) on
 the same screen commits, binding their values into the source's
 `parameters:`. Use it on a component with no cursor driver; it's fetched
 with the inputs' `initial` values when the screen opens.
@@ -565,5 +558,5 @@ with the inputs' `initial` values when the screen opens.
 | `bind` | map of template | — | required | Maps source parameters to templates over `${input.NAME}`, plus `${env.*}`. |
 
 **Validation:** the component has a `source:` that declares each bound
-parameter; `${input.NAME}` names an input or toggle on this screen; a
+parameter; `${input.NAME}` names an input on this screen; a
 parameter can't be bound by both `on_input` and `on_cursor`.

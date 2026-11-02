@@ -1,0 +1,36 @@
+openapi: 3.0.3
+info: {title: Auth Mix, version: "1"}
+servers: [{url: "https://api.example.com"}]
+security: [{Bearer: []}, {Key: []}]
+paths:
+  /me:
+    get:
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {id: {type: string}}}}}}}
+  /billing:
+    get:
+      security: [{Machine: [billing.read]}]
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {plan: {type: string}}}}}}}
+  /admin:
+    get:
+      security: [{Basic: []}]
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {ok: {type: boolean}}}}}}}
+  /partner:
+    get:
+      security: [{Mtls: []}]
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {ok: {type: boolean}}}}}}}
+  /dash:
+    get:
+      security: [{Browser: []}]
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {ok: {type: boolean}}}}}}}
+components:
+  securitySchemes:
+    Bearer: {type: http, scheme: bearer}
+    Key: {type: apiKey, in: query, name: key}
+    Basic: {type: http, scheme: basic}
+    Mtls: {type: mutualTLS}
+    Machine:
+      type: oauth2
+      flows: {clientCredentials: {tokenUrl: "https://auth.example.com/token", scopes: {billing.read: Read billing}}}
+    Browser:
+      type: oauth2
+      flows: {authorizationCode: {authorizationUrl: "https://auth.example.com/authorize", tokenUrl: "https://auth.example.com/token", scopes: {}}}

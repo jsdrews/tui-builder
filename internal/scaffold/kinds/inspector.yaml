@@ -1,0 +1,28 @@
+app:
+  title: __TITLE__
+  surface: filled
+
+data:
+  sources:
+    service:
+      type: static
+      data: {name: api, status: running, region: eu-west, replicas: 3}
+
+tui:
+  components:
+    service:
+      type: inspector
+      title: Service
+      filterable: true
+      source: service
+      fields:
+        - {label: Name,     path: name}
+        - {label: Status,   path: status}
+        - {label: Region,   path: region}
+        - {label: Replicas, path: replicas}
+        # @fields fields
+      # @fields
+
+  screen:
+    layout:
+      component: service

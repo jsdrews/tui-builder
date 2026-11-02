@@ -15,7 +15,7 @@ func inputsConfig(edit func(c *Config)) *Config {
 		TUI: TUIBlock{
 			Components: map[string]*Component{
 				"search": {Type: "input", Title: "Search"},
-				"flag":   {Type: "toggle"},
+				"flag":   {Type: "input", Title: "Flag"},
 				"items": {Type: "list", Source: "items", Item: "name",
 					OnInput: &OnInput{Bind: map[string]string{"q": "${input.search}"}}},
 			},
@@ -43,14 +43,8 @@ func TestInputValidation(t *testing.T) {
 			s := c.TUI.Components["search"]
 			s.Initial, s.Placeholder, s.CharLimit, s.Mask = "x", "type…", 20, true
 		}, ""},
-		{"toggle labels", func(c *Config) {
-			f := c.TUI.Components["flag"]
-			f.Initial, f.YesLabel, f.NoLabel = "true", "on", "off"
-		}, ""},
 		{"input with a source", func(c *Config) { c.TUI.Components["search"].Source = "items" }, "holds a value"},
-		{"bad toggle initial", func(c *Config) { c.TUI.Components["flag"].Initial = "maybe" }, "want true|false"},
-		{"placeholder on a toggle", func(c *Config) { c.TUI.Components["flag"].Placeholder = "x" }, "`placeholder:` is only valid on input"},
-		{"yes_label on a list", func(c *Config) { c.TUI.Components["items"].YesLabel = "x" }, "`yes_label:` is only valid on toggle"},
+		{"placeholder on a list", func(c *Config) { c.TUI.Components["items"].Placeholder = "x" }, "`placeholder:` is only valid on input"},
 		{"flex in a vstack", func(c *Config) { c.TUI.Screen.Layout.VStack[0].Flex = 2 }, "3 rows tall"},
 		{"fixed 3 in a vstack", func(c *Config) { c.TUI.Screen.Layout.VStack[0].Fixed = 3 }, ""},
 		{"width in an hstack", func(c *Config) {
@@ -64,7 +58,7 @@ func TestInputValidation(t *testing.T) {
 		{"on_input and on_cursor on one param", func(c *Config) {
 			c.TUI.Components["items"].OnCursor = &OnCursor{Source: "items", Bind: map[string]string{"q": "${cursor}"}}
 		}, "bind each parameter once"},
-		{"unknown input", func(c *Config) { c.TUI.Components["items"].OnInput.Bind["q"] = "${input.nope}" }, "${input.nope} needs an input or toggle"},
+		{"unknown input", func(c *Config) { c.TUI.Components["items"].OnInput.Bind["q"] = "${input.nope}" }, "${input.nope} needs an input"},
 		{"input that isn't one", func(c *Config) { c.TUI.Components["items"].OnInput.Bind["q"] = "${input.items}" }, "${input.items} needs"},
 		{"binding confirm", func(c *Config) {
 			c.Actions = map[string]*Action{"go": {Run: []string{"true"}}}

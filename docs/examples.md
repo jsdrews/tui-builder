@@ -181,7 +181,7 @@ task example NAME=marking
 
 ### inputs
 
-An `input` and a `toggle` driving a table's source through `on_input:` and `${input.NAME}`.
+An `input` driving a table's source through `on_input:` and `${input.NAME}`.
 
 ```sh
 task example NAME=inputs

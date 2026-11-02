@@ -1,0 +1,17 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "metadata": {"name": "api-7d9f", "namespace": "default", "uid": "1f2a", "creationTimestamp": "2026-10-01T10:00:00Z", "labels": {"app": "api"}},
+      "spec": {"nodeName": "node-1", "containers": [{"name": "api", "image": "api:1.4"}]},
+      "status": {"phase": "Running", "podIP": "10.0.0.12", "containerStatuses": [{"restartCount": 0}]}
+    },
+    {
+      "metadata": {"name": "worker-55c1", "namespace": "default", "uid": "9b7e", "creationTimestamp": "2026-10-02T08:30:00Z"},
+      "spec": {"nodeName": "node-2", "containers": [{"name": "worker", "image": "worker:2.0"}]},
+      "status": {"phase": "Pending", "podIP": null}
+    }
+  ],
+  "metadata": {"resourceVersion": ""}
+}

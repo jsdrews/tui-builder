@@ -1,0 +1,2 @@
+warning: GET /partner uses the mutualTLS scheme "Mtls", which tui-builder can't send, so it will likely fail with 401
+5 screens, 5 sources

@@ -92,7 +92,7 @@ One pane on a screen. It displays a source named by its `source:`, or holds a va
 _Avoid_: widget, view
 
 **Input field**:
-A component that holds a value rather than displaying a source: a text input (`type: input`) or a toggle (`type: toggle`). Other components read its committed value as `${input.NAME}`.
+A component that holds a value rather than displaying a source: a text input (`type: input`). Other components read its committed value as `${input.NAME}`.
 _Avoid_: control, widget
 
 **Focused row**:

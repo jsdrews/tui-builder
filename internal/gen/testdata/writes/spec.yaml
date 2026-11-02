@@ -1,0 +1,66 @@
+openapi: 3.0.3
+info: {title: Jobs, version: "1"}
+servers: [{url: "https://jobs.example.com"}]
+components:
+  schemas:
+    Job:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: integer, readOnly: true}
+        name: {type: string, pattern: "^[a-z0-9-]+$"}
+        state: {type: string, enum: [queued, running, done, failed]}
+        priority: {type: number}
+        paused: {type: boolean, default: false}
+        secret: {type: string, format: password, writeOnly: true}
+        spec: {type: object, properties: {image: {type: string}}}
+paths:
+  /jobs:
+    get:
+      summary: List jobs
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Job"}}}}}}
+    post:
+      summary: Create a job
+      parameters:
+        - {name: dry_run, in: query, schema: {type: boolean}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/Job"}}}}
+      responses: {"201": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Job"}}}}}
+  /jobs/{job_id}:
+    get:
+      responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Job"}}}}}
+    put:
+      requestBody: {content: {application/json: {schema: {$ref: "#/components/schemas/Job"}}}}
+      responses: {"200": {description: OK}}
+    delete:
+      responses: {"204": {description: Gone}}
+  /jobs/{job_id}/restart:
+    post:
+      summary: Restart job
+      responses: {"202": {description: Accepted}}
+  /jobs/{job_id}/logs:
+    post:
+      summary: Upload logs
+      requestBody: {content: {multipart/form-data: {schema: {type: object, properties: {file: {type: string, format: binary}}}}}}
+      responses: {"200": {description: OK}}
+  /jobs/{job_id}/tags/{tag}:
+    delete:
+      responses: {"204": {description: Gone}}
+  /jobs/{job_id}/notes:
+    post:
+      summary: Add a note
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema: {type: object, required: [text], properties: {text: {type: string, maxLength: 500}}}
+      responses: {"200": {description: OK}}
+  /jobs/{job_id}/schedule:
+    put:
+      summary: Schedule job
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [cron], properties: {cron: {type: object, properties: {expr: {type: string}}}}}}}
+      responses: {"200": {description: OK}}
+  /login:
+    post:
+      requestBody: {content: {application/json: {schema: {type: object, properties: {user: {type: string}}}}}}
+      responses: {"200": {description: OK}}

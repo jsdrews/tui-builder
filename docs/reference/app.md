@@ -47,7 +47,7 @@ actions:
 
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
-| `title` | string | — | — | The terminal window's title, set when the app starts. The breadcrumb shows each screen's own `title:`. |
+| `title` | string | — | — | The terminal window's title, set when the app starts. The breadcrumb shows each screen's own `title:`, and this on a first screen that has none. |
 | `version` | string | — | — | Shown on the right of the statusbar. |
 | `theme` | string | first built-in | — | The starting palette. The `TUI_BUILDER_THEME` environment variable overrides it for one run; when neither is set, the `theme:` in your own `$XDG_CONFIG_HOME/tuilib/config.yaml` is used. An unknown name falls through to the next of those, then to the first theme. Names: `dark`, `accent`, `light`, `solarized`, `nord`, `dracula`, `gruvbox`, `catppuccin-mocha`, `catppuccin-latte`, `tokyo-night`, `rose-pine`, `rose-pine-dawn`, `one-dark`, `monokai`, `everforest-dark`, `base16-ocean`, `base16-eighties`, `base16-railscasts`, `base16-tomorrow-night`. |
 | `surface` | string | `outlined` | — | The starting surface: how every pane's edge and body are drawn, independent of the palette. `outlined` (line borders, no fill), `filled` (solid cards), `banded` (a card under a coloured header band), `elevated` (a card with a drop shadow) or `accented` (a bar down the left edge). The `TUI_BUILDER_SURFACE` environment variable overrides it for one run; when neither is set, the `surface:` in your tuilib config file is used. Filled surfaces need 256 colours (and `filled` / `elevated` block glyphs) and fall back toward `outlined` on a terminal without them. |
@@ -283,7 +283,7 @@ app:
 
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
-| `title` | template | — | — | Shown in the breadcrumb. On a pushed screen it can use `${selection…}` from the row that opened it. |
+| `title` | template | `app.title` on the first screen | — | Shown in the breadcrumb. On a pushed screen it can use `${selection…}` from the row that opened it. |
 | `layout` | node | — | one of `layout` / `tabs` | The root of the screen's layout tree. |
 | `actions` | list of binding | — | not with `tabs` | Action bindings: which actions this screen offers, on which keys, fed by which component's selection. See [actions.md](actions.md#bindings). |
 | `tabs` | list | — | one of `layout` / `tabs` | Makes this a tabbed screen. See [tabs](#tabs). |
@@ -381,7 +381,7 @@ An item is a node plus a sizing hint.
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
 | `flex` | int | `1` | set one of `flex` / `fixed` | Share of the space left after fixed items. Used when neither is set. |
-| `fixed` | int | — | set one of `flex` / `fixed` | Exact size in rows (vstack) or columns (hstack). An input or toggle in a vstack is always `3` rows. |
+| `fixed` | int | — | set one of `flex` / `fixed` | Exact size in rows (vstack) or columns (hstack). An input in a vstack is always `3` rows. |
 
 **Validation:** setting both `flex` and `fixed` on one item is an error.
 

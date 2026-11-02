@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/jsdrews/tuilib/pkg/ansi"
 	"github.com/jsdrews/tuilib/pkg/theme"
 
@@ -13,21 +15,39 @@ import (
 // applyColorRules wraps value with ansi.CellColor when one of the rules
 // matches. Rules evaluate in order; first match wins. Returns value
 // unchanged when no rule matches or the matched rule's color spec is
-// unparseable. Designed for table cells — uses ansi.CellColor
-// (foreground-only) so the selected-row background passes through.
+// unparseable. Designed for table cells — foreground-only (see
+// cellColor) so the selected-row background passes through.
 func applyColorRules(value string, rules []cfg.ColorRule, th theme.Theme) string {
 	if len(rules) == 0 {
 		return value
 	}
 	for _, r := range rules {
 		if matchRule(value, r.When) {
-			if n := colorIndexFromSpec(r.Color, th); n >= 0 {
-				return ansi.CellColor(n, value)
-			}
-			return value
+			return cellColor(r.Color, value, th)
 		}
 	}
 	return value
+}
+
+// cellColor wraps text in spec's foreground with a foreground-only
+// reset. A palette index (named, 0-255, or a theme token that is one)
+// goes through ansi.CellColor; a hex color — a literal, or a theme token
+// from a palette written in hex — is downsampled to the terminal's color
+// profile, so it renders on 256- and 16-color terminals too. An
+// unparseable spec, or a terminal with no color, leaves text plain.
+func cellColor(spec, text string, th theme.Theme) string {
+	if n := colorIndexFromSpec(spec, th); n >= 0 {
+		return ansi.CellColor(n, text)
+	}
+	c, ok := parseColor(spec, th).(lipgloss.Color)
+	if !ok || !strings.HasPrefix(string(c), "#") {
+		return text
+	}
+	seq := lipgloss.ColorProfile().Color(string(c)).Sequence(false)
+	if seq == "" {
+		return text
+	}
+	return "\x1b[" + seq + "m" + text + "\x1b[39m"
 }
 
 // matchRule reports whether the cell value satisfies the rule's `when:`.

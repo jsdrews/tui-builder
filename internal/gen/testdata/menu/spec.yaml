@@ -1,0 +1,33 @@
+openapi: 3.0.3
+info: {title: Lots, version: "1"}
+servers: [{url: "https://lots.example.com"}]
+paths:
+  /alpha:
+    get:
+      tags: [one]
+      summary: Alpha
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {v: {type: string}}}}}}}
+  /beta:
+    get:
+      tags: [one]
+      summary: Beta
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {v: {type: string}}}}}}}
+  /gamma:
+    get:
+      tags: [two]
+      summary: Gamma
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {v: {type: string}}}}}}}
+  /delta:
+    get:
+      summary: Delta
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {v: {type: string}}}}}}}
+  /epsilon:
+    get:
+      tags: [two]
+      summary: Epsilon
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {v: {type: string}}}}}}}
+  /zeta:
+    get:
+      tags: [one]
+      summary: Zeta
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {v: {type: string}}}}}}}

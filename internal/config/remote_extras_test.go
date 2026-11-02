@@ -51,13 +51,35 @@ func TestSeekableFindNeedsAPosition(t *testing.T) {
 	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "find.position: required") {
 		t.Errorf("want position required on a paged source, got %v", err)
 	}
-	c = execWindowedConfig()
-	for _, s := range c.Data.Sources {
-		if s.Window != nil {
-			s.Window.Find = &FindConfig{Params: map[string]any{"q": "x"}, Position: "n"}
+	// On exec, find is a command: params are refused, a command that
+	// never reads the term is refused, and one that does is fine.
+	for _, tc := range []struct {
+		find *FindConfig
+		want string
+	}{
+		{&FindConfig{Params: map[string]any{"q": "x"}, Position: "n"}, "`params:` and `body:` are http-only"},
+		{&FindConfig{Command: []string{"find-books"}, Position: "n"}, "never references ${window.term}"},
+		{&FindConfig{Command: []string{"find-books", "${window.term}"}, Position: "n"}, ""},
+	} {
+		c = execWindowedConfig()
+		for _, s := range c.Data.Sources {
+			if s.Window != nil {
+				s.Window.Find = tc.find
+			}
+		}
+		err := c.Validate()
+		if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("exec find %+v: got %v, want %q", tc.find, err, tc.want)
 		}
 	}
-	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "find: http-only") {
-		t.Errorf("want find rejected on exec, got %v", err)
+	// And a command on http is refused.
+	c = windowedConfig()
+	for _, s := range c.Data.Sources {
+		if s.Window != nil {
+			s.Window.Find = &FindConfig{Command: []string{"x", "${window.term}"}, Position: "n"}
+		}
+	}
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "find.command: exec-only") {
+		t.Errorf("want a find command refused on http, got %v", err)
 	}
 }

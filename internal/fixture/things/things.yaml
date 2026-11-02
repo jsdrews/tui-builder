@@ -1,0 +1,273 @@
+# A FastAPI-style OpenAPI 3.1 document for the generator's tests, served
+# by the stub in this package. It's written the way FastAPI emits one:
+# operationIds like list_things_things_get, Optional[...] as
+# anyOf-with-null, Page_X_ envelope schemas, a 422 HTTPValidationError on
+# every operation, HTTPBearer security.
+#
+# What it deliberately leaves out or gets wrong, as real specs do:
+#   - the server also filters on name__icontains and
+#     description__icontains (things) and name__icontains (owners),
+#     which aren't documented here;
+#   - ThingOrder lists status and -status, which the server refuses
+#     with a 400.
+openapi: 3.1.0
+info:
+  title: Things API
+  version: 1.0.0
+  description: Things and the owners they belong to.
+servers:
+  - url: http://{host}:{port}
+    variables:
+      host: {default: localhost}
+      port: {default: "8765"}
+tags:
+  - name: things
+    description: The things themselves.
+  - name: owners
+    description: Who things belong to.
+paths:
+  /things:
+    get:
+      tags: [things]
+      summary: List Things
+      operationId: list_things_things_get
+      security: [{HTTPBearer: []}]
+      parameters:
+        - {name: page, in: query, required: false, schema: {type: integer, minimum: 1, default: 1, title: Page}}
+        - {name: per_page, in: query, required: false, schema: {type: integer, maximum: 100, minimum: 1, default: 50, title: Per Page}}
+        - name: order_by
+          in: query
+          required: false
+          schema:
+            anyOf: [{$ref: "#/components/schemas/ThingOrder"}, {type: "null"}]
+            title: Order By
+        - name: status
+          in: query
+          required: false
+          schema:
+            anyOf: [{$ref: "#/components/schemas/ThingStatus"}, {type: "null"}]
+            title: Status
+        - name: owner_id
+          in: query
+          required: false
+          schema:
+            anyOf: [{type: integer}, {type: "null"}]
+            title: Owner Id
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Page_ThingRead_"}
+        "422": {$ref: "#/components/responses/ValidationError"}
+    post:
+      tags: [things]
+      summary: Create Thing
+      operationId: create_thing_things_post
+      security: [{HTTPBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ThingCreate"}
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ThingRead"}
+        "422": {$ref: "#/components/responses/ValidationError"}
+  /things/{thing_id}:
+    parameters:
+      - {name: thing_id, in: path, required: true, schema: {type: integer, title: Thing Id}}
+    get:
+      tags: [things]
+      summary: Get Thing
+      operationId: get_thing_things__thing_id__get
+      security: [{HTTPBearer: []}]
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ThingRead"}
+        "422": {$ref: "#/components/responses/ValidationError"}
+    patch:
+      tags: [things]
+      summary: Update Thing
+      operationId: update_thing_things__thing_id__patch
+      security: [{HTTPBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ThingUpdate"}
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ThingRead"}
+        "422": {$ref: "#/components/responses/ValidationError"}
+    delete:
+      tags: [things]
+      summary: Delete Thing
+      operationId: delete_thing_things__thing_id__delete
+      security: [{HTTPBearer: []}]
+      responses:
+        "204": {description: Successful Response}
+        "422": {$ref: "#/components/responses/ValidationError"}
+  /owners:
+    get:
+      tags: [owners]
+      summary: List Owners
+      operationId: list_owners_owners_get
+      security: [{HTTPBearer: []}]
+      parameters:
+        - {name: page, in: query, required: false, schema: {type: integer, minimum: 1, default: 1, title: Page}}
+        - {name: per_page, in: query, required: false, schema: {type: integer, maximum: 100, minimum: 1, default: 50, title: Per Page}}
+        - name: order_by
+          in: query
+          required: false
+          schema:
+            anyOf: [{$ref: "#/components/schemas/OwnerOrder"}, {type: "null"}]
+            title: Order By
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Page_OwnerRead_"}
+        "422": {$ref: "#/components/responses/ValidationError"}
+  /owners/{owner_id}:
+    get:
+      tags: [owners]
+      summary: Get Owner
+      operationId: get_owner_owners__owner_id__get
+      security: [{HTTPBearer: []}]
+      parameters:
+        - {name: owner_id, in: path, required: true, schema: {type: integer, title: Owner Id}}
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OwnerRead"}
+        "422": {$ref: "#/components/responses/ValidationError"}
+  /owners/{owner_id}/things:
+    get:
+      tags: [owners, things]
+      summary: List Owner Things
+      operationId: list_owner_things_owners__owner_id__things_get
+      security: [{HTTPBearer: []}]
+      parameters:
+        - {name: owner_id, in: path, required: true, schema: {type: integer, title: Owner Id}}
+        - {name: page, in: query, required: false, schema: {type: integer, minimum: 1, default: 1, title: Page}}
+        - {name: per_page, in: query, required: false, schema: {type: integer, maximum: 100, minimum: 1, default: 50, title: Per Page}}
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Page_ThingRead_"}
+        "422": {$ref: "#/components/responses/ValidationError"}
+components:
+  securitySchemes:
+    HTTPBearer: {type: http, scheme: bearer}
+  responses:
+    ValidationError:
+      description: Validation Error
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/HTTPValidationError"}
+  schemas:
+    ThingStatus:
+      type: string
+      enum: [active, pending, failed, archived]
+      title: ThingStatus
+    ThingOrder:
+      type: string
+      enum: [name, -name, created_at, -created_at, size, -size, status, -status]
+      title: ThingOrder
+    OwnerOrder:
+      type: string
+      enum: [name, -name]
+      title: OwnerOrder
+    Labels:
+      type: object
+      title: Labels
+      properties:
+        team: {anyOf: [{type: string}, {type: "null"}], title: Team}
+        env: {anyOf: [{type: string}, {type: "null"}], title: Env}
+    ThingRead:
+      type: object
+      title: ThingRead
+      required: [id, name, status, size, owner_id, created_at]
+      properties:
+        id: {type: integer, title: Id}
+        name: {type: string, title: Name}
+        status: {$ref: "#/components/schemas/ThingStatus"}
+        size: {type: integer, title: Size, description: Size in bytes.}
+        owner_id: {type: integer, title: Owner Id}
+        tags: {type: array, items: {type: string}, title: Tags}
+        labels: {$ref: "#/components/schemas/Labels"}
+        description: {anyOf: [{type: string}, {type: "null"}], title: Description}
+        created_at: {type: string, format: date-time, title: Created At}
+    ThingCreate:
+      type: object
+      title: ThingCreate
+      required: [name, owner_id]
+      properties:
+        name: {type: string, maxLength: 80, title: Name}
+        owner_id: {type: integer, title: Owner Id}
+        status: {$ref: "#/components/schemas/ThingStatus", default: pending}
+        size: {type: integer, minimum: 0, default: 0, title: Size}
+        tags: {type: array, items: {type: string}, title: Tags}
+        description: {anyOf: [{type: string}, {type: "null"}], title: Description}
+    ThingUpdate:
+      type: object
+      title: ThingUpdate
+      properties:
+        name: {anyOf: [{type: string, maxLength: 80}, {type: "null"}], title: Name}
+        status: {anyOf: [{$ref: "#/components/schemas/ThingStatus"}, {type: "null"}]}
+        size: {anyOf: [{type: integer, minimum: 0}, {type: "null"}], title: Size}
+        description: {anyOf: [{type: string}, {type: "null"}], title: Description}
+    OwnerRead:
+      type: object
+      title: OwnerRead
+      required: [id, name, email]
+      properties:
+        id: {type: integer, title: Id}
+        name: {type: string, title: Name}
+        email: {type: string, format: email, title: Email}
+    Page_ThingRead_:
+      type: object
+      title: Page[ThingRead]
+      required: [total, page, per_page, entries]
+      properties:
+        total: {type: integer, title: Total}
+        page: {type: integer, title: Page}
+        per_page: {type: integer, title: Per Page}
+        entries: {type: array, items: {$ref: "#/components/schemas/ThingRead"}, title: Entries}
+    Page_OwnerRead_:
+      type: object
+      title: Page[OwnerRead]
+      required: [total, page, per_page, entries]
+      properties:
+        total: {type: integer, title: Total}
+        page: {type: integer, title: Page}
+        per_page: {type: integer, title: Per Page}
+        entries: {type: array, items: {$ref: "#/components/schemas/OwnerRead"}, title: Entries}
+    ValidationError:
+      type: object
+      title: ValidationError
+      required: [loc, msg, type]
+      properties:
+        loc: {type: array, items: {anyOf: [{type: string}, {type: integer}]}, title: Location}
+        msg: {type: string, title: Message}
+        type: {type: string, title: Error Type}
+    HTTPValidationError:
+      type: object
+      title: HTTPValidationError
+      properties:
+        detail: {type: array, items: {$ref: "#/components/schemas/ValidationError"}, title: Detail}

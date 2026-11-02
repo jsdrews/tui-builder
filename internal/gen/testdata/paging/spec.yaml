@@ -1,0 +1,88 @@
+openapi: 3.0.3
+info: {title: Paging, version: "1"}
+servers: [{url: "https://paging.example.com"}]
+components:
+  schemas:
+    Event:
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        createdAt: {type: string, format: date-time}
+        size: {type: integer}
+        kind: {type: string, enum: [a, b]}
+  parameters:
+    Limit: {name: limit, in: query, schema: {type: integer, maximum: 500, default: 50}}
+paths:
+  /seek:
+    get:
+      summary: Offset window with a header total and filters
+      parameters:
+        - {name: offset, in: query, schema: {type: integer}}
+        - $ref: "#/components/parameters/Limit"
+        - {name: q, in: query, schema: {type: string}}
+        - {name: kind, in: query, schema: {type: string, enum: [a, b]}}
+        - {name: size_gte, in: query, schema: {type: integer}}
+        - {name: size_lte, in: query, schema: {type: integer}}
+        - name: sort
+          in: query
+          schema: {type: string, enum: [name, created_at, -created_at, bogus]}
+      responses:
+        "200":
+          description: OK
+          headers: {X-Total-Count: {schema: {type: integer}}}
+          content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Event"}}}}
+  /pages:
+    get:
+      summary: Page numbers but no total
+      parameters:
+        - {name: page, in: query, schema: {type: integer, minimum: 0}}
+        - {name: page_size, in: query, schema: {type: integer, default: 25}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {type: object, properties: {results: {type: array, items: {$ref: "#/components/schemas/Event"}}}}}}}
+  /linked:
+    get:
+      summary: A Link header
+      parameters:
+        - {name: per_page, in: query, schema: {type: integer, maximum: 100}}
+        - {name: page, in: query, schema: {type: integer}}
+      responses:
+        "200":
+          description: OK
+          headers: {Link: {schema: {type: string}}}
+          content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Event"}}}}
+  /nexted:
+    get:
+      summary: A next URL in the body
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {type: object, properties: {next: {type: string, nullable: true}, results: {type: array, items: {$ref: "#/components/schemas/Event"}}}}}}}
+  /cursored:
+    get:
+      summary: A cursor
+      parameters:
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {type: object, properties: {next_cursor: {type: string}, items: {type: array, items: {$ref: "#/components/schemas/Event"}}}}}}}
+  /stripey:
+    get:
+      summary: Starting after
+      parameters:
+        - {name: starting_after, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, maximum: 100}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {type: object, properties: {has_more: {type: boolean}, data: {type: array, items: {$ref: "#/components/schemas/Event"}}}}}}}
+  /twice:
+    get:
+      summary: Two page parameters
+      parameters:
+        - {name: page, in: query, schema: {type: integer}}
+        - {name: p, in: query, schema: {type: integer}}
+        - {name: limit, in: query, schema: {type: integer}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {type: object, properties: {total: {type: integer}, data: {type: array, items: {$ref: "#/components/schemas/Event"}}}}}}}
+  /plain:
+    get:
+      summary: No paging
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Event"}}}}}

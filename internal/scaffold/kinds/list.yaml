@@ -1,0 +1,27 @@
+app:
+  title: __TITLE__
+  surface: filled
+
+data:
+  sources:
+    services:
+      type: static
+      data:
+        - {name: api,    status: running}
+        - {name: worker, status: running}
+        - {name: web,    status: pending}
+        - {name: cron,   status: stopped}
+
+tui:
+  components:
+    services:
+      type: list
+      title: Services
+      filterable: true
+      source: services
+      item: name
+      # @fields
+
+  screen:
+    layout:
+      component: services

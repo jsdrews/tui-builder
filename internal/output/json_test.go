@@ -18,8 +18,8 @@ type fakeSource struct {
 	err  error
 }
 
-func (f *fakeSource) Fetch(_ context.Context) (any, error)  { return f.data, f.err }
-func (f *fakeSource) Refresh() time.Duration                 { return 0 }
+func (f *fakeSource) Fetch(_ context.Context) (any, error) { return f.data, f.err }
+func (f *fakeSource) Refresh() time.Duration               { return 0 }
 
 type fakeStreamer struct {
 	fakeSource

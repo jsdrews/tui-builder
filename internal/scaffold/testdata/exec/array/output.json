@@ -1,0 +1,5 @@
+[
+  {"Repository": "nginx", "Tag": "1.27", "ID": "a1b2c3", "Size": "187MB", "CreatedAt": "2026-09-30 12:00:00", "Containers": 2, "Labels": null},
+  {"Repository": "redis", "Tag": "7", "ID": "d4e5f6", "Size": "4.2MB", "CreatedAt": "2026-09-01 08:00:00", "Containers": 0, "Labels": null},
+  {"Repository": "busybox", "Tag": "latest", "ID": "0a0b0c", "Size": "900kB", "CreatedAt": "2026-08-15 18:20:00", "Containers": 11, "Labels": null}
+]

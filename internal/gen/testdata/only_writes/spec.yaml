@@ -1,0 +1,7 @@
+openapi: 3.0.3
+info: {title: Writes, version: "1"}
+servers: [{url: "https://w.example.com"}]
+paths:
+  /login:
+    post:
+      responses: {"200": {description: OK, content: {application/json: {schema: {type: object, properties: {token: {type: string}}}}}}}

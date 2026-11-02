@@ -1,0 +1,125 @@
+openapi: 3.1.0
+info:
+  title: Status Service
+  version: 2.4.0
+servers:
+  - url: https://{region}.status.example.com/v2
+    description: Production
+    variables:
+      region: {default: eu, enum: [eu, us, ap]}
+  - url: https://staging.status.example.com/v2
+    description: Staging
+tags:
+  - name: account
+  - name: system
+paths:
+  /me:
+    get:
+      tags: [account]
+      summary: Who I am
+      operationId: get_me
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/User"}
+        "429": {description: Slow down}
+  /health:
+    get:
+      tags: [system]
+      summary: Health
+      operationId: get_health
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, enum: [ok, degraded, down]}
+                  checks: {type: object, additionalProperties: {type: string}}
+  /report.csv:
+    get:
+      tags: [system]
+      summary: Report
+      operationId: get_report
+      responses:
+        "200":
+          description: CSV
+          content:
+            text/csv: {schema: {type: string}}
+  /legacy:
+    get:
+      summary: Legacy status
+      operationId: get_legacy
+      deprecated: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {ok: {type: boolean}}}
+  /tenant:
+    get:
+      summary: Tenant
+      operationId: get_tenant
+      parameters:
+        - {name: X-Tenant, in: header, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {id: {type: string}}}
+  /incidents:
+    get:
+      tags: [system]
+      summary: List incidents
+      operationId: list_incidents
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {type: array, items: {type: object, properties: {id: {type: integer}}}}
+  /settings:
+    get:
+      tags: [account]
+      summary: Settings
+      operationId: get_settings
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: "#/components/schemas/Base"}
+                  - {type: object, properties: {theme: {type: string}}}
+webhooks:
+  incident:
+    post:
+      requestBody: {content: {application/json: {schema: {type: object}}}}
+      responses: {"200": {description: OK}}
+components:
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Your key from the dashboard.
+  schemas:
+    Base:
+      type: object
+      properties:
+        updated: {type: string, format: date-time}
+    User:
+      type: object
+      properties:
+        login: {type: string}
+        manager: {$ref: "#/components/schemas/User"}
+security:
+  - ApiKey: []

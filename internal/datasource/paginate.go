@@ -49,6 +49,10 @@ func (s *httpSource) fetchPaginated(ctx context.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if acc == nil {
+		// No rows is an empty list, not nothing: [] in wrangl, not null.
+		acc = []any{}
+	}
 	// A walk cut short is said once, not on every refresh; a complete
 	// one clears it, so the next cut is said again.
 	if cut != "" {

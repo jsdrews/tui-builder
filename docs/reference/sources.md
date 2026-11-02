@@ -393,6 +393,9 @@ a source (`kubectl get -o json`, `gh api`, scripts); with
 `follow: true`, any command that streams lines (`kubectl logs -f`,
 `tail -f`).
 
+A command that prints one JSON value per line (NDJSON, as from
+`docker ps --format json` or `jq -c`) reads as the list of those values.
+
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
 | `command` | list of template | — | required | The argv. The first element is looked up in `$PATH`. Not run through a shell: use `[sh, -c, "…"]` when you want one. |
@@ -631,7 +634,7 @@ Supported on `http` (the request goes in the query string) and `exec`
 | `page_size` | int | `100` | — | Rows per request. |
 | `prefetch` | int | `0` | — | Extra pages fetched beyond the screen. `1` hides the placeholder flash at page boundaries, for one extra request. |
 | `total_path` | [locator](#locators) | — | required, except with `cursor` | Where the total match count is: a dot-path into the raw response (before `root:`), or a header such as `header:X-Total-Count`. Without a total the table never scrolls past its first window, so it's required; a response that lacks it posts one notice. |
-| `filters` | map of string, or of map | — | a map value: http only | Maps a column **title** to where a scoped `title:value` filter term goes: a query parameter on http, a `${window.filters.NAME}` token name on exec. On http a value can instead be a map of [comparisons](#filter-rules) to params, `{gte: year_from, lte: year_to}`. An entry here replaces `filter_ops` for that column. Terms on unmapped columns are treated as bare terms. Without `search_param` (or `${window.search}` on exec), bare terms aren't sent: the table says so and its placeholder shows the column syntax. |
+| `filters` | map of string, or of map | — | exec, http; a map value: http only | Maps a column **title** to where a scoped `title:value` filter term goes: a query parameter on http, a `${window.filters.NAME}` token name on exec. On http a value can instead be a map of [comparisons](#filter-rules) to params, `{gte: year_from, lte: year_to}`. An entry here replaces `filter_ops` for that column. Terms on unmapped columns are treated as bare terms. Without `search_param` (or `${window.search}` on exec), bare terms aren't sent: the table says so and its placeholder shows the column syntax. |
 | `filter_ops` | map of string | — | http only | One [filter rule](#filter-rules) for every column instead of a `filters:` entry each: a param template per comparison, each using `${column.value}`. |
 | `filter_except` | list of string | — | needs `filter_ops` | Column titles `filter_ops` leaves alone: numbers, ids, enums the API can't match on. |
 | `offset_param` | string | — | http: this or `page_param`; not on exec | Query parameter for the first row wanted (`offset`, `_start`, `skip`). |
@@ -647,7 +650,7 @@ Supported on `http` (the request goes in the query string) and `exec`
 | `older` | map | — | http, with `cursor` | What the request changes to walk towards older items, merged into `body:` or set as query parameters. |
 | `newer` | map | — | http, with `cursor` | The same, walking towards newer items. |
 | `anchor` | string | `newest` | with `cursor` | Where an Anchored view starts: `newest` (and follows), `oldest` (and walks newer as you scroll down), or a template that resolves to a cursor, `${input.jump_to}`, to jump there. See [jumping](#jumping-to-a-cursor). |
-| `find` | map | — | http | Searches past what's loaded: `n` / `N` ask the source where the next match is. See [`find`](#find). |
+| `find` | map | — | http, exec | Searches past what's loaded: `n` / `N` ask the source where the next match is. See [`find`](#find). |
 | `viewport_delay` | duration | tuilib's | — | How long scrolling must pause before rows are requested. `-` asks at once. |
 | `growing` | `true` or map | — | eventlog only; not with `refresh` | The set is still gaining items at its newest end. A bound eventlog follows the newest item and the source is polled every `follow_every`; when growth stops, one final read picks up the last items. `true` grows for as long as the screen is open. The map form ties it to another source; see [growing](#growing). |
 | `follow_every` | duration | `2s` | needs `growing` | Poll interval while growing. |
@@ -760,13 +763,14 @@ logs:
 
 Without `find:`, `/` searches only the items loaded, and `n` / `N` stop
 at the edge of what's held. With it, they ask the source where the next
-match is. `find:` is a patch over the source's request, like `older:` /
-`newer:`:
+match is. On http, `find:` is a patch over the source's request, like
+`older:` / `newer:`; on exec it's a `command:` of its own:
 
 | Field | Type | Default | Valid on/with | What it does |
 |---|---|---|---|---|
-| `params` | map | — | one of `params` / `body` | Query parameters set on the search request. |
-| `body` | map | — | one of `params` / `body` | Fields merged into the request's JSON body. |
+| `params` | map | — | http: one of `params` / `body` | Query parameters set on the search request. |
+| `body` | map | — | http: one of `params` / `body` | Fields merged into the request's JSON body. |
+| `command` | list of template | — | exec; required there | The argv that prints the match, in the source's own shape (its `root:` and fields). Must reference `${window.term}`. |
 | `position` | path | — | required on a paged source; not on an Anchored one | The path in the matching item to its 0-based position in the (filtered) set. |
 
 Its tokens are `${window.term}` (what was searched for), `${window.dir}`
@@ -791,9 +795,24 @@ window:
       sort: [{"@timestamp": desc}]
 ```
 
-**Validation:** `find` needs `params` or `body`; `position` is required on
-a paged source and an error on an Anchored one; `find` is http-only (an
-exec window searches what's loaded).
+On exec, the same tokens go into `command:`, so one script can answer
+both the window and the search:
+
+```yaml
+command: [sh, -c, &script "…", sh, page, "${window.offset}", "${window.limit}"]
+window:
+  total_path: total
+  find:
+    command: [sh, -c, *script, sh, find, "${window.term}", "${window.dir}", "${window.from}"]
+    position: pos
+```
+
+`tui-builder init eventlog` writes a working one.
+
+**Validation:** `find` needs `params` or `body` on http, and `command`
+(which references `${window.term}`, and whose program isn't a template)
+on exec; each refuses the other's. `position` is required on a paged
+source and an error on an Anchored one.
 
 ### Growing
 

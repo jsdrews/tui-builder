@@ -134,6 +134,10 @@ func yamlName(f reflect.StructField) string {
 	return name
 }
 
+// Suggest returns the candidate closest to s, if it's close enough to
+// be a likely typo, or "".
+func Suggest(s string, candidates []string) string { return suggest(s, candidates) }
+
 // suggest returns the candidate closest to s, if it's close enough to
 // be a likely typo.
 func suggest(s string, candidates []string) string {

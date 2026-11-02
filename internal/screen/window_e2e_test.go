@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -201,6 +202,15 @@ func (h *windowHarness) drain(cmds ...tea.Cmd) {
 		// sleeps for its interval — draining them costs whole seconds
 		// per keystroke and tells us nothing about the window loop.
 		if _, ok := msg.(spinner.TickMsg); ok {
+			continue
+		}
+		// So do a text input's cursor blinks, every half second while a
+		// form or filter is open: without this, opening a form costs the
+		// whole step budget in real sleeps.
+		if _, ok := msg.(cursor.BlinkMsg); ok {
+			continue
+		}
+		if fmt.Sprintf("%T", msg) == "cursor.initialBlinkMsg" {
 			continue
 		}
 		var next tea.Cmd
